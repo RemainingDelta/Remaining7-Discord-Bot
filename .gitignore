@@ -1,0 +1,13 @@
+.env
+config.json
+discloud.config 
+*.db
+*.sqlite
+*.json
+
+__pycache__/
+*.pyc
+venv/
+.DS_Store
+
+.venv/
