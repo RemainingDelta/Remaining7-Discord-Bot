@@ -69,8 +69,8 @@ SHOP_DATA = {
         "desc": "Redeem 15 USD via PayPal!",
         "price": 25500
     },
-    "shoutouts": {
-        "display": "📣 **Shoutouts**",
+    "shoutout": {
+        "display": "📣 **Shoutout**",
         "desc": "Get a personal shoutout in announcements!",
         "price": 12000
     }

@@ -204,8 +204,8 @@ class Economy(commands.Cog):
     async def supply_drop_task(self):
         await self.bot.wait_until_ready()
         
-        # Wait 0-2 hours so it's not predictable
-        await asyncio.sleep(random.randint(0, 7200))
+        # Wait 0-12 hours so it's not predictable (on average 4 times a day)
+        await asyncio.sleep(random.randint(0, 45600))
         
         channel = self.bot.get_channel(GENERAL_CHANNEL_ID)
         if not channel: return
@@ -349,7 +349,7 @@ class Economy(commands.Cog):
             "brawl pass": "brawlpass_redeemed_count",
             "nitro": "nitro_redeemed_count",
             "paypal": "paypal_redeemed_count",
-            "shoutouts": "shoutout_redeemed_count"
+            "shoutout": "shoutout_redeemed_count"
         }
         if item in tracking_keys:
             key = tracking_keys[item]
@@ -376,7 +376,7 @@ class Economy(commands.Cog):
             if "brawl pass" in item: instructions = "- Provide your in-game ID and a link to add you."
             elif "nitro" in item: instructions = "- Provide the Discord account you'd like the Nitro gifted to."
             elif "paypal" in item: instructions = "- Provide your PayPal email address."
-            elif "shoutouts" in item: instructions = "- Provide the message you want to be shouted out."
+            elif "shoutout" in item: instructions = "- Provide the message you want to be shouted out."
 
             embed = discord.Embed(
                 title="✅ **Redemption Successful**",
