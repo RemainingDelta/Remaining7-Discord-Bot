@@ -38,9 +38,8 @@ async def on_ready():
         await bot.load_extension("features.economy")
         print("✅ Loaded Feature: Economy (Shop, Levels, Admin Cmds)")
         
-        # Load other features if/when you create them (e.g. quests, events)
-        # await bot.load_extension("features.quests")
-        # await bot.load_extension("features.events")
+        await bot.load_extension("features.event")
+        print("✅ Loaded Feature: Event (Cleanup & Alerts)")
         
     except Exception as e:
         print(f"❌ Error loading features: {e}")
@@ -63,7 +62,7 @@ async def on_ready():
 
 # --- START ---
 if __name__ == "__main__":
-    token = os.getenv("DISCORD_TOKEN")
+    token = os.getenv("REAL_TOKEN")
     if token:
         try:
             bot.run(token)
