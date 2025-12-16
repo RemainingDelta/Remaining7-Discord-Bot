@@ -62,7 +62,7 @@ async def on_ready():
 
 # --- START ---
 if __name__ == "__main__":
-    token = os.getenv("REAL_TOKEN")
+    token = os.getenv("DISCORD_TOKEN")
     if token:
         try:
             bot.run(token)
