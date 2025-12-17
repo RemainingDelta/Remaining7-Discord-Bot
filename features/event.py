@@ -2,7 +2,9 @@ import discord
 from discord import app_commands
 from discord.ext import commands, tasks
 from datetime import datetime, time
-import zoneinfo # Standard in Python 3.9+
+import zoneinfo 
+import re 
+from database.mongo import get_user_balance, update_user_balance 
 
 from features.config import (
     ADMIN_ROLE_ID, 
@@ -10,7 +12,8 @@ from features.config import (
     RED_EVENT_CHANNEL_ID,
     BLUE_EVENT_CHANNEL_ID,
     GREEN_EVENT_CHANNEL_ID,
-    EVENT_STAFF_CHANNEL_ID
+    EVENT_STAFF_CHANNEL_ID,
+    EVENT_ANNOUNCEMENTS_CHANNEL_ID
 )
 
 # Mapping for easier looping
@@ -94,6 +97,77 @@ class ClearChannelView(discord.ui.View):
             f"🗑️ **Cleared!** {interaction.user.mention} purged **{count} messages** in {channel.mention}.", 
             ephemeral=False
         )
+        
+
+class PayoutConfirmView(discord.ui.View):
+    def __init__(self, original_msg, matches, interaction_user):
+        super().__init__(timeout=60) # Buttons expire after 60 seconds
+        self.original_msg = original_msg
+        self.matches = matches # List of tuples: [('User_ID', 'Amount'), ...]
+        self.interaction_user = interaction_user
+        self.processed = False
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        # Only allow the person who ran the command to click
+        if interaction.user.id != self.interaction_user.id:
+            await interaction.response.send_message("❌ This is not your command.", ephemeral=True)
+            return False
+        return True
+
+    @discord.ui.button(label="Confirm Payout", style=discord.ButtonStyle.green, emoji="✅")
+    async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if self.processed: return
+        self.processed = True
+        
+        await interaction.response.defer()
+        
+        processed_log = []
+        total_distributed = 0
+
+        # --- EXECUTE PAYOUTS ---
+        for user_id_str, amount_str in self.matches:
+            user_id = str(user_id_str)
+            amount = int(amount_str)
+
+            current_bal = await get_user_balance(user_id)
+            await update_user_balance(user_id, current_bal + amount)
+            
+            processed_log.append(f"<@{user_id}>: +{amount}")
+            total_distributed += amount
+        
+        # Mark original message with a checkmark
+        try:
+            await self.original_msg.add_reaction("✅")
+        except:
+            pass
+
+        # Update the confirmation message to show success
+        embed = interaction.message.embeds[0]
+        embed.title = "✅ Payouts Complete"
+        embed.color = discord.Color.green()
+        embed.clear_fields()
+        embed.add_field(name="Summary", value=f"Distributed **{total_distributed}** tokens to **{len(self.matches)}** users.", inline=False)
+        
+        # Disable buttons
+        for child in self.children:
+            child.disabled = True
+            
+        await interaction.edit_original_response(embed=embed, view=self)
+
+    @discord.ui.button(label="Cancel", style=discord.ButtonStyle.red, emoji="✖️")
+    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.processed = True
+        
+        embed = interaction.message.embeds[0]
+        embed.title = "❌ Payout Cancelled"
+        embed.color = discord.Color.red()
+        embed.description = "No tokens were distributed."
+        embed.clear_fields()
+
+        for child in self.children:
+            child.disabled = True
+            
+        await interaction.response.edit_message(embed=embed, view=self)
 
 
 class Events(commands.Cog):
@@ -201,6 +275,70 @@ class Events(commands.Cog):
                     break 
             except Exception as e:
                 print(f"Error checking history for #{name}-event: {e}")
+    
+    @app_commands.command(name="event-rewards", description="ADMIN ONLY: Distribute tokens from an announcement.")
+    @app_commands.describe(message_id="The ID of the message in #event-announcements")
+    async def event_rewards(self, interaction: discord.Interaction, message_id: str):
+        # 1. Permission Check - STRICTLY ADMIN ONLY
+        # We access the role directly rather than using the shared helper
+        if not interaction.user.get_role(ADMIN_ROLE_ID):
+            await interaction.response.send_message("❌ Permission Denied: Only Admins can process rewards.", ephemeral=True)
+            return
+
+        # 2. Channel Check
+        if interaction.channel_id != EVENT_STAFF_CHANNEL_ID:
+             await interaction.response.send_message(f"❌ Please use this command in <#{EVENT_STAFF_CHANNEL_ID}>.", ephemeral=True)
+             return
+
+        await interaction.response.defer()
+
+        # 3. Fetch Message from Configured Channel
+        ann_channel = self.bot.get_channel(EVENT_ANNOUNCEMENTS_CHANNEL_ID)
+        if not ann_channel:
+            await interaction.followup.send("❌ Config Error: Announcement channel not found.")
+            return
+
+        try:
+            target_message = await ann_channel.fetch_message(int(message_id))
+        except:
+            await interaction.followup.send("❌ Could not find that message ID in the announcements channel.")
+            return
+
+        # 4. Check for previous processing
+        if any(r.emoji == "✅" and r.me for r in target_message.reactions):
+            await interaction.followup.send("⚠️ This message has already been processed (marked with ✅).")
+            return
+
+        # 5. Parse Data
+        pattern = r'<@!?(\d+)>\s+(\d+)'
+        matches = re.findall(pattern, target_message.content)
+
+        if not matches:
+            await interaction.followup.send("⚠️ No valid `User Amount` pairs found.\nFormat required: `@User 500`")
+            return
+
+        # 6. Generate Preview
+        preview_lines = []
+        total_preview = 0
+        for uid, amt in matches:
+            amt = int(amt)
+            preview_lines.append(f"• <@{uid}> ➡️ **{amt}**")
+            total_preview += amt
+
+        preview_text = "\n".join(preview_lines)
+        if len(preview_text) > 2000:
+            preview_text = preview_text[:2000] + "\n... (more users hidden)"
+
+        # 7. Send Confirmation
+        embed = discord.Embed(
+            title="⚠️ Confirm Event Rewards?",
+            description=f"Found **{len(matches)} users**.\nTotal Payout: **{total_preview} tokens**.",
+            color=discord.Color.orange()
+        )
+        embed.add_field(name="Recipient List", value=preview_text)
+        
+        view = PayoutConfirmView(target_message, matches, interaction.user)
+        await interaction.followup.send(embed=embed, view=view)
 
 async def setup(bot):
     await bot.add_cog(Events(bot))

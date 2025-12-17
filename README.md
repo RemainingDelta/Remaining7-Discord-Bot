@@ -14,7 +14,7 @@
 - Automatically track and reset the monthly budget for redemptions to prevent overspending.
 - Include a Leveling System based on user activity (XP/Levels) and provide level-based bonuses.
 - Introduce an Automatic Supply Drop system to encourage server activity and token distribution.
-- Streamline Tournament & Ticketing Operations by providing specific commands for match reporting, bracket management- 
+- Streamline Tournament & Ticketing Operations by providing specific commands for match reporting and bracket management.
 - Automate maintenance of event channels (`#red-event`, `#blue-event`, `#green-event`) to ensure messages are cleared before they exceed the 14-day bulk-delete limit.
 ---
 
@@ -52,12 +52,13 @@
 - **Ticket Control (`!close`, `!c`):** Tourney admin command to close an active ticket.
 - **Ticket Access (`/add`, `/remove`):** Tourney admin commands to manually add or remove a specific user to/from an active ticket channel.
 - **Support Channel Lock (`!lock`, `!reopen`):** Tourney admin commands to temporarily lock the general support channel from non-staff members, with an automatic timer to reopen after 6 hours.
-- **Hall of Fame (`/halloffame`):** Tourney admin to post structured, calculated results (prize money split: 50/25/15/10%) to the designated Hall of Fame channel.
+- **Hall of Fame (`/hall-of-fame`):** Tourney admin to post structured, calculated results (prize money split: 50/25/15/10%) to the designated Hall of Fame channel.
 
 ### Event Maintenance
 - **Automated Monitoring**: A daily background task (12:00 AM ET) scans the three event channels (`#red-event`, `#blue-event`, `#green-event`).
 - **Smart Alerts**: If the oldest message in a channel is 7 days or older, an alert is sent to `#event-staff` containing a "Purge" button. This prevents messages from exceeding Discord's 14-day limit for bulk deletion.
-- **Manual Commands**: `/clear-red`, `/clear-blue`, `/clear-green` allow Event Staff to manually wipe channels instantly.
+- **Manual Cleanup**: `/clear-red`, `/clear-blue`, `/clear-green` allow Event Staff to manually wipe channels instantly.
+- **Payout Automation**: `/event-rewards` (Admin Only) parses announcement messages (Format: `@User [Amount]`) to batch-distribute tokens. It includes a confirmation preview and prevents duplicate payouts.
 - **Safety Checks**: These commands are restricted to the `#event-staff` channel and require the Event Staff or Admin role.
 
 ### Admin Tools
@@ -105,4 +106,5 @@ This bot requires Python 3.10+ and a MongoDB Atlas database.
 ## Future Roadmap 
 - Budget Fixes
 - Update general server ticket system 
-- Added event rewards parsing feature to automate giving out the rewards
+- Auto-purge and 7-day timeout for users detecting spamming scam links
+- Blacklist for tourney's

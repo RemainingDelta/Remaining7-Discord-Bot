@@ -438,7 +438,7 @@ def setup_tourney_commands(bot: commands.Bot):
         await interaction.response.send_message(f"✅ Removed {user.mention} from this ticket.", ephemeral=True)
         await channel.send(f"{user.mention} has been removed from this ticket by {interaction.user.mention}.")
 
-    @app_commands.command(name="halloffame", description="Post results to Hall of Fame.")
+    @app_commands.command(name="hall-of-fame", description="Post results to Hall of Fame.")
     async def hall_of_fame(interaction: discord.Interaction, tourney_name: str, link: str, total_prize: str, first: str, second: str, third: str, fourth: str):
         if not isinstance(interaction.user, discord.Member) or not is_staff(interaction.user):
             await interaction.response.send_message("You don't have permission to use this command.", ephemeral=True)
