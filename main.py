@@ -34,12 +34,15 @@ async def on_ready():
 
     # 2. Load Features (Cogs)
     try:
-        # Load the massive Economy/Shop/Leveling feature we just created
         await bot.load_extension("features.economy")
-        print("✅ Loaded Feature: Economy (Shop, Levels, Admin Cmds)")
+        print("✅ Loaded Feature: Economy")
         
         await bot.load_extension("features.event")
-        print("✅ Loaded Feature: Event (Cleanup & Alerts)")
+        print("✅ Loaded Feature: Event")
+
+        # Load Security/Hacked Feature
+        await bot.load_extension("features.security")
+        print("✅ Loaded Feature: Security (Hacked)")
         
     except Exception as e:
         print(f"❌ Error loading features: {e}")
@@ -49,15 +52,17 @@ async def on_ready():
         setup_tourney_commands(bot)
         print("✅ Loaded Feature: Tournaments")
         
-        # Sync Slash Commands (This registers /shop, /buy, /tourney, etc. with Discord)
+    except Exception as e:
+        print(f"⚠️ Tourney Error: {e}")
+
+    # 4. SYNC COMMANDS (Do this LAST)
+    try:
+        # This registers /shop, /buy, /tourney, /hacked etc. with Discord
         synced = await bot.tree.sync()
         print(f"✅ Slash Commands Synced: {len(synced)} commands available")
-        
     except Exception as e:
         print(f"⚠️ Command Sync Error: {e}")
 
-    # 4. Cache Invites (Optional - if you want invite tracking logic here or in a cog)
-    # You can move your on_invite_create/delete listeners to a 'features/invites.py' cog later
     print("🚀 Bot Startup Complete!")
 
 # --- START ---

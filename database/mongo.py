@@ -1,3 +1,4 @@
+from datetime import datetime
 import os
 import motor.motor_asyncio
 import certifi
@@ -134,3 +135,26 @@ async def get_user_level_rank(user_id: str):
         ]
     })
     return count + 1
+
+# --- SECURITY / HACKED USER TRACKING ---
+
+async def add_hacked_user(user_id: str, reason: str = "Compromised Account"):
+    """Tags a user as hacked in the database."""
+    await db.hacked_users.update_one(
+        {"_id": user_id},
+        {"$set": {
+            "status": "hacked", 
+            "reason": reason, 
+            "timestamp": datetime.utcnow()
+        }},
+        upsert=True
+    )
+
+async def get_hacked_users():
+    """Retrieves all currently hacked users."""
+    cursor = db.hacked_users.find({"status": "hacked"})
+    return await cursor.to_list(length=100)
+
+async def remove_hacked_user(user_id: str):
+    """Removes the hacked tag (e.g., after they recover account)."""
+    await db.hacked_users.delete_one({"_id": user_id})
