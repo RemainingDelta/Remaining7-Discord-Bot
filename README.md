@@ -16,6 +16,7 @@
 - Introduce an Automatic Supply Drop system to encourage server activity and token distribution.
 - Streamline Tournament & Ticketing Operations by providing specific commands for match reporting and bracket management.
 - Automate maintenance of event channels (`#red-event`, `#blue-event`, `#green-event`) to ensure messages are cleared before they exceed the 14-day bulk-delete limit.
+- Implement a rapid-response security protocol to instantly isolate compromised accounts and purge malicious content from all server channels.
 ---
 
 ## Tech Stack 
@@ -60,6 +61,12 @@
 - **Manual Cleanup**: `/clear-red`, `/clear-blue`, `/clear-green` allow Event Staff to manually wipe channels instantly.
 - **Payout Automation**: `/event-rewards` (Admin Only) parses announcement messages (Format: `@User [Amount]`) to batch-distribute tokens. It includes a confirmation preview and prevents duplicate payouts.
 - **Safety Checks**: These commands are restricted to the `#event-staff` channel and require the Event Staff or Admin role.
+
+### Security System
+- **Hacked Protocol:** `/hacked` (Slash) or `!hacked` (Reply) to instantly secure a compromised account.
+- **Automated Cleanup:** triggers a 7-day timeout, flags the user in the database, and recursively purges their recent messages from **Text, Voice, and Thread** channels.
+- **Recovery:** `/unhacked` removes the timeout and database flag once the user recovers their account.
+- **Visibility:** `/hackedlist` displays all currently flagged/compromised users.
 
 ### Admin Tools
 - **Permissions:** `/perm` (Admin) Add/Remove ability to use staff commands.
@@ -106,5 +113,5 @@ This bot requires Python 3.10+ and a MongoDB Atlas database.
 ## Future Roadmap 
 - Budget Fixes
 - Update general server ticket system 
-- Auto-purge and 7-day timeout for users detecting spamming scam links
 - Blacklist for tourney's
+- Tourney admin payouts tracker
