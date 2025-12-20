@@ -3,7 +3,7 @@
 ## Overview 
 **Name:** Remaining7 Discord Bot      
 **Contributors:** nightwarrior5, remainingdelta    
-**Objective:** To provide comprehensive economy, moderation, leveling, and event management features for the Remaining7 community Discord server. The bot centralizes server engagement by offering an R7 token system, automatic rewards, a redemption shop with real-world item tracking, and tools for competitive tournament management.   
+**Objective:** To provide comprehensive economy, moderation, leveling, and event management features for the Remaining7 community Discord server, supporting over 15k members. The bot centralizes server engagement by offering an R7 token system, automatic rewards, a redemption shop with real-world item tracking, and tools for competitive tournament management.   
 **Server Link:** https://discord.gg/6MzrjS2X8k
 
 ---
@@ -54,6 +54,12 @@
 - **Ticket Access (`/add`, `/remove`):** Tourney admin commands to manually add or remove a specific user to/from an active ticket channel.
 - **Support Channel Lock (`!lock`, `!reopen`):** Tourney admin commands to temporarily lock the general support channel from non-staff members, with an automatic timer to reopen after 6 hours.
 - **Hall of Fame (`/hall-of-fame`):** Tourney admin to post structured, calculated results (prize money split: 50/25/15/10%) to the designated Hall of Fame channel.
+
+### Tourney Admin Compensation System
+- **Payout Tracking:** `/payout-add` records debts to tourney admins using unique Batch IDs ("receipts"). Supports **Split** (divides amount evenly) or **Flat** (full amount each) modes with reason logging.
+- **Ledger Management:** `/payout-list` displays a live view of all outstanding tourney admin balances.
+- **Smart History:** `/payout-history` displays a log of multi-user payouts. It dynamically filters the view to show *only* users who have not yet been paid for that specific event (hides users who have been reset).
+- **Cash Out:** `/payout-reset` clears a staff member's balance and "shreds" their unpaid receipts, removing them from the pending history log.
 
 ### Event Maintenance
 - **Automated Monitoring**: A daily background task (12:00 AM ET) scans the three event channels (`#red-event`, `#blue-event`, `#green-event`).
@@ -112,6 +118,6 @@ This bot requires Python 3.10+ and a MongoDB Atlas database.
 
 ## Future Roadmap 
 - Budget Fixes
+- Tokens while messaging fixes
 - Update general server ticket system 
 - Blacklist for tourney
-- Tourney admin payouts tracker
