@@ -2,6 +2,15 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 import asyncio
+import re 
+
+from database.mongo import (
+    add_payout_batch,         
+    get_payout_logs,         
+    get_user_unpaid_batches, 
+    get_all_pending_payouts, 
+    clear_pending_payout
+)
 
 # Import Config and Utils
 from features.config import (
@@ -30,6 +39,23 @@ LOCK_DURATION_HOURS = 6
 def is_staff(member: discord.Member) -> bool:
     """Return True if the member has any of the allowed staff roles."""
     return any(role.id in ALLOWED_STAFF_ROLES for role in member.roles)
+
+class PayoutResetConfirmView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=30)
+        self.value = None
+
+    @discord.ui.button(label="Confirm Reset All", style=discord.ButtonStyle.danger)
+    async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.value = True
+        await interaction.response.defer()
+        self.stop()
+
+    @discord.ui.button(label="Cancel", style=discord.ButtonStyle.grey)
+    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.value = False
+        await interaction.response.defer()
+        self.stop()
 
 def setup_tourney_commands(bot: commands.Bot):
     print("Setting up tourney commands...")
@@ -488,9 +514,177 @@ def setup_tourney_commands(bot: commands.Bot):
         except Exception as e:
             await interaction.response.send_message(f"❌ Failed to send message: {e}", ephemeral=True)
 
-    # Register Slash Commands
+    # =========================================================================
+    #  PAYOUT COMMANDS
+    # =========================================================================
+
+    @app_commands.command(name="payout-add", description="Add compensation for tourney admins.")
+    @app_commands.describe(
+        mode="Split: Divides amount among admins. Flat: Each admin gets the full amount.",
+        amount="The amount of currency.",
+        staff_mentions="Mention the admins (e.g. @Admin1 @Admin2)",
+        reason="Reason for this payout (e.g. Weekly Tourney)"
+    )
+    @app_commands.choices(mode=[
+        app_commands.Choice(name="Split Total Evenly", value="split"),
+        app_commands.Choice(name="Flat Rate Per Person", value="flat")
+    ])
+    async def payout_add(interaction: discord.Interaction, mode: str, amount: float, staff_mentions: str, reason: str):
+        # 1. Security Check
+        if not isinstance(interaction.user, discord.Member) or not is_staff(interaction.user):
+            await interaction.response.send_message("❌ You do not have permission to manage payouts.", ephemeral=True)
+            return
+
+        # 2. Parse User IDs
+        found_ids = [str(uid) for uid in re.findall(r'<@!?(\d+)>', staff_mentions)]
+        staff_ids = list(set(found_ids)) # Remove duplicates
+
+        if not staff_ids:
+            await interaction.response.send_message("❌ No valid user mentions found.", ephemeral=True)
+            return
+
+        # 3. Calculate Math
+        payout_per_person = 0
+        if mode == "split":
+            payout_per_person = amount / len(staff_ids)
+        else:
+            payout_per_person = amount
+
+        # 4. Update Database (Batch System)
+        await add_payout_batch(payout_per_person, staff_ids, reason)
+
+        # 5. Response
+        embed = discord.Embed(title="💰 Payouts Recorded", color=discord.Color.green())
+        embed.add_field(name="Mode", value=mode.title(), inline=True)
+        embed.add_field(name="Amount Per Admin", value=f"{payout_per_person:,.2f}", inline=True)
+        embed.add_field(name="Reason", value=reason, inline=False)
+        
+        mentions_str = " ".join([f"<@{uid}>" for uid in staff_ids])
+        embed.add_field(name="Staff Credited", value=mentions_str, inline=False)
+        
+        await interaction.response.send_message(embed=embed)
+
+    @app_commands.command(name="payout-list", description="View all pending tourney admin payouts.")
+    async def payout_list(interaction: discord.Interaction):
+        if not isinstance(interaction.user, discord.Member) or not is_staff(interaction.user):
+            await interaction.response.send_message("❌ Permission denied.", ephemeral=True)
+            return
+
+        rows = await get_all_pending_payouts()
+
+        if not rows:
+            await interaction.response.send_message("✅ No pending payouts found. All clear!", ephemeral=True)
+            return
+
+        embed = discord.Embed(title="🧾 Pending Staff Payouts", color=discord.Color.blurple())
+        description = ""
+        total_owed = 0
+
+        for row in rows:
+            user_id = row["_id"]
+            amt = row.get("amount", 0)
+            if amt > 0:
+                description += f"<@{user_id}>: **{amt:,.2f}**\n"
+                total_owed += amt
+
+        if total_owed == 0:
+             await interaction.response.send_message("✅ No pending payouts found (balances are 0).", ephemeral=True)
+             return
+
+        embed.description = description
+        embed.set_footer(text=f"Total Treasury Needed: {total_owed:,.2f}")
+        
+        await interaction.response.send_message(embed=embed)
+
+    @app_commands.command(name="payout-reset", description="Clear payouts (Cash Out).")
+    @app_commands.describe(target="Leave empty to reset ALL, or tag a user to reset only them.")
+    async def payout_reset(interaction: discord.Interaction, target: discord.User = None):
+        if not isinstance(interaction.user, discord.Member) or not is_staff(interaction.user):
+            await interaction.response.send_message("❌ Permission denied.", ephemeral=True)
+            return
+
+        # Option A: Reset One Person
+        if target:
+            await clear_pending_payout(str(target.id))
+            await interaction.response.send_message(f"✅ Cashed out {target.mention}. Receipts cleared.", ephemeral=False)
+            return
+
+        # Option B: Reset EVERYONE
+        view = PayoutResetConfirmView()
+        await interaction.response.send_message(
+            "⚠️ **WARNING** ⚠️\nYou are about to wipe **ALL** pending staff payouts.\nAre you sure?", 
+            view=view, 
+            ephemeral=True
+        )
+
+        await view.wait()
+        
+        if view.value is True:
+            await clear_pending_payout(None)
+            await interaction.followup.send("✅ All pending admin payouts have been cashed out.", ephemeral=False)
+        else:
+            await interaction.followup.send("❌ Operation cancelled.", ephemeral=True)
+
+    @app_commands.command(name="payout-history", description="View log of multi-user additions.")
+    async def payout_history(interaction: discord.Interaction):
+        """
+        Displays logs for multi-user adds. 
+        Only shows users who still 'owe' the specific batch ID (have not been reset).
+        """
+        if not isinstance(interaction.user, discord.Member) or not is_staff(interaction.user):
+            await interaction.response.send_message("❌ Permission denied.", ephemeral=True)
+            return
+            
+        logs = await get_payout_logs(limit=20)
+        if not logs:
+            await interaction.response.send_message("No logs found.", ephemeral=True)
+            return
+
+        embed = discord.Embed(title="📜 Group Payout History", color=discord.Color.gold())
+        logs_found = False
+
+        for entry in logs:
+            # FILTER 1: Only show logs where multiple people were involved
+            if len(entry["user_ids"]) <= 1:
+                continue
+
+            batch_id = entry.get("batch_id")
+            active_users_display = []
+
+            # FILTER 2: Check who still has the receipt
+            for uid in entry["user_ids"]:
+                user_batches = await get_user_unpaid_batches(uid)
+                # If the batch_id is still in their list, they haven't been paid for this yet.
+                if batch_id in user_batches:
+                    active_users_display.append(f"<@{uid}>")
+
+            # FILTER 3: If everyone in this log has been paid out, skip showing the log
+            if not active_users_display:
+                continue
+
+            logs_found = True
+            date_str = entry["timestamp"].strftime("%Y-%m-%d")
+            
+            users_str = ", ".join(active_users_display)
+            value_text = (
+                f"**Amount:** {entry['amount']:,.2f} per person\n"
+                f"**Reason:** {entry['reason']}\n"
+                f"**Included:** {users_str}"
+            )
+            
+            embed.add_field(name=f"📅 {date_str} - Group Add", value=value_text, inline=False)
+
+        if logs_found:
+            await interaction.response.send_message(embed=embed)
+        else:
+            await interaction.response.send_message("✅ No outstanding multi-user payouts found.", ephemeral=True)
+
     bot.tree.add_command(tourney_panel)
     bot.tree.add_command(pre_tourney_panel)
     bot.tree.add_command(add_to_ticket)
     bot.tree.add_command(remove_from_ticket)
     bot.tree.add_command(hall_of_fame)
+    bot.tree.add_command(payout_add)
+    bot.tree.add_command(payout_list)
+    bot.tree.add_command(payout_reset)
+    bot.tree.add_command(payout_history)

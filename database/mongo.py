@@ -1,11 +1,11 @@
 from datetime import datetime
 import os
+import uuid
 import motor.motor_asyncio
 import certifi
 from dotenv import load_dotenv
 
 load_dotenv()
-
 MONGO_URI = os.getenv("MONGO_URI")
 
 if not MONGO_URI:
@@ -158,3 +158,70 @@ async def get_hacked_users():
 async def remove_hacked_user(user_id: str):
     """Removes the hacked tag (e.g., after they recover account)."""
     await db.hacked_users.delete_one({"_id": user_id})
+    
+# --- PAYOUT / ADMIN COMPENSATION HELPERS ---
+
+async def add_payout_batch(amount: float, user_ids: list[str], reason: str):
+    """
+    1. Logs the batch globally with a unique ID.
+    2. Adds funds AND the Batch ID to every user's profile.
+    """
+    if db is None: return
+
+    # Generate a unique receipt ID (e.g., "a1b2c3d4")
+    batch_id = str(uuid.uuid4())[:8]
+
+    # 1. Save Global Log
+    log_entry = {
+        "batch_id": batch_id,
+        "timestamp": datetime.utcnow(),
+        "amount": amount,
+        "user_ids": user_ids,
+        "reason": reason
+    }
+    await db.payout_logs.insert_one(log_entry)
+
+    # 2. Update Users (Loop ensures everyone gets updated/created)
+    for uid in user_ids:
+        await db.payouts.update_one(
+            {"_id": uid},
+            {
+                "$inc": {"amount": amount},
+                "$push": {"unpaid_batches": batch_id}
+            },
+            upsert=True
+        )
+
+async def get_payout_logs(limit: int = 25):
+    """Fetches global payout history."""
+    if db is None: return []
+    cursor = db.payout_logs.find().sort("timestamp", -1).limit(limit)
+    return await cursor.to_list(length=limit)
+
+async def get_user_unpaid_batches(user_id: str):
+    """Returns the list of batch_ids the user currently owes."""
+    if db is None: return []
+    doc = await db.payouts.find_one({"_id": user_id})
+    if doc:
+        return doc.get("unpaid_batches", [])
+    return []
+
+async def get_all_pending_payouts():
+    """Returns a list of all users with a positive pending balance."""
+    if db is None: return []
+    cursor = db.payouts.find({"amount": {"$gt": 0}}).sort("amount", -1)
+    return await cursor.to_list(length=None)
+
+async def clear_pending_payout(user_id: str = None):
+    """
+    Resets balance to 0 and clears the 'unpaid_batches' list.
+    If user_id is None, clears ALL payouts.
+    """
+    if db is None: return
+    
+    update_data = {"$set": {"amount": 0, "unpaid_batches": []}}
+    
+    if user_id:
+        await db.payouts.update_one({"_id": user_id}, update_data)
+    else:
+        await db.payouts.update_many({}, update_data)
