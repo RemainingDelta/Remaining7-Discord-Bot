@@ -165,8 +165,9 @@ class DropView(discord.ui.View):
 
     @discord.ui.button(label="Claim Supply Drop", style=discord.ButtonStyle.green, emoji="🎁")
     async def claim_callback(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer(ephemeral=True)
         if self.claimed:
-            await interaction.response.send_message("❌ Already claimed!", ephemeral=True)
+            await interaction.followup.send("❌ Already claimed!", ephemeral=True)
             return
         
         self.claimed = True
@@ -186,7 +187,7 @@ class DropView(discord.ui.View):
         embed.color = discord.Color.light_grey()
         embed.description = f"**📦 CLAIMED!**\n\n**{interaction.user.mention}** grabbed **{self.amount} Tokens**!"
         
-        await interaction.response.edit_message(embed=embed, view=self)
+        await interaction.edit_original_response(embed=embed, view=self)
         await interaction.followup.send(f"🎉 **+{self.amount} Tokens** added to your account!", ephemeral=True)
 
 # --- COG ---
@@ -444,6 +445,7 @@ class Economy(commands.Cog):
     @app_commands.command(name="balance", description="Check your or another user's R7 token balance.")
     @app_commands.describe(user="The user whose balance you want to check (leave blank for your own balance).")
     async def balance(self, interaction: discord.Interaction, user: Optional[discord.User] = None):
+        await interaction.response.defer()
         target = user or interaction.user
         balance = await get_user_balance(str(target.id))
         embed = discord.Embed(
@@ -452,7 +454,7 @@ class Economy(commands.Cog):
             color=discord.Color.blue()
         )
         embed.set_footer(text=f"Requested by {interaction.user.name}", icon_url=interaction.user.display_avatar.url)
-        await interaction.response.send_message(embed=embed)
+        await interaction.followup.send(embed=embed)
 
     @app_commands.command(name="leaderboard", description="View the server's R7 token leaderboard.")
     async def leaderboard(self, interaction: discord.Interaction):
