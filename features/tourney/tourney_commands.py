@@ -2,6 +2,13 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 import asyncio
+import re 
+
+from database.mongo import (
+    add_pending_payout, 
+    get_all_pending_payouts, 
+    clear_pending_payout
+)
 
 # Import Config and Utils
 from features.config import (
@@ -30,6 +37,23 @@ LOCK_DURATION_HOURS = 6
 def is_staff(member: discord.Member) -> bool:
     """Return True if the member has any of the allowed staff roles."""
     return any(role.id in ALLOWED_STAFF_ROLES for role in member.roles)
+
+class PayoutResetConfirmView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=30)
+        self.value = None
+
+    @discord.ui.button(label="Confirm Reset All", style=discord.ButtonStyle.danger)
+    async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.value = True
+        await interaction.response.defer()
+        self.stop()
+
+    @discord.ui.button(label="Cancel", style=discord.ButtonStyle.grey)
+    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.value = False
+        await interaction.response.defer()
+        self.stop()
 
 def setup_tourney_commands(bot: commands.Bot):
     print("Setting up tourney commands...")
@@ -488,9 +512,121 @@ def setup_tourney_commands(bot: commands.Bot):
         except Exception as e:
             await interaction.response.send_message(f"❌ Failed to send message: {e}", ephemeral=True)
 
+    # =========================================================================
+    #  PAYOUT COMMANDS
+    # =========================================================================
+
+    @app_commands.command(name="payout-add", description="Add compensation for tourney admins.")
+    @app_commands.describe(
+        mode="Split: Divides amount among admins. Flat: Each admin gets the full amount.",
+        amount="The amount of currency.",
+        staff_mentions="Mention the admins involved (e.g. @Admin1 @Admin2)"
+    )
+    @app_commands.choices(mode=[
+        app_commands.Choice(name="Split Total Evenly", value="split"),
+        app_commands.Choice(name="Flat Rate Per Person", value="flat")
+    ])
+    async def payout_add(interaction: discord.Interaction, mode: str, amount: float, staff_mentions: str):
+        # 1. Security Check
+        if not isinstance(interaction.user, discord.Member) or not is_staff(interaction.user):
+            await interaction.response.send_message("❌ You do not have permission to manage payouts.", ephemeral=True)
+            return
+
+        # 2. Parse User IDs from the text string
+        # This finds numbers inside <@123> or <@!123> formats
+        found_ids = [str(uid) for uid in re.findall(r'<@!?(\d+)>', staff_mentions)]
+        # Remove duplicates
+        staff_ids = list(set(found_ids))
+
+        if not staff_ids:
+            await interaction.response.send_message("❌ No valid user mentions found.", ephemeral=True)
+            return
+
+        # 3. Calculate Math
+        payout_per_person = 0
+        if mode == "split":
+            payout_per_person = amount / len(staff_ids)
+        else:
+            payout_per_person = amount
+
+        # 4. Update Database
+        for uid in staff_ids:
+            await add_pending_payout(uid, payout_per_person)
+
+        # 5. Response
+        embed = discord.Embed(title="💰 Payouts Recorded", color=discord.Color.green())
+        embed.add_field(name="Mode", value=mode.title(), inline=True)
+        embed.add_field(name="Amount Per Admin", value=f"{payout_per_person:,.2f}", inline=True)
+        embed.add_field(name="Admins Count", value=str(len(staff_ids)), inline=True)
+        
+        # Create a string of mentions for the embed
+        mentions_str = " ".join([f"<@{uid}>" for uid in staff_ids])
+        embed.add_field(name="Staff Credited", value=mentions_str, inline=False)
+        
+        await interaction.response.send_message(embed=embed)
+
+    @app_commands.command(name="payout-list", description="View all pending admin payouts.")
+    async def payout_list(interaction: discord.Interaction):
+        if not isinstance(interaction.user, discord.Member) or not is_staff(interaction.user):
+            await interaction.response.send_message("❌ Permission denied.", ephemeral=True)
+            return
+
+        rows = await get_all_pending_payouts()
+
+        if not rows:
+            await interaction.response.send_message("✅ No pending payouts found. All clear!", ephemeral=True)
+            return
+
+        embed = discord.Embed(title="🧾 Pending Staff Payouts", color=discord.Color.blurple())
+        description = ""
+        total_owed = 0
+
+        for row in rows:
+            user_id = row["_id"]
+            amt = row["amount"]
+            description += f"<@{user_id}>: **{amt:,.2f}**\n"
+            total_owed += amt
+
+        embed.description = description
+        embed.set_footer(text=f"Total Treasury Needed: {total_owed:,.2f}")
+        
+        await interaction.response.send_message(embed=embed)
+
+    @app_commands.command(name="payout-reset", description="Clear payouts for a specific admin or EVERYONE.")
+    @app_commands.describe(target="Leave empty to reset ALL, or tag a user to reset only them.")
+    async def payout_reset(interaction: discord.Interaction, target: discord.User = None):
+        if not isinstance(interaction.user, discord.Member) or not is_staff(interaction.user):
+            await interaction.response.send_message("❌ Permission denied.", ephemeral=True)
+            return
+
+        # Option A: Reset One Person
+        if target:
+            await clear_pending_payout(str(target.id))
+            await interaction.response.send_message(f"✅ Cleared pending balance for {target.mention}.", ephemeral=True)
+            return
+
+        # Option B: Reset EVERYONE (Needs Confirmation)
+        view = PayoutResetConfirmView()
+        await interaction.response.send_message(
+            "⚠️ **WARNING** ⚠️\nYou are about to wipe **ALL** pending staff payouts from the database.\nAre you sure?", 
+            view=view, 
+            ephemeral=True
+        )
+
+        await view.wait()
+        
+        if view.value is True:
+            await clear_pending_payout(None) # None means clear all
+            await interaction.followup.send("✅ All pending admin payouts have been wiped.", ephemeral=True)
+        else:
+            await interaction.followup.send("❌ Operation cancelled.", ephemeral=True)
+
     # Register Slash Commands
     bot.tree.add_command(tourney_panel)
     bot.tree.add_command(pre_tourney_panel)
     bot.tree.add_command(add_to_ticket)
     bot.tree.add_command(remove_from_ticket)
     bot.tree.add_command(hall_of_fame)
+    bot.tree.add_command(payout_add)
+    bot.tree.add_command(payout_list)
+    bot.tree.add_command(payout_reset)

@@ -113,5 +113,5 @@ This bot requires Python 3.10+ and a MongoDB Atlas database.
 ## Future Roadmap 
 - Budget Fixes
 - Update general server ticket system 
-- Blacklist for tourney's
+- Blacklist for tourney
 - Tourney admin payouts tracker
