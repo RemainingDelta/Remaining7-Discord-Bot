@@ -158,3 +158,31 @@ async def get_hacked_users():
 async def remove_hacked_user(user_id: str):
     """Removes the hacked tag (e.g., after they recover account)."""
     await db.hacked_users.delete_one({"_id": user_id})
+    
+# --- PAYOUT / ADMIN COMPENSATION HELPERS ---
+
+async def add_pending_payout(user_id: str, amount: float):
+    """Adds an amount to a staff member's pending payout."""
+    if db is None: return
+    await db.payouts.update_one(
+        {"_id": user_id},
+        {"$inc": {"amount": amount}},
+        upsert=True
+    )
+
+async def get_all_pending_payouts():
+    """Returns a list of all users with a positive pending balance."""
+    if db is None: return []
+    cursor = db.payouts.find({"amount": {"$gt": 0}}).sort("amount", -1)
+    return await cursor.to_list(length=None)
+
+async def clear_pending_payout(user_id: str = None):
+    """
+    Clears payout for a specific user. 
+    If user_id is None, clears ALL payouts.
+    """
+    if db is None: return
+    if user_id:
+        await db.payouts.delete_one({"_id": user_id})
+    else:
+        await db.payouts.delete_many({})
