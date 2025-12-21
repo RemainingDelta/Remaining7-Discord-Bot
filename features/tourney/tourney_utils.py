@@ -11,7 +11,9 @@ from features.config import (
     TOURNEY_CLOSED_CATEGORY_ID, 
     PRE_TOURNEY_CLOSED_CATEGORY_ID,
     ALLOWED_STAFF_ROLES, 
-    LOG_CHANNEL_ID
+    LOG_CHANNEL_ID,
+    TOURNEY_ADMIN_CHANNEL_ID, 
+    TOURNEY_ADMIN_ROLE_ID
 )
 _ticket_counter: int = 1
 _pre_tourney_ticket_counter: int = 1 
@@ -22,7 +24,7 @@ _pre_tourney_ticket_counter: int = 1
 MAX_OPEN_TICKETS_PER_USER = 3
 
 # Minimum time between ticket creations for a single user
-TICKET_COOLDOWN = timedelta(minutes=0.1) 
+TICKET_COOLDOWN = timedelta(minutes=3) 
 
 # user_id -> set of open ticket channel IDs
 _user_open_tickets: dict[int, set[int]] = {}
@@ -113,6 +115,18 @@ def reset_ticket_counter():
     _ticket_counter = 1
 
 
+async def _send_capacity_warning(guild: discord.Guild, category_name: str, count: int):
+    """Sends a warning to the admin channel if capacity > 40."""
+    admin_ch = guild.get_channel(TOURNEY_ADMIN_CHANNEL_ID)
+    if admin_ch and isinstance(admin_ch, discord.TextChannel):
+        role_mention = f"<@&{TOURNEY_ADMIN_ROLE_ID}>"
+        embed = discord.Embed(
+            title="⚠️ High Traffic Alert",
+            description=f"**{category_name}** is filling up!\nCurrent Count: **{count}/50**",
+            color=discord.Color.orange()
+        )
+        embed.set_footer(text="If this reaches 50, new tickets cannot be opened.")
+        await admin_ch.send(content=role_mention, embed=embed)
 
 async def create_tourney_ticket_channel(
     interaction: discord.Interaction,
@@ -126,12 +140,26 @@ async def create_tourney_ticket_channel(
 
     category = guild.get_channel(TOURNEY_CATEGORY_ID)
     if category is None or not isinstance(category, discord.CategoryChannel):
-        # FIXED: This was causing the crash
         await interaction.followup.send(
             "Tourney category is not configured correctly. Please tell an admin.",
             ephemeral=True,
         )
         return
+    
+    current_count = len(category.channels)
+    if current_count >= 50:
+        await interaction.followup.send(
+            "❌ **System Full:** The tournament ticket queue is currently at maximum capacity (50/50).\n"
+            "Please wait for Admins to close some tickets before trying again.",
+            ephemeral=True
+        )
+        # Ping admins so they know it is critical
+        await _send_capacity_warning(guild, category.name, current_count)
+        return
+
+    if current_count >= 40:
+        # We allow creation, but we warn admins
+        asyncio.create_task(_send_capacity_warning(guild, category.name, current_count + 1))
     
     user_id = interaction.user.id
     ok, message = _check_ticket_limits_for_user(user_id)
@@ -229,7 +257,6 @@ async def create_pre_tourney_ticket_channel(
     team_name: str | None,
     issue: str,
 ):
-    # FIXED: Added missing defer
     await interaction.response.defer(ephemeral=True)
 
     guild = interaction.guild
@@ -237,42 +264,50 @@ async def create_pre_tourney_ticket_channel(
 
     category = guild.get_channel(PRE_TOURNEY_CATEGORY_ID)
     if category is None or not isinstance(category, discord.CategoryChannel):
-        # FIXED: Use followup
         await interaction.followup.send(
             "Pre-Tourney category is not configured correctly. Please tell an admin.",
             ephemeral=True,
         )
         return
+
+    # --- ADDED: Safety Checks ---
+    current_count = len(category.channels)
+    
+    # Check 1: Hard Limit (50)
+    if current_count >= 50:
+        await interaction.followup.send(
+            "❌ **System Full:** The pre-tournament ticket queue is currently at maximum capacity (50/50).\n"
+            "Please wait for Admins to close some tickets.",
+            ephemeral=True
+        )
+        await _send_capacity_warning(guild, category.name, current_count)
+        return
+
+    # Check 2: Soft Limit (40)
+    if current_count >= 40:
+        asyncio.create_task(_send_capacity_warning(guild, category.name, current_count + 1))
+    # -----------------------------
     
     user_id = interaction.user.id
     ok, message = _check_ticket_limits_for_user(user_id)
     if not ok:
-        # FIXED: Use followup
         await interaction.followup.send(message, ephemeral=True)
         return
 
+    # ... rest of the function remains the same ...
     ticket_number = get_next_pre_tourney_ticket_number()
     channel_name = f"「❗」ticket-{ticket_number:03d}"
-
-    # Build permission overwrites
-    overwrites: dict[discord.abc.Snowflake, discord.PermissionOverwrite] = {
+    
+    # (Keep the rest of your existing code here)
+    overwrites = {
         guild.default_role: discord.PermissionOverwrite(view_channel=False),
-        interaction.user: discord.PermissionOverwrite(
-            view_channel=True,
-            send_messages=True,
-            read_message_history=True,
-        ),
+        interaction.user: discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True),
     }
 
     for role_id in ALLOWED_STAFF_ROLES:
         role = guild.get_role(role_id)
-        if role is not None:
-            overwrites[role] = discord.PermissionOverwrite(
-                view_channel=True,
-                send_messages=True,
-                read_message_history=True,
-                manage_messages=True,
-            )
+        if role:
+            overwrites[role] = discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True, manage_messages=True)
 
     display_team = team_name if team_name else "N/A"
 
@@ -282,16 +317,11 @@ async def create_pre_tourney_ticket_channel(
         overwrites=overwrites,
         reason=f"Pre-Tourney ticket from {interaction.user}",
     )
-    # Force move to top
     await channel.edit(position=0)
 
     _register_ticket_for_user(interaction.user.id, channel.id)
     
-    topic = (
-        f"tourney-opener:{interaction.user.id}"
-        f"|team:{display_team}"
-        f"|issue:{issue}"
-    )
+    topic = f"tourney-opener:{interaction.user.id}|team:{display_team}|issue:{issue}"
     await channel.edit(topic=topic, reason="Store ticket opener ID")
 
     ticket_embed = discord.Embed(
@@ -299,18 +329,12 @@ async def create_pre_tourney_ticket_channel(
         description="A Staff member will assist you shortly.",
         color=discord.Color.orange()
     )
-
     ticket_embed.add_field(name="👤 User", value=interaction.user.mention, inline=False)
     ticket_embed.add_field(name="📛 Team", value=f"```\n{display_team}\n```", inline=False)
     ticket_embed.add_field(name="📝 Inquiry", value=f"```\n{issue}\n```", inline=False)
 
     await channel.send(embed=ticket_embed)
-
-    # FIXED: Use followup
-    await interaction.followup.send(
-        f"Support ticket created: {channel.mention}",
-        ephemeral=True,
-    )
+    await interaction.followup.send(f"Support ticket created: {channel.mention}", ephemeral=True)
 
 async def close_ticket_via_command(ctx: commands.Context):
     """
@@ -343,9 +367,32 @@ async def close_ticket_via_command(ctx: commands.Context):
         await ctx.reply("This command can only be used in an active tourney ticket channel.")
         return
 
+    if target_category and isinstance(target_category, discord.CategoryChannel):
+        current_count = len(target_category.channels)
+        LIMIT = 40 
+        
+        if current_count >= LIMIT:
+            # Sort existing archive tickets by creation time (Oldest first)
+            existing_channels = [c for c in target_category.channels if isinstance(c, discord.TextChannel)]
+            existing_channels.sort(key=lambda c: c.created_at)
+
+            # Delete enough to get back to 39 (making room for the incoming one)
+            excess_amount = current_count - LIMIT + 1
+            to_delete = existing_channels[:excess_amount]
+
+            await ctx.send(f"🧹 Closed category full ({current_count}/50). Auto-cleaning {len(to_delete)} oldest closed ticket(s)...")
+
+            for old_chan in to_delete:
+                try:
+                    await delete_ticket_with_transcript(guild, old_chan, ctx.author, ctx.bot)
+                    await asyncio.sleep(1.5) 
+                except Exception as e:
+                    print(f"Failed to auto-clean ticket {old_chan.name}: {e}")
+    
     # 1. Move Category (Await this first so it happens immediately)
     if target_category and isinstance(target_category, discord.CategoryChannel):
         await channel.edit(category=target_category)
+    
 
     # 2. Handle Opener Tracking
     opener_id: int | None = None
@@ -562,6 +609,16 @@ async def reopen_tourney_ticket(interaction: discord.Interaction):
 
     # 1. Move Category & Force Top Position
     if target_category and isinstance(target_category, discord.CategoryChannel):
+        
+        # --- SAFETY CHECK: Is the active category full? ---
+        if len(target_category.channels) >= 50:
+            await interaction.followup.send(
+                "❌ **Cannot Reopen:** The Active Ticket category is full (50/50). You must close another ticket first.",
+                ephemeral=True
+            )
+            return
+        # --------------------------------------------------
+
         # We edit category first
         await channel.edit(category=target_category)
         # Then force position 0
@@ -622,7 +679,7 @@ async def reopen_tourney_ticket(interaction: discord.Interaction):
         pass
 
     await interaction.followup.send("Ticket reopened and moved to top of active category.", ephemeral=True)
-
+    
 async def delete_tourney_ticket(interaction: discord.Interaction):
     """Delete the ticket channel via button interaction, using shared helper."""
     guild = interaction.guild
