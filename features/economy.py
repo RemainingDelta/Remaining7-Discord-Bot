@@ -33,7 +33,6 @@ allowed_users = set()
 async def shop_item_autocomplete(interaction: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
     choices = []
     for key, data in SHOP_DATA.items():
-        # Match against the key (e.g., "nitro") or the display name (e.g., "Discord Nitro")
         if current.lower() in key.lower() or current.lower() in data['display'].lower():
             choices.append(app_commands.Choice(name=data['display'], value=key))
     return choices[:25]
@@ -44,10 +43,11 @@ class LeaderboardView(discord.ui.View):
     def __init__(self, author: discord.User):
         super().__init__(timeout=60)
         self.page = 0
-        self.author = author
+        self.author = author # This is now correctly a User object
         self.per_page = 10
 
     async def generate_embed(self) -> discord.Embed:
+
         offset = self.page * self.per_page
         entries = await get_leaderboard_page(offset, self.per_page)
         
@@ -57,23 +57,27 @@ class LeaderboardView(discord.ui.View):
         )
         
         if entries:
+            description_lines = []
             for index, user_doc in enumerate(entries, start=offset+1):
                 uid = user_doc["_id"]
                 bal = user_doc["balance"]
-                if index == 1: rank_emoji = "🥇 "
-                elif index == 2: rank_emoji = "🥈 "
-                elif index == 3: rank_emoji = "🥉 "
-                else: rank_emoji = f"**#{index}** "
                 
-                embed.add_field(
-                    name=f"{rank_emoji}<@{uid}>",
-                    value=f"💰 {bal} R7 tokens",
-                    inline=False
-                )
+                if index == 1: rank = "🥇"
+                elif index == 2: rank = "🥈"
+                elif index == 3: rank = "🥉"
+                else: rank = f"**#{index}**"
+                
+                # Format: 🥇 <@User> - 💰 **Balance**
+                line = f"{rank} <@{uid}> - 💰 **{bal}**"
+                description_lines.append(line)
+            
+            embed.description = "\n".join(description_lines)
         else:
             embed.description = "No entries to display."
             
+        # Ensure we pass the ID as a String to the database
         user_rank = await get_user_rank(str(self.author.id))
+        
         embed.set_footer(text=f"Page {self.page + 1} | Your Rank: {user_rank}")
         return embed
 
@@ -204,21 +208,17 @@ class Economy(commands.Cog):
     @tasks.loop(hours=6)
     async def supply_drop_task(self):
         await self.bot.wait_until_ready()
-        
-        # Wait 0-12 hours so it's not predictable (on average 4 times a day)
         await asyncio.sleep(random.randint(0, 45600))
         
         channel = self.bot.get_channel(GENERAL_CHANNEL_ID)
         if not channel: return
 
         amount = random.randint(100, 300)
-        
         embed = discord.Embed(
             title="🪂 Supply Drop Incoming!",
             description=f"A crate containing **{amount} R7 Tokens** has landed!\n\n**Click FAST to claim it!**",
             color=discord.Color.red()
         )
-        # Use DropView(amount)
         await channel.send(embed=embed, view=DropView(amount))
         print(f"🪂 Auto-Drop sent: {amount} tokens")
 
@@ -229,35 +229,24 @@ class Economy(commands.Cog):
             await interaction.response.send_message("❌ Permission Denied", ephemeral=True)
             return
 
-        # 1. Get the Specific Channel
-        # (Make sure GENERAL_CHANNEL_ID is defined at the top of your file!)
         target_channel = self.bot.get_channel(GENERAL_CHANNEL_ID)
-
         if not target_channel:
             await interaction.response.send_message("❌ Error: Could not find the General channel.", ephemeral=True)
             return
 
-        # 2. Create the Drop
         embed = discord.Embed(
             title="🪂 Admin Supply Drop!",
             description=f"Admin summoned **{amount} R7 Tokens**!",
             color=discord.Color.gold()
         )
         view = DropView(amount)
-
-        # 3. Send it to the TARGET channel (Not the current one)
         await target_channel.send(embed=embed, view=view)
-
-        # 4. Tell the Admin it worked (Ephemerally, where they typed it)
         await interaction.response.send_message(f"✅ Drop sent to {target_channel.mention}!", ephemeral=True)
 
-
     async def has_permission(self, interaction: discord.Interaction):
-        # 1. Check if user has the Staff/Admin Role
         if isinstance(interaction.user, discord.Member):
             if interaction.user.get_role(ADMIN_ROLE_ID):
                 return True
-        # 2. Keep "allowed_users" list as a backup (from /perm command)
         if interaction.user.id in allowed_users:
             return True
         return False
@@ -266,30 +255,19 @@ class Economy(commands.Cog):
 
     @app_commands.command(name="shop", description="View the R7 token shop.")
     async def shop(self, interaction: discord.Interaction):
-        embed = discord.Embed(
-            title="🛒 **R7 Token Shop** 🛒",
-            color=discord.Color.blue()
-        )
-        
+        embed = discord.Embed(title="🛒 **R7 Token Shop** 🛒", color=discord.Color.blue())
         for key, info in SHOP_DATA.items():
-            embed.add_field(
-                name=info['display'],
-                value=f"{info['desc']}\n**Price:** {info['price']} R7 tokens",
-                inline=False
-            )
-            
+            embed.add_field(name=info['display'], value=f"{info['desc']}\n**Price:** {info['price']} R7 tokens", inline=False)
         embed.set_footer(text="Use /buy <item> to purchase!")
         await interaction.response.send_message(embed=embed)
 
     @app_commands.command(name="buy", description="Purchase an item from the shop.")
     @app_commands.describe(item="Select the item you want to buy.")
-    @app_commands.choices(item=shop_choices) # <--- THIS ENABLES THE DROPDOWN
+    @app_commands.choices(item=shop_choices) 
     async def buy(self, interaction: discord.Interaction, item: str):
         user_id = str(interaction.user.id)
-        
-        # Since we use choices, 'item' is guaranteed to be a valid key from SHOP_DATA
         if item not in SHOP_DATA:
-            await interaction.response.send_message("❌ Error: Item not found in config.", ephemeral=True)
+            await interaction.response.send_message("❌ Error: Item not found.", ephemeral=True)
             return
 
         item_info = SHOP_DATA[item]
@@ -305,7 +283,6 @@ class Economy(commands.Cog):
             await interaction.response.send_message(embed=embed, ephemeral=True)
             return
 
-        # Process Transaction
         new_balance = balance - price
         await update_user_balance(user_id, new_balance)
         await add_item_token(user_id, item)
@@ -320,17 +297,14 @@ class Economy(commands.Cog):
 
     @app_commands.command(name="redeem", description="Redeem an item you own.")
     @app_commands.describe(item="Select the item you want to redeem.")
-    @app_commands.choices(item=shop_choices) # <--- THIS ENABLES THE DROPDOWN
+    @app_commands.choices(item=shop_choices)
     async def redeem(self, interaction: discord.Interaction, item: str):
         user_id = str(interaction.user.id)
-
         if item not in SHOP_DATA:
             await interaction.response.send_message("❌ Error: Item data not found.", ephemeral=True)
             return
             
         item_info = SHOP_DATA[item]
-
-        # Check Ownership
         qty = await get_item_count(user_id, item)
         if qty < 1:
             embed = discord.Embed(
@@ -341,11 +315,8 @@ class Economy(commands.Cog):
             await interaction.response.send_message(embed=embed, ephemeral=True)
             return
 
-        # Remove Item
         await remove_item_token(user_id, item)
 
-        # Budget / Stats Logic
-        # Update specific counters for budget tracking
         tracking_keys = {
             "brawl pass": "brawlpass_redeemed_count",
             "nitro": "nitro_redeemed_count",
@@ -357,22 +328,16 @@ class Economy(commands.Cog):
             current = int(await get_setting(key, "0"))
             await set_setting(key, str(current + 1))
 
-        # Create Ticket
         try:
             ch = await interaction.guild.create_text_channel(f"ticket-{interaction.user.name}")
-            
-            # Set Permissions
             await ch.set_permissions(interaction.guild.default_role, read_messages=False)
             await ch.set_permissions(interaction.user, read_messages=True, send_messages=True)
             
-            # Add Admin/Staff Role
-            # Note: Ensure ADMIN_ROLE_ID is imported from your config!
             from features.config import ADMIN_ROLE_ID 
             staff_role = interaction.guild.get_role(ADMIN_ROLE_ID)
             if staff_role:
                 await ch.set_permissions(staff_role, read_messages=True, send_messages=True, manage_messages=True)
 
-            # Determine Instructions
             instructions = "- Provide necessary details."
             if "brawl pass" in item: instructions = "- Provide your in-game ID and a link to add you."
             elif "nitro" in item: instructions = "- Provide the Discord account you'd like the Nitro gifted to."
@@ -385,7 +350,6 @@ class Economy(commands.Cog):
                 color=discord.Color.green()
             )
             await interaction.response.send_message(embed=embed)
-
             ticket_embed = discord.Embed(
                 title=f"🎫 **{item.title()} Redemption Ticket**",
                 description=f"{interaction.user.mention}, please provide the following details in this ticket channel:\n\n{instructions}",
@@ -395,13 +359,11 @@ class Economy(commands.Cog):
 
         except Exception as e:
             await interaction.response.send_message(f"❌ **Error** Failed to create ticket: {e}", ephemeral=True)
-    # --- DAILY & BALANCE ---
 
     @app_commands.command(name="daily", description="Claim your daily R7 tokens!")
     async def daily(self, interaction: discord.Interaction):
         user_id = str(interaction.user.id)
         now = datetime.utcnow()
-        
         last_daily_str = await get_setting(f"daily_{user_id}")
         if last_daily_str:
             last_daily = datetime.utcfromtimestamp(float(last_daily_str))
@@ -419,8 +381,6 @@ class Economy(commands.Cog):
                 return
 
         daily_tokens = random.randint(80, 160)
-        
-        # YOUR LEVEL BONUS LOGIC
         level, _ = await get_leveling_data(user_id)
         bonus_multiplier = 1 + (level - 1) * 0.05
         final_tokens = int(daily_tokens * bonus_multiplier)
@@ -458,21 +418,18 @@ class Economy(commands.Cog):
 
     @app_commands.command(name="leaderboard", description="View the server's R7 token leaderboard.")
     async def leaderboard(self, interaction: discord.Interaction):
-        view = LeaderboardView(interaction.user)
+        await interaction.response.defer()
+        # FIX: Pass interaction.user, NOT interaction
+        view = LeaderboardView(interaction.user) 
         embed = await view.generate_embed()
-        await interaction.response.send_message(embed=embed, view=view)
-
-    # --- LEVELING COMMANDS ---
+        await interaction.followup.send(embed=embed, view=view)
 
     @app_commands.command(name="level", description="Check your or another user's level and progress.")
     @app_commands.describe(user="The user whose level you want to check")
     async def level(self, interaction: discord.Interaction, user: Optional[discord.Member] = None):
         user = user or interaction.user
         user_id = str(user.id)
-        
         level, exp = await get_leveling_data(user_id)
-        
-        # Calculate Logic
         BASE_EXP = 100
         EXP_GROWTH_PHASE_CUTOFF = 20
         if level <= EXP_GROWTH_PHASE_CUTOFF:
@@ -486,10 +443,7 @@ class Economy(commands.Cog):
         filled_length = min(progress_bar_length, int(progress_bar_length * (exp / next_level_exp)))
         progress_bar = "🟩" * filled_length + "⬜" * (progress_bar_length - filled_length)
 
-        embed = discord.Embed(
-            title=f"📊 {user.display_name}'s Level Progress",
-            color=discord.Color.blue()
-        )
+        embed = discord.Embed(title=f"📊 {user.display_name}'s Level Progress", color=discord.Color.blue())
         embed.add_field(name="📈 Level", value=f"**{level}**", inline=True)
         embed.add_field(name="⚡ EXP", value=f"{exp}/{next_level_exp}", inline=True)
         embed.add_field(name="📊 Progress", value=f"{progress_bar} `{progress_percentage:.1f}%`", inline=False)
@@ -498,7 +452,6 @@ class Economy(commands.Cog):
         elif level < 20: footer = "Nice progress! The challenges are getting tougher."
         else: footer = "Legendary status! Each level is a real achievement now!"
         embed.set_footer(text=footer)
-        
         await interaction.response.send_message(embed=embed)
 
     @app_commands.command(name="levels_leaderboard", description="View the server's level leaderboard")
@@ -507,19 +460,15 @@ class Economy(commands.Cog):
         embed = await view.generate_embed()
         await interaction.response.send_message(embed=embed, view=view)
 
-    # --- BUDGET & ADMIN COMMANDS ---
-
     @app_commands.command(name="checkbudget", description="Check the remaining budget for redemptions.")
     async def check_budget(self, interaction: discord.Interaction):
         budget_str = await get_setting("monthly_budget", "50.00")
         try: TOTAL_BUDGET = float(budget_str)
         except: TOTAL_BUDGET = 50.00
         
-        # Get Counts
         bp_c = int(await get_setting("brawlpass_redeemed_count", "0"))
         ni_c = int(await get_setting("nitro_redeemed_count", "0"))
         pi_c = int(await get_setting("pin_redeemed_count", "0"))
-
         manual_spent = await get_setting("manual_total_spent")
         if manual_spent:
             total_spent = float(manual_spent)
@@ -527,7 +476,6 @@ class Economy(commands.Cog):
             total_spent = (bp_c * 10) + (ni_c * 10) + (pi_c * 5)
         
         remaining = TOTAL_BUDGET - total_spent
-        
         embed = discord.Embed(title="💰 **Budget Status**", color=discord.Color.blue())
         embed.description = (
             f"**Total Monthly Budget:** ${TOTAL_BUDGET:.2f}\n"
@@ -563,7 +511,6 @@ class Economy(commands.Cog):
             lvl, exp = await get_leveling_data(uid)
             await update_leveling_data(uid, lvl + amount, exp)
             msg = f"Gave **{amount} Levels** to {user.mention}."
-            
         await interaction.response.send_message(embed=discord.Embed(title="✅ Given", description=msg, color=discord.Color.green()))
 
     @app_commands.command(name="setbalance", description="Set a user's R7 token balance.")
@@ -584,13 +531,9 @@ class Economy(commands.Cog):
         if not await self.has_permission(interaction):
             await interaction.response.send_message("❌ Permission Denied.", ephemeral=True)
             return
-            
-        # 2. Add Logic
         if action == "add":
             allowed_users.add(member.id)
             await interaction.response.send_message(f"✅ **Added:** {member.mention} has been granted bot command permissions.")
-            
-        # 3. Remove Logic
         else:
             if member.id in allowed_users:
                 allowed_users.remove(member.id)
