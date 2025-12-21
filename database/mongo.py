@@ -117,12 +117,36 @@ async def get_total_users():
     if db is None: return 0
     return await db.users.count_documents({})
 
-async def get_user_rank(user_id: str):
+async def get_user_rank(user_id: str) -> int:
+    """
+    Calculates rank by checking the 'users' collection.
+    Handles String vs Int ID mismatch to prevent Rank 0 errors.
+    """
     if db is None: return 0
-    bal = await get_user_balance(user_id)
-    # Count how many people have strictly MORE money
-    count = await db.users.count_documents({"balance": {"$gt": bal}})
-    return count + 1
+    
+    # 1. Ensure we look in the 'users' collection
+    collection = db["users"] 
+
+    # 2. Try to find the user to get their balance
+    user_doc = await collection.find_one({"_id": str(user_id)})
+    
+    # If not found, try Integer (legacy data fix)
+    if not user_doc:
+        try:
+            user_doc = await collection.find_one({"_id": int(user_id)})
+        except ValueError:
+            pass
+
+    # 3. Determine the balance (default 0 if not found)
+    user_balance = user_doc.get("balance", 0) if user_doc else 0
+
+    # 4. Count how many people have strictly MORE money
+    higher_balance_count = await collection.count_documents({
+        "balance": {"$gt": user_balance}
+    })
+    
+    # 5. Rank is the number of people above you + 1
+    return higher_balance_count + 1
 
 async def get_user_level_rank(user_id: str):
     if db is None: return 0
