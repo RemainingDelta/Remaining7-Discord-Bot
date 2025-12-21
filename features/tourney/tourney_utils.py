@@ -445,7 +445,7 @@ async def close_ticket_via_command(ctx: commands.Context):
             )
 
     await ctx.send(
-        f"Ticket closed by {ctx.author.mention} and moved to {target_category.name if target_category else 'closed category'}.",
+        f"Ticket closed by {ctx.author.name} and moved to {target_category.name if target_category else 'closed category'}.",
         view=DeleteTicketView(),
     )
 
