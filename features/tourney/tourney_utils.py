@@ -726,3 +726,95 @@ async def delete_tourney_ticket(interaction: discord.Interaction):
         deleter=member,
         client=interaction.client,
     )
+
+async def delete_ticket_via_command(ctx: commands.Context):
+    """Command version of delete ticket logic."""
+    if not _is_staff(ctx.author):
+        await ctx.reply("Permission denied.")
+        return
+
+    # Check if we are in a valid ticket category (Active or Closed)
+    valid_categories = (
+        TOURNEY_CATEGORY_ID, 
+        PRE_TOURNEY_CATEGORY_ID, 
+        TOURNEY_CLOSED_CATEGORY_ID, 
+        PRE_TOURNEY_CLOSED_CATEGORY_ID
+    )
+    if ctx.channel.category_id not in valid_categories:
+        await ctx.reply("This command can only be used in a tourney ticket channel.")
+        return
+
+    await ctx.send("Deleting this ticket channel...")
+    await delete_ticket_with_transcript(ctx.guild, ctx.channel, ctx.author, ctx.bot)
+
+
+async def reopen_ticket_via_command(ctx: commands.Context):
+    """Command version of reopen ticket logic."""
+    guild = ctx.guild
+    channel = ctx.channel
+
+    if not _is_staff(ctx.author):
+        await ctx.reply("Permission denied.")
+        return
+
+    # Determine destination (Active) category based on current (Closed) category
+    target_category = None
+    if channel.category_id == TOURNEY_CLOSED_CATEGORY_ID:
+        target_category = guild.get_channel(TOURNEY_CATEGORY_ID)
+    elif channel.category_id == PRE_TOURNEY_CLOSED_CATEGORY_ID:
+        target_category = guild.get_channel(PRE_TOURNEY_CATEGORY_ID)
+    else:
+        await ctx.reply("This ticket is not in a Closed Ticket category.")
+        return
+
+    # SAFETY CHECK: Capacity (50 channel limit)
+    if target_category and len(target_category.channels) >= 50:
+        await ctx.reply(f"❌ Cannot reopen: The active category '{target_category.name}' is full (50/50).")
+        return
+
+    # 1. Move
+    if target_category:
+        await channel.edit(category=target_category, position=0)
+
+    # 2. Register Opener
+    opener_id = None
+    if channel.topic:
+        for part in channel.topic.split("|"):
+            key, _, value = part.partition(":")
+            if key.strip() == "tourney-opener":
+                try: opener_id = int(value.strip())
+                except ValueError: pass
+                break
+
+    if opener_id: 
+        _register_ticket_for_user(opener_id, channel.id)
+
+    # 3. Rename
+    base_name = channel.name
+    if "「" in base_name and "」" in base_name: 
+        base_name = base_name.split("」", 1)[1]
+    new_name = f"「❗」{base_name}"
+
+    if channel.name != new_name:
+        asyncio.create_task(channel.edit(name=new_name, reason="Reopened via command"))
+
+    # 4. Restore Perms
+    opener_mention = "the ticket owner"
+    if opener_id:
+        opener = guild.get_member(opener_id)
+        if opener:
+            opener_mention = opener.mention
+            await channel.set_permissions(opener, view_channel=True, send_messages=True, read_message_history=True)
+
+    embed = discord.Embed(
+        title="🔓 Ticket Reopened",
+        description=f"{opener_mention}, this ticket has been reopened by staff.",
+        color=discord.Color.green()
+    )
+    await channel.send(embed=embed)
+    
+    # React to the command message to show success
+    try:
+        await ctx.message.add_reaction("✅")
+    except:
+        pass
