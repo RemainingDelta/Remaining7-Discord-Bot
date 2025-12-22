@@ -51,6 +51,8 @@
 
 ### Tournament & Ticketing
 - **Phase Management (`!starttourney`, `!endtourney`):** Tourney admin commands to switch the server between pre-tourney and main tourney phases. This includes resetting ticket counters, locking/reopening the general support channel, updating channel permissions, and automatically deleting old tickets.
+- **Live Queue Dashboard:** A real-time, auto-updating embed (every 15s) posted in the main support channel. It displays the **"Currently Serving"** ticket number and the total number of users **"In Line"**, complete with a relative "Last Updated" timestamp.
+- **Queue Status (`/queue`):** Allows users inside an active ticket to check their specific position in the line (e.g., "3/10") and see their wait status.
 - **Support Panels (`/tourney-panel`, `/pre-tourney-panel`):** Commands to post the interactive button panels for opening new tickets (for live match issues or pre-tourney questions).
 - **Ticket Control (`!close`, `!c`):** Tourney admin command to close an active ticket. Automatically identifies and deletes the oldest archived tickets if the closed category reaches the Discord 50-channel limit, ensuring new tickets can always be closed safely. 
 - **Ticket Deletion (`!delete`, `!del`):** A command-based backup to manually delete a ticket channel and save the transcript (useful if button interactions fail).
@@ -126,4 +128,4 @@ This bot requires Python 3.10+ and a MongoDB Atlas database.
 - Update general server ticket system 
 - Blacklist for tourney
 - Level Leaderboard View Revamp
-- Someway to track which ticket the tourney admins are on
+- Tourney stats after running `!endtourney`
