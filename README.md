@@ -45,12 +45,16 @@
 ### Leveling & Leaderboards
 - **Leveling:** Tracks user XP and level progress.
 - **Progress Check:** `/level` shows individual progress bar and next level EXP goal.
-- **Ranking:** `/leaderboard` for tokens
+- **Token Ranking:** `/leaderboard` for tokens
+- **Level Ranking:** `/levels_leaderboard` for tokens
+
 
 ### Tournament & Ticketing
 - **Phase Management (`!starttourney`, `!endtourney`):** Tourney admin commands to switch the server between pre-tourney and main tourney phases. This includes resetting ticket counters, locking/reopening the general support channel, updating channel permissions, and automatically deleting old tickets.
 - **Support Panels (`/tourney-panel`, `/pre-tourney-panel`):** Commands to post the interactive button panels for opening new tickets (for live match issues or pre-tourney questions).
 - **Ticket Control (`!close`, `!c`):** Tourney admin command to close an active ticket. Automatically identifies and deletes the oldest archived tickets if the closed category reaches the Discord 50-channel limit, ensuring new tickets can always be closed safely. 
+- **Ticket Deletion (`!delete`, `!del`):** A command-based backup to manually delete a ticket channel and save the transcript (useful if button interactions fail).
+- **Ticket Reopen (`!reopen`):** Reopens a closed ticket, moving it from the Closed category back to the Active category and restoring user permissions.
 - **Ticket Access (`/add`, `/remove`):** Tourney admin commands to manually add or remove a specific user to/from an active ticket channel.
 - **Support Channel Lock (`!lock`, `!reopen`):** Tourney admin commands to temporarily lock the general support channel from non-staff members, with an automatic timer to reopen after 6 hours.
 - **Hall of Fame (`/hall-of-fame`):** Tourney admin to post structured, calculated results (prize money split: 50/25/15/10%) to the designated Hall of Fame channel.
@@ -121,3 +125,5 @@ This bot requires Python 3.10+ and a MongoDB Atlas database.
 - Tokens while messaging fixes
 - Update general server ticket system 
 - Blacklist for tourney
+- Level Leaderboard View Revamp
+- Someway to track which ticket the tourney admins are on

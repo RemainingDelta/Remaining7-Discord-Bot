@@ -456,9 +456,10 @@ class Economy(commands.Cog):
 
     @app_commands.command(name="levels_leaderboard", description="View the server's level leaderboard")
     async def levels_leaderboard(self, interaction: discord.Interaction):
+        await interaction.response.defer()
         view = LevelsLeaderboardView(interaction.user)
         embed = await view.generate_embed()
-        await interaction.response.send_message(embed=embed, view=view)
+        await interaction.followup.send(embed=embed, view=view)
 
     @app_commands.command(name="checkbudget", description="Check the remaining budget for redemptions.")
     async def check_budget(self, interaction: discord.Interaction):
