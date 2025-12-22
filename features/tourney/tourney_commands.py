@@ -130,27 +130,14 @@ def setup_tourney_commands(bot: commands.Bot):
         task = asyncio.create_task(auto_reopen())
         lock_tasks[channel.id] = task
 
-    @bot.command(name="delete", aliases=["del"])
-    async def delete_command(ctx: commands.Context):
-        """Delete a ticket (backup for button)."""
-        await delete_ticket_via_command(ctx)
-
-    @bot.command(name="reopen")
-    async def reopen_command(ctx: commands.Context):
+    @bot.command(name="unlock")
+    async def unlock_command(ctx: commands.Context):
         """
-        Smart Reopen:
-        - If inside a Closed Ticket -> Reopens the ticket.
-        - If anywhere else -> Unlocks the Main Support Channel (Legacy feature).
+        Manually unlock the general support channel (Legacy feature).
+        Previously named !reopen.
         """
-        # 1. NEW LOGIC: Check if we are inside a CLOSED ticket category
-        if ctx.channel.category_id in (TOURNEY_CLOSED_CATEGORY_ID, PRE_TOURNEY_CLOSED_CATEGORY_ID):
-            await reopen_ticket_via_command(ctx)
-            return
-
-        # 2. LEGACY LOGIC: Unlock Support Channel
-        # (This is your original code, preserved here so it still works outside tickets)
         if not isinstance(ctx.author, discord.Member) or not is_staff(ctx.author):
-            await ctx.reply("You don't have permission to reopen the ticket channel.")
+            await ctx.reply("You don't have permission to unlock the ticket channel.")
             return
 
         channel = bot.get_channel(OTHER_TICKET_CHANNEL_ID)
@@ -169,13 +156,32 @@ def setup_tourney_commands(bot: commands.Bot):
             await ctx.reply("Member role not found in this server.")
             return
 
+        # Restore permissions for members
         await channel.set_permissions(member_role, view_channel=True)
 
+        # Cancel any auto-lock timer
         task = lock_tasks.pop(channel.id, None)
         if task and not task.done():
             task.cancel()
 
-        await ctx.reply(f"🔓 Reopened {channel.mention}.")
+        await ctx.reply(f"🔓 **Unlocked** {channel.mention}. Members can see it again.")
+        
+    @bot.command(name="delete", aliases=["del"])
+    async def delete_command(ctx: commands.Context):
+        """Delete a ticket (backup for button)."""
+        await delete_ticket_via_command(ctx)
+
+    @bot.command(name="reopen")
+    async def reopen_command(ctx: commands.Context):
+        """
+        Reopen a closed tourney ticket channel.
+        Moves it from the Closed Category back to the Active Category.
+        """
+        # Check if we are inside a CLOSED ticket category
+        if ctx.channel.category_id in (TOURNEY_CLOSED_CATEGORY_ID, PRE_TOURNEY_CLOSED_CATEGORY_ID):
+            await reopen_ticket_via_command(ctx)
+        else:
+            await ctx.reply("⚠️ This command is for reopening **Closed Tourney Tickets**.\nTo unlock the main support channel, use `!unlock`.")
 
     @bot.command(name="starttourney")
     async def start_tourney_command(ctx: commands.Context):
