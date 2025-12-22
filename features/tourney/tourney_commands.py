@@ -191,7 +191,6 @@ class QueueDashboard(commands.Cog):
                 inline=True
             )
             
-        embed.set_footer(text="Data provided by Hypixel API") 
 
         # 4. Jump-to-Bottom Logic (Edit or Resend)
         try:
