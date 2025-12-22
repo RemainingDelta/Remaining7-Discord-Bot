@@ -29,6 +29,8 @@ from .tourney_utils import (
     close_ticket_via_command,
     reset_ticket_counter,
     delete_ticket_with_transcript,
+    delete_ticket_via_command,
+    reopen_ticket_via_command
 )
 from .tourney_views import TourneyOpenTicketView, PreTourneyOpenTicketView
 
@@ -128,9 +130,25 @@ def setup_tourney_commands(bot: commands.Bot):
         task = asyncio.create_task(auto_reopen())
         lock_tasks[channel.id] = task
 
+    @bot.command(name="delete", aliases=["del"])
+    async def delete_command(ctx: commands.Context):
+        """Delete a ticket (backup for button)."""
+        await delete_ticket_via_command(ctx)
+
     @bot.command(name="reopen")
     async def reopen_command(ctx: commands.Context):
-        """Manually reopen the OTHER ticket channel early."""
+        """
+        Smart Reopen:
+        - If inside a Closed Ticket -> Reopens the ticket.
+        - If anywhere else -> Unlocks the Main Support Channel (Legacy feature).
+        """
+        # 1. NEW LOGIC: Check if we are inside a CLOSED ticket category
+        if ctx.channel.category_id in (TOURNEY_CLOSED_CATEGORY_ID, PRE_TOURNEY_CLOSED_CATEGORY_ID):
+            await reopen_ticket_via_command(ctx)
+            return
+
+        # 2. LEGACY LOGIC: Unlock Support Channel
+        # (This is your original code, preserved here so it still works outside tickets)
         if not isinstance(ctx.author, discord.Member) or not is_staff(ctx.author):
             await ctx.reply("You don't have permission to reopen the ticket channel.")
             return
@@ -508,7 +526,7 @@ def setup_tourney_commands(bot: commands.Bot):
 
         try:
             await target_channel.send(embed=embed)
-            await interaction.response.send_message(f"✅ Hall of Fame post sent to {target_channel.mention}!", ephemeral=True)
+            await interaction.response.send_message(f"✅ Hall of Fame post sent to {target_channel.mention}!", ephemeral=False)
         except discord.Forbidden:
             await interaction.response.send_message(f"❌ I don't have permission to send messages in {target_channel.mention}.", ephemeral=True)
         except Exception as e:
