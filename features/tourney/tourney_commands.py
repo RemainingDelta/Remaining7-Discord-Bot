@@ -1,6 +1,6 @@
 import discord
 from discord import app_commands
-from discord.ext import commands
+from discord.ext import commands, tasks
 import asyncio
 import re 
 
@@ -59,6 +59,165 @@ class PayoutResetConfirmView(discord.ui.View):
         await interaction.response.defer()
         self.stop()
 
+class QueueDashboard(commands.Cog):
+    def __init__(self, bot):
+        self.bot = bot
+        # self.dashboard_task.start()  <-- Manual start via !starttourney
+
+    def cog_unload(self):
+        self.dashboard_task.cancel()
+
+    async def start_dashboard(self):
+        """Starts the loop if not already running."""
+        if not self.dashboard_task.is_running():
+            self.dashboard_task.start()
+            print("📊 Queue Dashboard Started")
+
+    async def stop_dashboard(self):
+        """Stops the loop and deletes the message."""
+        if self.dashboard_task.is_running():
+            self.dashboard_task.cancel()
+            print("📊 Queue Dashboard Stopped")
+        
+        # Cleanup
+        channel = self.bot.get_channel(TOURNEY_SUPPORT_CHANNEL_ID)
+        if channel and isinstance(channel, discord.TextChannel):
+            try:
+                async for m in channel.history(limit=10):
+                    if m.author == self.bot.user and m.embeds and m.embeds[0].title == "📊 Live Tournament Queue":
+                        await m.delete()
+                        break
+            except Exception as e:
+                print(f"Failed to cleanup dashboard message: {e}")
+
+    @tasks.loop(seconds=15)
+    async def dashboard_task(self):
+        """Updates the live queue status in the main support channel."""
+        await self.bot.wait_until_ready()
+        
+        channel = self.bot.get_channel(TOURNEY_SUPPORT_CHANNEL_ID)
+        if not channel or not isinstance(channel, discord.TextChannel):
+            return
+
+        # 1. Get Active Tickets
+        guild = channel.guild
+        cat = guild.get_channel(TOURNEY_CATEGORY_ID)
+        
+        active_tickets = []
+        active_nums = [] # List to store just the integers (e.g., [3, 4, 5])
+
+        if cat and isinstance(cat, discord.CategoryChannel):
+            active_tickets = [c for c in cat.channels if isinstance(c, discord.TextChannel) and "ticket-" in c.name]
+            # Sort by creation time to establish line order
+            active_tickets.sort(key=lambda c: c.created_at)
+
+            # Extract numbers from active tickets for logic checks
+            for t in active_tickets:
+                match = re.search(r"ticket-(\d+)", t.name)
+                if match:
+                    try:
+                        active_nums.append(int(match.group(1)))
+                    except ValueError:
+                        pass
+            
+            # Sort numbers just in case creation time didn't match numbering perfectly
+            active_nums.sort()
+
+        count = len(active_tickets)
+
+        # 2. Determine Message Content
+        embed = discord.Embed(title="📊 Live Tournament Queue", color=discord.Color.blurple())
+        
+        # --- LOGIC START ---
+        # If no tickets are open at all, show the "Green" state immediately
+        if count == 0:
+            embed.color = discord.Color.green()
+            embed.description = "✅ **No tickets currently in the queue.**\nStaff are standing by!"
+            serving_display = None # Flag to skip adding fields
+        else:
+            # Calculate Max Closed Number
+            max_closed_num = 0
+            closed_cat = guild.get_channel(TOURNEY_CLOSED_CATEGORY_ID)
+            if closed_cat and isinstance(closed_cat, discord.CategoryChannel):
+                for ch in closed_cat.channels:
+                    match = re.search(r"ticket-(\d+)", ch.name)
+                    if match:
+                        try:
+                            num = int(match.group(1))
+                            if num > max_closed_num:
+                                max_closed_num = num
+                        except:
+                            pass
+            
+            # Logic: Determine who we are serving
+            target_num = max_closed_num + 1
+            
+            if target_num in active_nums:
+                # Ideally, we serve the next number in sequence
+                final_serving_num = target_num
+            else:
+                # EDGE CASE: 
+                # The target (MaxClosed + 1) does not exist in active tickets.
+                # In this case, serve the LOWEST available open ticket.
+                if len(active_nums) > 0:
+                    final_serving_num = min(active_nums)
+                else:
+                    # Should be caught by the (count == 0) check above, but safe fallback
+                    final_serving_num = 0 
+
+            serving_display = f"ticket-{final_serving_num:03d}"
+            embed.color = discord.Color.orange()
+
+        # 3. Add Timestamp & Fields
+        current_timestamp = int(discord.utils.utcnow().timestamp())
+        
+        # --- FIX IS HERE ---
+        # Initialize description to empty string if it is None
+        if embed.description is None:
+            embed.description = ""
+            
+        embed.description = f"**Last Updated:** <t:{current_timestamp}:R>\n\n{embed.description}"
+        # -------------------
+
+        if serving_display:
+            embed.add_field(
+                name="🟢 Currently Serving", 
+                value=f"**{serving_display}**", 
+                inline=True
+            )
+            embed.add_field(
+                name="👥 In Line", 
+                value=f"**{count}** tickets waiting", 
+                inline=True
+            )
+            
+        embed.set_footer(text="Data provided by Hypixel API") 
+
+        # 4. Jump-to-Bottom Logic (Edit or Resend)
+        try:
+            last_message = None
+            async for m in channel.history(limit=1):
+                last_message = m
+                break 
+
+            old_dashboard_msg = None
+            async for m in channel.history(limit=10):
+                if m.author == self.bot.user and m.embeds and m.embeds[0].title == "📊 Live Tournament Queue":
+                    old_dashboard_msg = m
+                    break
+
+            if last_message and old_dashboard_msg and last_message.id == old_dashboard_msg.id:
+                try: await old_dashboard_msg.edit(embed=embed)
+                except discord.HTTPException: pass 
+            else:
+                if old_dashboard_msg:
+                    try: await old_dashboard_msg.delete()
+                    except: pass
+                await channel.send(embed=embed)
+
+        except Exception as e:
+            print(f"Queue Dashboard Error: {e}")
+                                    
 def setup_tourney_commands(bot: commands.Bot):
     print("Setting up tourney commands...")
 
@@ -130,27 +289,14 @@ def setup_tourney_commands(bot: commands.Bot):
         task = asyncio.create_task(auto_reopen())
         lock_tasks[channel.id] = task
 
-    @bot.command(name="delete", aliases=["del"])
-    async def delete_command(ctx: commands.Context):
-        """Delete a ticket (backup for button)."""
-        await delete_ticket_via_command(ctx)
-
-    @bot.command(name="reopen")
-    async def reopen_command(ctx: commands.Context):
+    @bot.command(name="unlock")
+    async def unlock_command(ctx: commands.Context):
         """
-        Smart Reopen:
-        - If inside a Closed Ticket -> Reopens the ticket.
-        - If anywhere else -> Unlocks the Main Support Channel (Legacy feature).
+        Manually unlock the general support channel (Legacy feature).
+        Previously named !reopen.
         """
-        # 1. NEW LOGIC: Check if we are inside a CLOSED ticket category
-        if ctx.channel.category_id in (TOURNEY_CLOSED_CATEGORY_ID, PRE_TOURNEY_CLOSED_CATEGORY_ID):
-            await reopen_ticket_via_command(ctx)
-            return
-
-        # 2. LEGACY LOGIC: Unlock Support Channel
-        # (This is your original code, preserved here so it still works outside tickets)
         if not isinstance(ctx.author, discord.Member) or not is_staff(ctx.author):
-            await ctx.reply("You don't have permission to reopen the ticket channel.")
+            await ctx.reply("You don't have permission to unlock the ticket channel.")
             return
 
         channel = bot.get_channel(OTHER_TICKET_CHANNEL_ID)
@@ -169,13 +315,32 @@ def setup_tourney_commands(bot: commands.Bot):
             await ctx.reply("Member role not found in this server.")
             return
 
+        # Restore permissions for members
         await channel.set_permissions(member_role, view_channel=True)
 
+        # Cancel any auto-lock timer
         task = lock_tasks.pop(channel.id, None)
         if task and not task.done():
             task.cancel()
 
-        await ctx.reply(f"🔓 Reopened {channel.mention}.")
+        await ctx.reply(f"🔓 **Unlocked** {channel.mention}. Members can see it again.")
+        
+    @bot.command(name="delete", aliases=["del"])
+    async def delete_command(ctx: commands.Context):
+        """Delete a ticket (backup for button)."""
+        await delete_ticket_via_command(ctx)
+
+    @bot.command(name="reopen")
+    async def reopen_command(ctx: commands.Context):
+        """
+        Reopen a closed tourney ticket channel.
+        Moves it from the Closed Category back to the Active Category.
+        """
+        # Check if we are inside a CLOSED ticket category
+        if ctx.channel.category_id in (TOURNEY_CLOSED_CATEGORY_ID, PRE_TOURNEY_CLOSED_CATEGORY_ID):
+            await reopen_ticket_via_command(ctx)
+        else:
+            await ctx.reply("⚠️ This command is for reopening **Closed Tourney Tickets**.\nTo unlock the main support channel, use `!unlock`.")
 
     @bot.command(name="starttourney")
     async def start_tourney_command(ctx: commands.Context):
@@ -280,6 +445,11 @@ def setup_tourney_commands(bot: commands.Bot):
         
         await ctx.send(f"✅ Tourney Started! Channels updated and {deleted_count} pre-tourney tickets deleted.")
 
+        # START THE DASHBOARD
+        dashboard_cog = bot.get_cog("QueueDashboard")
+        if dashboard_cog:
+            await dashboard_cog.start_dashboard()
+
     @bot.command(name="endtourney")
     async def end_tourney_command(ctx: commands.Context):
         """
@@ -297,7 +467,7 @@ def setup_tourney_commands(bot: commands.Bot):
         if guild is None:
             return
 
-        await reopen_command(ctx)
+        await unlock_command(ctx)
 
         # 1. Update MAIN Tourney Support Channel
         # GOAL: 「❌❌❌」「🔴」tourney-support | Perms: Everyone View(X)
@@ -385,6 +555,10 @@ def setup_tourney_commands(bot: commands.Bot):
                 )
             except Exception as e:
                 print(f"Error deleting ticket {ch.id} ({ch.name}): {e}")
+                
+        dashboard_cog = bot.get_cog("QueueDashboard")
+        if dashboard_cog:
+            await dashboard_cog.stop_dashboard()
 
     # =========================================================================
     #  SLASH COMMANDS (Restored from your New File)
@@ -696,6 +870,53 @@ def setup_tourney_commands(bot: commands.Bot):
             await interaction.response.send_message(embed=embed)
         else:
             await interaction.response.send_message("✅ No outstanding multi-user payouts found.", ephemeral=True)
+            
+    @app_commands.command(name="queue", description="Check your current position in the ticket line.")
+    async def check_queue(interaction: discord.Interaction):
+        # 1. Validation
+        channel = interaction.channel
+        if not isinstance(channel, discord.TextChannel) or "ticket-" not in channel.name:
+            await interaction.response.send_message("❌ This command can only be used inside a ticket channel.", ephemeral=True)
+            return
+
+        # 2. Identify Queue
+        if channel.category_id == TOURNEY_CATEGORY_ID:
+            cat = interaction.guild.get_channel(TOURNEY_CATEGORY_ID)
+        elif channel.category_id == PRE_TOURNEY_CATEGORY_ID:
+            cat = interaction.guild.get_channel(PRE_TOURNEY_CATEGORY_ID)
+        else:
+            await interaction.response.send_message("❌ This ticket is not in an active queue.", ephemeral=True)
+            return
+
+        # 3. Calculate Position
+        tickets = [c for c in cat.channels if isinstance(c, discord.TextChannel) and "ticket-" in c.name]
+        tickets.sort(key=lambda c: c.created_at)
+
+        try:
+            position = tickets.index(channel) + 1
+            total = len(tickets)
+        except ValueError:
+            await interaction.response.send_message("Could not determine position.", ephemeral=True)
+            return
+
+        # 4. Report
+        if position == 1:
+            status = "🟢 **NOW SERVING**"
+            desc = f"You are **1/{total}** in the queue.\nA staff member should be with you momentarily!"
+            color = discord.Color.green()
+        else:
+            status = "🟠 **WAITING**"
+            desc = f"You are **{position}/{total}** in the queue.\nPlease wait for a staff member."
+            color = discord.Color.orange()
+
+        embed = discord.Embed(title="⏳ Queue Status", description=desc, color=color)
+        embed.add_field(name="Current Status", value=status, inline=False)
+        
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
+    # --- Start the Dashboard Task ---
+    asyncio.create_task(bot.add_cog(QueueDashboard(bot)))
+    print("✅ Queue Dashboard task started.")
 
     bot.tree.add_command(tourney_panel)
     bot.tree.add_command(pre_tourney_panel)
@@ -706,3 +927,4 @@ def setup_tourney_commands(bot: commands.Bot):
     bot.tree.add_command(payout_list)
     bot.tree.add_command(payout_reset)
     bot.tree.add_command(payout_history)
+    bot.tree.add_command(check_queue)
