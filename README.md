@@ -59,6 +59,7 @@
 - **Ticket Reopen (`!reopen`):** Reopens a closed ticket, moving it from the Closed category back to the Active category and restoring user permissions.
 - **Ticket Access (`/add`, `/remove`):** Tourney admin commands to manually add or remove a specific user to/from an active ticket channel.
 - **Support Channel Lock (`!lock`, `!reopen`):** Tourney admin commands to temporarily lock the general support channel from non-staff members, with an automatic timer to reopen after 6 hours.
+- **Blacklist Management (`/blacklist add`, `/blacklist remove`, `/blacklist list`):** Stores blacklisted user through their Discord id, along with their matcherino profile, reason for blacklist, and their alts. 
 - **Hall of Fame (`/hall-of-fame`):** Tourney admin to post structured, calculated results (prize money split: 50/25/15/10%) to the designated Hall of Fame channel.
 
 ### Tourney Admin Compensation System
