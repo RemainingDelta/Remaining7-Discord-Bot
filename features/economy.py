@@ -19,7 +19,8 @@ from database.mongo import (
 from features.config import (
     ADMIN_ROLE_ID,
     GENERAL_CHANNEL_ID,
-    SHOP_DATA
+    SHOP_DATA,
+    MODERATOR_ROLE_ID
 )
 
 shop_choices = [
@@ -170,6 +171,11 @@ class DropView(discord.ui.View):
     @discord.ui.button(label="Claim Supply Drop", style=discord.ButtonStyle.green, emoji="🎁")
     async def claim_callback(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.defer(ephemeral=True)
+        
+        if any(role.id == MODERATOR_ROLE_ID for role in interaction.user.roles):
+            await interaction.followup.send("❌ Staff cannot claim supply drops!", ephemeral=True)
+            return
+        
         if self.claimed:
             await interaction.followup.send("❌ Already claimed!", ephemeral=True)
             return
