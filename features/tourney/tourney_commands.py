@@ -9,7 +9,11 @@ from database.mongo import (
     get_payout_logs,         
     get_user_unpaid_batches, 
     get_all_pending_payouts, 
-    clear_pending_payout
+    clear_pending_payout,
+    add_blacklisted_user,
+    remove_blacklisted_user,
+    get_all_blacklisted_users,
+    get_blacklisted_user
 )
 
 # Import Config and Utils
@@ -216,6 +220,94 @@ class QueueDashboard(commands.Cog):
 
         except Exception as e:
             print(f"Queue Dashboard Error: {e}")
+            
+class BlacklistGroup(app_commands.Group):
+    def __init__(self, bot: commands.Bot):
+        super().__init__(name="blacklist", description="Manage tournament blacklisted users")
+        self.bot = bot
+
+    @app_commands.command(name="add", description="Blacklist a user from tournaments.")
+    @app_commands.describe(
+        user="The user to blacklist",
+        reason="Why are they being blacklisted?",
+        matcherino="Link to their Matcherino profile (Optional)",
+        alts="List of Alt User IDs or mentions (space separated) (Optional)"
+    )
+    async def blacklist_add(self, interaction: discord.Interaction, user: discord.User, reason: str, matcherino: str = None, alts: str = None):
+        if not is_staff(interaction.user):
+            await interaction.response.send_message("❌ Permission denied.", ephemeral=True)
+            return
+
+        # Parse Alts string into a list of IDs
+        alt_ids = []
+        if alts:
+            # clear out <@! > formatting to get raw IDs
+            raw_ids = re.findall(r'\d+', alts)
+            alt_ids = list(set(raw_ids)) # unique IDs only
+
+        await add_blacklisted_user(
+            user_id=str(user.id),
+            reason=reason,
+            admin_id=str(interaction.user.id),
+            matcherino=matcherino,
+            alts=alt_ids
+        )
+
+        embed = discord.Embed(title="⛔ User Blacklisted", color=discord.Color.dark_red())
+        embed.add_field(name="User", value=f"{user.mention} (`{user.id}`)", inline=False)
+        embed.add_field(name="Reason", value=reason, inline=False)
+        if matcherino:
+            embed.add_field(name="Matcherino", value=matcherino, inline=False)
+        if alt_ids:
+            alt_mentions = ", ".join([f"<@{aid}>" for aid in alt_ids])
+            embed.add_field(name="Registered Alts", value=alt_mentions, inline=False)
+        
+        await interaction.response.send_message(embed=embed)
+
+    @app_commands.command(name="remove", description="Remove a user from the blacklist.")
+    async def blacklist_remove(self, interaction: discord.Interaction, user: discord.User):
+        if not is_staff(interaction.user):
+            await interaction.response.send_message("❌ Permission denied.", ephemeral=True)
+            return
+
+        # Check if they are actually blacklisted first
+        existing = await get_blacklisted_user(str(user.id))
+        if not existing:
+            await interaction.response.send_message(f"⚠️ {user.mention} is not currently blacklisted.", ephemeral=True)
+            return
+
+        await remove_blacklisted_user(str(user.id))
+        await interaction.response.send_message(f"✅ {user.mention} has been removed from the blacklist.")
+
+    @app_commands.command(name="list", description="View all blacklisted users.")
+    async def blacklist_list(self, interaction: discord.Interaction):
+        if not is_staff(interaction.user):
+            await interaction.response.send_message("❌ Permission denied.", ephemeral=True)
+            return
+
+        users = await get_all_blacklisted_users()
+        if not users:
+            await interaction.response.send_message("✅ No users are currently blacklisted.", ephemeral=True)
+            return
+
+        # Simple pagination or long list logic
+        embed = discord.Embed(title="⛔ Blacklisted Users", color=discord.Color.dark_red())
+        
+        description_lines = []
+        for doc in users:
+            uid = doc["_id"]
+            reason = doc.get("reason", "No reason provided")
+            date_str = doc.get("timestamp").strftime("%Y-%m-%d") if doc.get("timestamp") else "Unknown Date"
+            description_lines.append(f"• <@{uid}> (`{uid}`) — {date_str}\n  Reason: *{reason}*")
+
+        # Join lines. If too long, Discord will error, so ideally chunk this. 
+        # For now, we truncate to 4000 chars to be safe.
+        full_text = "\n\n".join(description_lines)
+        if len(full_text) > 4000:
+            full_text = full_text[:3990] + "... (list truncated)"
+            
+        embed.description = full_text
+        await interaction.response.send_message(embed=embed)
                                     
 def setup_tourney_commands(bot: commands.Bot):
     print("Setting up tourney commands...")
@@ -927,3 +1019,4 @@ def setup_tourney_commands(bot: commands.Bot):
     bot.tree.add_command(payout_reset)
     bot.tree.add_command(payout_history)
     bot.tree.add_command(check_queue)
+    bot.tree.add_command(BlacklistGroup(bot))
