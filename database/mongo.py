@@ -249,3 +249,41 @@ async def clear_pending_payout(user_id: str = None):
         await db.payouts.update_one({"_id": user_id}, update_data)
     else:
         await db.payouts.update_many({}, update_data)
+        
+
+# --- BLACKLIST HELPERS ---
+
+async def add_blacklisted_user(user_id: str, reason: str, admin_id: str, matcherino: str = None, alts: list[str] = None):
+    """
+    Adds or updates a user in the blacklist.
+    """
+    if db is None: return
+    
+    doc = {
+        "_id": user_id,
+        "reason": reason,
+        "admin_id": admin_id,
+        "matcherino": matcherino,
+        "alts": alts or [],
+        "timestamp": datetime.utcnow()
+    }
+    
+    # Use replace_one with upsert to completely overwrite if they exist (updating details)
+    await db.blacklist.replace_one({"_id": user_id}, doc, upsert=True)
+
+async def remove_blacklisted_user(user_id: str):
+    """Removes a user from the blacklist."""
+    if db is None: return
+    await db.blacklist.delete_one({"_id": user_id})
+
+async def get_blacklisted_user(user_id: str):
+    """Returns the blacklist document if the user is banned, else None."""
+    if db is None: return None
+    # Ensure we search by string ID
+    return await db.blacklist.find_one({"_id": str(user_id)})
+
+async def get_all_blacklisted_users():
+    """Returns a list of all blacklisted users."""
+    if db is None: return []
+    cursor = db.blacklist.find().sort("timestamp", -1)
+    return await cursor.to_list(length=None)
