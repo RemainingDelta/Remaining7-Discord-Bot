@@ -127,6 +127,6 @@ This bot requires Python 3.10+ and a MongoDB Atlas database.
 - Budget Fixes
 - Tokens while messaging fixes
 - Update general server ticket system 
-- Blacklist for tourney
 - Level Leaderboard View Revamp
 - Tourney stats after running `!endtourney`
+- Bug: `!endtourney` sometimes doesn't delete the live tournament queue embeded
