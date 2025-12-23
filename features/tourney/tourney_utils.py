@@ -4,7 +4,7 @@ import io
 from datetime import datetime, timedelta
 from discord.utils import utcnow
 import asyncio 
-
+from database.mongo import get_blacklisted_user
 from features.config import (
     TOURNEY_CATEGORY_ID, 
     PRE_TOURNEY_CATEGORY_ID, 
@@ -15,6 +15,7 @@ from features.config import (
     TOURNEY_ADMIN_CHANNEL_ID, 
     TOURNEY_ADMIN_ROLE_ID
 )
+
 _ticket_counter: int = 1
 _pre_tourney_ticket_counter: int = 1 
 
@@ -244,6 +245,8 @@ async def create_tourney_ticket_channel(
         f"Tourney ticket created: {channel.mention}",
         ephemeral=True,
     )
+    
+    await check_and_alert_blacklist(guild, interaction.user, channel)
 
 
 def _is_staff(member: discord.abc.User | discord.Member) -> bool:
@@ -335,6 +338,8 @@ async def create_pre_tourney_ticket_channel(
 
     await channel.send(embed=ticket_embed)
     await interaction.followup.send(f"Support ticket created: {channel.mention}", ephemeral=True)
+    
+    await check_and_alert_blacklist(guild, interaction.user, channel)
 
 async def close_ticket_via_command(ctx: commands.Context):
     """
@@ -818,3 +823,49 @@ async def reopen_ticket_via_command(ctx: commands.Context):
         await ctx.message.add_reaction("✅")
     except:
         pass
+
+async def check_and_alert_blacklist(guild: discord.Guild, user: discord.User, ticket_channel: discord.TextChannel):
+    """
+    Checks if a user is blacklisted. If so, pings admins in the admin channel.
+    """
+    blacklist_data = await get_blacklisted_user(str(user.id))
+    
+    if not blacklist_data:
+        return # Not blacklisted, do nothing.
+
+    # They are blacklisted! Prepare the alert.
+    admin_channel = guild.get_channel(TOURNEY_ADMIN_CHANNEL_ID)
+    if not admin_channel or not isinstance(admin_channel, discord.TextChannel):
+        return
+
+    reason = blacklist_data.get("reason", "N/A")
+    matcherino = blacklist_data.get("matcherino", "N/A")
+    alts = blacklist_data.get("alts", [])
+    timestamp = blacklist_data.get("timestamp")
+    
+    date_str = timestamp.strftime("%Y-%m-%d") if timestamp else "Unknown"
+
+    # Build Alt String
+    if alts:
+        alt_str = ", ".join([f"<@{aid}>" for aid in alts])
+    else:
+        alt_str = "None"
+
+    embed = discord.Embed(
+        title="🚨 Blacklisted User Opened Ticket",
+        description=f"**User:** {user.mention} (`{user.id}`)\n**Ticket:** {ticket_channel.mention}",
+        color=discord.Color.dark_red()
+    )
+    
+    embed.add_field(name="Ban Reason", value=reason, inline=False)
+    embed.add_field(name="Ban Date", value=date_str, inline=True)
+    embed.add_field(name="Matcherino", value=matcherino, inline=True)
+    embed.add_field(name="Known Alts", value=alt_str, inline=False)
+
+    # Ping the admin role
+    content = f"<@&{TOURNEY_ADMIN_ROLE_ID}> ⚠️ **Blacklisted User Alert!**"
+    
+    try:
+        await admin_channel.send(content=content, embed=embed)
+    except Exception as e:
+        print(f"Failed to send blacklist alert: {e}")
