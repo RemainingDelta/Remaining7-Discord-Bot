@@ -115,26 +115,27 @@ class LevelsLeaderboardView(discord.ui.View):
         
         embed = discord.Embed(
             title="🏆 **Server Level Leaderboard** 🏆",
-            description="Top members by level and experience",
             color=discord.Color.gold()
         )
         
         if entries:
+            description_lines = []
             for index, user_doc in enumerate(entries, start=offset+1):
                 uid = user_doc["_id"]
                 lvl = user_doc["level"]
                 exp = user_doc["exp"]
                 
-                if index == 1: rank_emoji = "👑 "
-                elif index == 2: rank_emoji = "🥈 "
-                elif index == 3: rank_emoji = "🥉 "
-                else: rank_emoji = f"**#{index}** "
+                # Match emojis to the Token Leaderboard
+                if index == 1: rank = "🥇"
+                elif index == 2: rank = "🥈"
+                elif index == 3: rank = "🥉"
+                else: rank = f"**#{index}**"
                 
-                embed.add_field(
-                    name=f"{rank_emoji}<@{uid}>",
-                    value=f"Level {lvl} | {exp} EXP",
-                    inline=False
-                )
+                # Format: 🥇 <@User> - Level **10** | **500** EXP
+                line = f"{rank} <@{uid}> - Level **{lvl}** | **{exp}** EXP"
+                description_lines.append(line)
+            
+            embed.description = "\n".join(description_lines)
         else:
             embed.description = "No leveled users yet!"
             
@@ -161,7 +162,7 @@ class LevelsLeaderboardView(discord.ui.View):
             await interaction.response.edit_message(embed=embed, view=self)
         else:
             await interaction.response.defer()
-
+            
 class DropView(discord.ui.View):
     def __init__(self, amount):
         super().__init__(timeout=1800) # 30 mins
