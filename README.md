@@ -46,7 +46,7 @@
 - **Leveling:** Tracks user XP and level progress.
 - **Progress Check:** `/level` shows individual progress bar and next level EXP goal.
 - **Token Ranking:** `/leaderboard` for tokens
-- **Level Ranking:** `/levels_leaderboard` for tokens
+- **Level Ranking:** `/levels_leaderboard` for levels
 
 
 ### Tournament & Ticketing
@@ -127,6 +127,40 @@ This bot requires Python 3.10+ and a MongoDB Atlas database.
 - Budget Fixes
 - Tokens while messaging fixes
 - Update general server ticket system 
-- Level Leaderboard View Revamp
 - Tourney stats after running `!endtourney`
 - Bug: `!endtourney` sometimes doesn't delete the live tournament queue embeded
+- Brawl Stars Collectible Game (Large)
+  - Phase 1: Data & Models
+    - [ ] Create JSON file for Brawler stats and assets
+    - [ ] Define Python dataclass to load Brawler data
+    - [ ] Update MongoDB schema to support user inventory
+    - [ ] Create helper function to fetch user collection
+  - Phase 2: The Gacha (Summoning)
+    - [ ] Implement RNG logic for weighted rarity drops
+    - [ ] Create slash command to summon using R7 tokens
+    - [ ] Add logic to deduct tokens and save Brawler
+    - [ ] Design embed to display summoned Brawler image
+  - Phase 3: Inventory Management
+    - [ ] Create inventory command with pagination view
+    - [ ] Implement command to view specific Brawler details
+    - [ ] Add functionality to lock and favorite Brawlers
+    - [ ] Create command to sort inventory by rarity
+  - Phase 4: Team Building
+    - [ ] Update schema to store active battle team
+    - [ ] Create command to equip Brawlers to slots
+    - [ ] Add validation to prevent duplicate team members
+  - Phase 5: Battle Engine (Logic)
+    - [ ] Develop Battle class to manage turn order
+    - [ ] Implement damage calculation logic based on stats
+    - [ ] Add simple AI logic for enemy moves
+    - [ ] Create logic to determine win/loss conditions
+  - Phase 6: Battle Interface (UI)
+    - [ ] Design dynamic battle embed for health updates
+    - [ ] Implement Discord buttons for attack actions
+    - [ ] Connect buttons to Battle class turn logic
+    - [ ] Add visual indicators for critical hits
+  - Phase 7: Progression & Economy
+    - [ ] Integrate battle victories with R7 token rewards
+    - [ ] Implement experience points system for Brawlers
+    - [ ] Create shop command to buy power points
+    - [ ] Add leaderboard for highest win streaks
