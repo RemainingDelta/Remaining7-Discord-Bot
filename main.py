@@ -65,9 +65,10 @@ async def on_ready():
 
     print("🚀 Bot Startup Complete!")
 
-# --- START ---
+
 if __name__ == "__main__":
-    token = os.getenv("DISCORD_TOKEN")
+    MODE = os.getenv('BOT_MODE', 'TEST').upper()
+    token = os.getenv("DISCORD_TOKEN") if MODE == "REAL" else os.getenv("FAKE_TOKEN")
     if token:
         try:
             bot.run(token)
