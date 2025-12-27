@@ -397,3 +397,18 @@ async def get_brawl_currencies(user_id: str):
         "gems": 0, 
         "credits": 0 
     })
+
+async def deduct_credits(user_id: str, amount: int) -> bool:
+    """Deducts credits if user has enough. Returns True if successful."""
+    if db is None: return False
+    user_data = await get_user_data(user_id)
+    current_credits = user_data.get("currencies", {}).get("credits", 0)
+    
+    if current_credits < amount:
+        return False
+        
+    await db.users.update_one(
+        {"_id": str(user_id)},
+        {"$inc": {"currencies.credits": -amount}}
+    )
+    return True

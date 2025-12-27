@@ -406,3 +406,12 @@ STARR_DROP_LOOT = {
     ]
 }
 
+BRAWLER_PRICES = {
+    "Rare": 200,
+    "Super Rare": 450,
+    "Epic": 925,
+    "Mythic": 1900,
+    "Legendary": 3800,
+    "Ultra Legendary": 5500
+}
+
