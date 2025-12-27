@@ -37,7 +37,13 @@ if MODE == "REAL":
     EVENT_ANNOUNCEMENTS_CHANNEL_ID = 863649858120450088
 
     EVENT_STAFF_ROLE_ID = 811495204346789938
-
+    
+    EMOJIS_CURRENCY = { 
+        "coins": "<:bs_coin:1454305320015888516>",        
+        "power_points": "<:bs_power_point:1454305322263908486>",
+        "credits": "<:bs_credit:1454305320838103186>",
+        "brawler": "🥊"
+    }
 else:
     TOURNEY_CATEGORY_ID = 1442029102185054290    
     PRE_TOURNEY_CATEGORY_ID = 1448871112598618203
@@ -68,6 +74,114 @@ else:
     EVENT_ANNOUNCEMENTS_CHANNEL_ID = 1450923458342162677
 
     EVENT_STAFF_ROLE_ID = 1450350588209533019
+    
+    EMOJIS_CURRENCY = { 
+        "coins": "<:bs_coin:1454290949780934678>",        
+        "power_points": "<:bs_power_point:1454291060183400489>",
+        "credits": "<:bs_credit:1454291577190224060>",
+        "brawler": "🥊"
+    }
+    
+    EMOJIS_BRAWLERS = { 
+        "pierce": "<:brawler_pierce:1454328096206487572>",
+        "gigi": "<:brawler_gigi:1454328095413895168>",
+        "mina": "<:brawler_mina:1454328094621176011>",
+        "shelly": "<:brawler_shelly:1454328093660676270>",
+        "ziggy": "<:brawler_ziggy:1454328092641329202>",
+        "alli": "<:brawler_alli:1454328091328512181>",
+        "trunk": "<:brawler_trunk:1454328089277501511>",
+        "kaze": "<:brawler_kaze:1454328087474081793>",
+        "jaeyong": "<:brawler_jaeyong:1454328086626701478>",
+        "lumi": "<:brawler_lumi:1454328085078999123>",
+        "finx": "<:brawler_finx:1454328083984420874>",
+        "ollie": "<:brawler_ollie:1454328082822336604>",
+        "meeple": "<:brawler_meeple:1454328081698521088>",
+        "shade": "<:brawler_shade:1454328080922443897>",
+        "juju": "<:brawler_juju:1454328079702032516>",
+        "kenji": "<:brawler_kenji:1454328078351339681>",
+        "moe": "<:brawler_moe:1454328075704602821>",
+        "clancy": "<:brawler_clancy:1454328074807283774>",
+        "berry": "<:brawler_berry:1454328073834070047>",
+        "draco": "<:brawler_draco:1454328071904825511>",
+        "lily": "<:brawler_lily:1454328070428299294>",
+        "melodie": "<:brawler_melodie:1454328069459542098>",
+        "angelo": "<:brawler_angelo:1454328067861385321>",
+        "kit": "<:brawler_kit:1454328067043491891>",
+        "larrylawrie": "<:brawler_larrylawrie:1454328064787087532>",
+        "mico": "<:brawler_mico:1454328063864082525>",
+        "charlie": "<:brawler_charlie:1454328062916165736>",
+        "chuck": "<:brawler_chuck:1454328061909532834>",
+        "pearl": "<:brawler_pearl:1454328060940783669>",
+        "cordelius": "<:brawler_cordelius:1454328060198387984>",
+        "doug": "<:brawler_doug:1454328058990432454>",
+        "maisie": "<:brawler_maisie:1454328058017349642>",
+        "hank": "<:brawler_hank:1454328057132482687>",
+        "willow": "<:brawler_willow:1454328056188506327>",
+        "rt": "<:brawler_rt:1454328054506852548>",
+        "buster": "<:brawler_buster:1454328052925333565>",
+        "mandy": "<:brawler_mandy:1454328051948326995>",
+        "gray": "<:brawler_gray:1454328050329321700>",
+        "chester": "<:brawler_chester:1454328048009740359>",
+        "eve": "<:brawler_eve:1454328046978076682>",
+        "darryl": "<:brawler_darryl:1454328045094568097>",
+        "piper": "<:brawler_piper:1454328044042059919>",
+        "gene": "<:brawler_gene:1454328042972516393>",
+        "mortis": "<:brawler_mortis:1454328042171142420>",
+        "8bit": "<:brawler_8bit:1454328040778891491>",
+        "elprimo": "<:brawler_elprimo:1454328040086573157>",
+        "colt": "<:brawler_colt:1454328038987661423>",
+        "lola": "<:brawler_lola:1454328038002004030>",
+        "fang": "<:brawler_fang:1454328036668346422>",
+        "bo": "<:brawler_bo:1454328035666034899>",
+        "squeak": "<:brawler_squeak:1454328034390704318>",
+        "surge": "<:brawler_surge:1454328032922833018>",
+        "stu": "<:brawler_stu:1454328031807017043>",
+        "colette": "<:brawler_colette:1454328031056494645>",
+        "bull": "<:brawler_bull:1454328030121038040>",
+        "mrp": "<:brawler_mrp:1454328028472672290>",
+        "leon": "<:brawler_leon:1454328027205861537>",
+        "carl": "<:brawler_carl:1454328026107085012>",
+        "bea": "<:brawler_bea:1454328024227905648>",
+        "spike": "<:brawler_spike:1454328023066083509>",
+        "tick": "<:brawler_tick:1454328021472251995>",
+        "crow": "<:brawler_crow:1454328020381860028>",
+        "dynamike": "<:brawler_dynamike:1454328019282821296>",
+        "jessie": "<:brawler_jessie:1454328018301485269>",
+        "jacky": "<:brawler_jacky:1454328017068228719>",
+        "brock": "<:brawler_brock:1454328015604551795>",
+        "ash": "<:brawler_ash:1454328014761492560>",
+        "amber": "<:brawler_amber:1454328013784223755>",
+        "nita": "<:brawler_nita:1454328012794236981>",
+        "frank": "<:brawler_frank:1454328011917885503>",
+        "bibi": "<:brawler_bibi:1454328010709667934>",
+        "barley": "<:brawler_barley:1454328009309028629>",
+        "nani": "<:brawler_nani:1454328008230965312>",
+        "rosa": "<:brawler_rosa:1454328006914080938>",
+        "emz": "<:brawler_emz:1454328005529833552>",
+        "griff": "<:brawler_griff:1454328004644704413>",
+        "belle": "<:brawler_bella:1454328003315368089>",
+        "gale": "<:brawler_gale:1454328001536987296>",
+        "pam": "<:brawler_pam:1454327999913787505>",
+        "tara": "<:brawler_tara:1454327998835720304>",
+        "ruffs": "<:brawler_ruffs:1454327998076555314>",
+        "edgar": "<:brawler_edgar:1454327997258535105>",
+        "byron": "<:brawler_byron:1454327996323205320>",
+        "max": "<:brawler_max:1454327995467829250>",
+        "lou": "<:brawler_lou:1454327994288967702>",
+        "poco": "<:brawler_poco:1454327993538445478>",
+        "sandy": "<:brawler_sandy:1454327992615440446>",
+        "grom": "<:brawler_grom:1454327991948673126>",
+        "buzz": "<:brawler_buzz:1454327990983856302>",
+        "rico": "<:brawler_rico:1454327990237528115>",
+        "meg": "<:brawler_meg:1454327989113454635>",
+        "sprout": "<:brawler_sprout:1454327988236582995>",
+        "otis": "<:brawler_otis:1454327986638815335>",
+        "janet": "<:brawler_janet:1454327985665740871>",
+        "bonnie": "<:brawler_bonnie:1454327984071774301>",
+        "penny": "<:brawler_penny:1454327983019135129>",
+        "gus": "<:brawler_gus:1454327981685080178>",
+        "sam": "<:brawler_sam:1454327979894247566>"
+    }
 
 ALLOWED_STAFF_ROLES = [
     TOURNEY_ADMIN_ROLE_ID,
@@ -163,9 +277,3 @@ STARR_DROP_LOOT = {
     ]
 }
 
-EMOJIS = { 
-    "coins": "<:bs_coin:1454290949780934678>",        
-    "power_points": "<:bs_power_point:1454291060183400489>",
-    "credits": "<:bs_credit:1454291577190224060>",
-    "brawler": "🥊"
-}
