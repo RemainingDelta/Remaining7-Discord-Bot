@@ -1,6 +1,6 @@
 import random
 # Import the loot tables
-from features.config import MEGA_BOX_LOOT, STARR_DROP_RARITIES, STARR_DROP_LOOT, EMOJIS
+from features.config import MEGA_BOX_LOOT, STARR_DROP_RARITIES, STARR_DROP_LOOT, EMOJIS_CURRENCY
 from database.mongo import (
     add_brawl_coins, 
     add_power_points, 
@@ -21,7 +21,7 @@ async def process_reward(user_id: str, reward: dict):
     r_type = reward["type"]
     
     # 2. GET THE EMOJI (Look it up by type, default to empty string if missing)
-    icon = EMOJIS.get(r_type, "")
+    icon = EMOJIS_CURRENCY.get(r_type, "")
     
     # --- 1. Simple Currency ---
     if r_type == "coins":
@@ -43,7 +43,7 @@ async def process_reward(user_id: str, reward: dict):
         await add_brawl_coins(user_id, amount)
         name = r_type.replace("_", " ").title()
         # Uses the coin icon because it converted to coins
-        return f"{EMOJIS.get('coins')} **Random {name}** (Converted to {amount} Coins)"
+        return f"{EMOJIS_CURRENCY.get('coins')} **Random {name}** (Converted to {amount} Coins)"
 
     # --- 3. Brawlers ---
     elif r_type == "brawler":
@@ -56,7 +56,7 @@ async def process_reward(user_id: str, reward: dict):
             fb_amount = reward.get("fallback_credits", 100)
             await add_credits(user_id, fb_amount)
             # Uses the credits icon for fallback
-            return f"{EMOJIS.get('credits')} **Fallback: {fb_amount} Credits** (Duplicate {reward['rarity'].title()})"
+            return f"{EMOJIS_CURRENCY.get('credits')} **Fallback: {fb_amount} Credits** (Duplicate {reward['rarity'].title()})"
 
 async def open_mega_box(user_id: str):
     """Opens a Mega Box with 10 items."""
