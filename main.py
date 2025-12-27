@@ -44,6 +44,9 @@ async def on_ready():
         await bot.load_extension("features.security")
         print("✅ Loaded Feature: Security (Hacked)")
         
+        await bot.load_extension("features.brawl.commands")
+        print("✅ Loaded Feature: Brawl (Drops)")
+        
     except Exception as e:
         print(f"❌ Error loading features: {e}")
 

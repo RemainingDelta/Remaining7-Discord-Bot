@@ -1,5 +1,7 @@
 import os
+import random
 from dotenv import load_dotenv
+
 
 load_dotenv()
 
@@ -94,4 +96,69 @@ SHOP_DATA = {
         "desc": "Get a personal shoutout in announcements!",
         "price": 12000
     }
+}
+
+MEGA_BOX_LOOT = [
+    {"type": "coins", "amount": 50, "weight": 34.00},
+    {"type": "coins", "amount": 1000, "weight": 0.10},  # Jackpot Coins
+    {"type": "coins", "amount": 500, "weight": 0.50},   # Fallback for Gadget
+    {"type": "coins", "amount": 1000, "weight": 0.30},  # Fallback for Star Power
+    {"type": "coins", "amount": 1000, "weight": 0.10},  # Fallback for Hypercharge
+    {"type": "power_points", "amount": 25, "weight": 20.00},
+    {"type": "power_points", "amount": 1000, "weight": 0.10},
+    {"type": "credits", "amount": 10, "weight": 15.00},
+    {"type": "credits", "amount": 30, "weight": 1.00},
+    # Brawlers (Weight matches drop rate)
+    {"type": "brawler", "rarity": "rare", "fallback_credits": 100, "weight": 1.00},
+    {"type": "brawler", "rarity": "super_rare", "fallback_credits": 200, "weight": 0.50},
+    {"type": "brawler", "rarity": "epic", "fallback_credits": 500, "weight": 0.30},
+    {"type": "brawler", "rarity": "mythic", "fallback_credits": 1000, "weight": 0.20},
+    {"type": "brawler", "rarity": "legendary", "fallback_credits": 2000, "weight": 0.10},
+]
+
+# 2. STARR DROP RARITY CHANCES
+STARR_DROP_RARITIES = {
+    "Rare": 50,
+    "Super Rare": 28,
+    "Epic": 15,
+    "Mythic": 5,
+    "Legendary": 2
+}
+
+# 3. STARR DROP REWARDS (Per Rarity)
+# Cosmetics/XP Doublers removed. 
+# Weights based on your image/text but normalized for "Useful" items only.
+
+STARR_DROP_LOOT = {
+    "Rare": [
+        {"type": "coins", "amount": 50, "weight": 41.9},
+        {"type": "power_points", "amount": 25, "weight": 32.6},
+        {"type": "credits", "amount": 10, "weight": 2.3},
+    ],
+    "Super Rare": [
+        {"type": "coins", "amount": 100, "weight": 42.4},
+        {"type": "power_points", "amount": 50, "weight": 33.1},
+        {"type": "credits", "amount": 30, "weight": 3.3},
+    ],
+    "Epic": [
+        {"type": "coins", "amount": 200, "weight": 21.0},
+        {"type": "power_points", "amount": 100, "weight": 21.0},
+        {"type": "credits", "amount": 150, "weight": 5.3},
+        # Assuming "Random Brawler" slots here or Fallback Coins for Gadgets
+        {"type": "coins", "amount": 500, "weight": 15.8}, # Gadget Fallback
+    ],
+    "Mythic": [
+        {"type": "coins", "amount": 500, "weight": 9.5},
+        {"type": "power_points", "amount": 200, "weight": 19.0},
+        {"type": "credits", "amount": 500, "weight": 6.3}, # High credits
+        {"type": "brawler", "rarity": "mythic", "fallback_credits": 1000, "weight": 2.5},
+        {"type": "coins", "amount": 1000, "weight": 3.2}, # SP Fallback
+    ],
+    "Legendary": [
+        {"type": "credits", "amount": 1000, "weight": 2.17}, # Fallback for Legendary Brawler logic often handled here
+        {"type": "brawler", "rarity": "legendary", "fallback_credits": 2000, "weight": 2.17}, 
+        {"type": "brawler", "rarity": "epic", "fallback_credits": 500, "weight": 8.86}, 
+        {"type": "coins", "amount": 1000, "weight": 16.3}, # Hypercharge Fallback
+        {"type": "coins", "amount": 1000, "weight": 38.0}, # Star Power Fallback
+    ]
 }
