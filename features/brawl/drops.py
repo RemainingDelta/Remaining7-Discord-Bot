@@ -35,33 +35,35 @@ async def process_reward(user_id: str, reward: dict):
 
     # --- Specific Brawler Selection ---
     elif r_type == "brawler":
-        rolled_rarity = reward['rarity'] # e.g., "mythic"
-        rarity_key = rolled_rarity.lower().replace(" ", "_")
+        # NORMALIZATION: Convert "super_rare" -> "Super Rare" to match JSON
+        raw_rarity = reward['rarity']
+        formatted_rarity = raw_rarity.replace("_", " ").title()
+        
+        rarity_key = raw_rarity.lower().replace(" ", "_")
         rarity_emoji = EMOJIS_RARITIES.get(rarity_key, "🥊")
 
-        # Filter the roster for brawlers matching the rolled rarity
-        eligible = [b for b in BRAWLER_ROSTER if b.rarity.lower() == rolled_rarity.lower()]
+        # Filter the roster using a case-insensitive match against the formatted name
+        eligible = [b for b in BRAWLER_ROSTER if b.rarity.lower() == formatted_rarity.lower()]
         
         if not eligible:
-            return f"❌ Error: No brawlers found for rarity {rolled_rarity}"
+            # Debugging error to help identify exactly what failed
+            return f"❌ Error: No brawlers found for rarity '{formatted_rarity}' (from {raw_rarity})"
 
         # Pick a random brawler from that rarity
         selected_brawler = random.choice(eligible)
-        # Look up the brawler's specific emoji from config using their ID
-        b_emoji = EMOJIS_BRAWLERS.get(selected_brawler.id, "🥊")
+        b_emoji = EMOJIS_BRAWLERS.get(selected_brawler.id.lower(), "🥊")
 
         # Try to add to DB (logic handles "new" vs "duplicate")
-        status = await add_brawler_to_user(user_id, selected_brawler.id)
+        status = await add_brawler_to_user(user_id, selected_brawler.id.lower())
         
         if status == "new":
-            return f"{b_emoji} **NEW BRAWLER! {selected_brawler.name} ({rolled_rarity.title()})**"
+            return f"{rarity_emoji} **NEW BRAWLER! {selected_brawler.name} ({formatted_rarity})**"
         else:
-            # Duplicate fallback logic
+            # Duplicate fallback logic: Give credits if user already owns the brawler
             fb_amount = reward.get("fallback_credits", 100)
             await add_credits(user_id, fb_amount)
             credit_icon = EMOJIS_CURRENCY.get("credits", "💳")
             return f"{credit_icon} **{fb_amount} Credits** (Duplicate {selected_brawler.name})"
-
     return "🎁 **Reward Received**"
 
 # --- These functions MUST be defined here for commands.py to find them ---
