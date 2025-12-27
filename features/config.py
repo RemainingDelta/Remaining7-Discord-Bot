@@ -162,3 +162,10 @@ STARR_DROP_LOOT = {
         {"type": "coins", "amount": 1000, "weight": 38.0}, # Star Power Fallback
     ]
 }
+
+EMOJIS = { 
+    "coins": "<:bs_coin:1454290949780934678>",        
+    "power_points": "<:bs_power_point:1454291060183400489>",
+    "credits": "<:bs_credit:1454291577190224060>",
+    "brawler": "🥊"
+}

@@ -136,8 +136,8 @@ This bot requires Python 3.10+ and a MongoDB Atlas database.
     - [x] Update MongoDB schema to support user inventory
     - [x] Create helper function to fetch user collection
   - Phase 2: The Gacha (Summoning)
-    - [ ] Implement RNG logic for weighted rarity drops
-    - [ ] Create slash command to summon using R7 tokens
+    - [x] Implement RNG logic for weighted rarity drops
+    - [x] Create slash command to open mega boxes/star drops
     - [ ] Add logic to deduct tokens and save Brawler
     - [ ] Design embed to display summoned Brawler image
   - Phase 3: Inventory Management
