@@ -26,3 +26,5 @@ def load_brawlers():
     except Exception as e:
         print(f"Error loading brawlers: {e}")
         return []
+    
+BRAWLER_ROSTER = load_brawlers()
