@@ -1,7 +1,6 @@
 import random
 # Import the loot tables
-from features.config import MEGA_BOX_LOOT, STARR_DROP_RARITIES, STARR_DROP_LOOT
-
+from features.config import MEGA_BOX_LOOT, STARR_DROP_RARITIES, STARR_DROP_LOOT, EMOJIS
 from database.mongo import (
     add_brawl_coins, 
     add_power_points, 
@@ -21,39 +20,43 @@ async def process_reward(user_id: str, reward: dict):
     """Interprets the reward dict and updates DB."""
     r_type = reward["type"]
     
-    # 1. Simple Currency
+    # 2. GET THE EMOJI (Look it up by type, default to empty string if missing)
+    icon = EMOJIS.get(r_type, "")
+    
+    # --- 1. Simple Currency ---
     if r_type == "coins":
         await add_brawl_coins(user_id, reward["amount"])
-        return f"**{reward['amount']} Coins**"
+        # 3. ADD {icon} TO THE STRING
+        return f"{icon} **{reward['amount']} Coins**"
     
     elif r_type == "power_points":
         await add_power_points(user_id, reward["amount"])
-        return f"**{reward['amount']} Power Points**"
+        return f"{icon} **{reward['amount']} Power Points**"
     
     elif r_type == "credits":
         await add_credits(user_id, reward["amount"])
-        return f"**{reward['amount']} Credits**"
+        return f"{icon} **{reward['amount']} Credits**"
 
-    # 2. Converted Items (Gadgets/Star Powers -> Coins)
+    # --- 2. Converted Items (Gadgets/Star Powers -> Coins) ---
     elif r_type in ["gadget", "star_power", "hypercharge"]:
         amount = reward["amount"]
         await add_brawl_coins(user_id, amount)
         name = r_type.replace("_", " ").title()
-        return f"**Random {name}** (Converted to {amount} Coins)"
+        # Uses the coin icon because it converted to coins
+        return f"{EMOJIS.get('coins')} **Random {name}** (Converted to {amount} Coins)"
 
-    # 3. Brawlers
+    # --- 3. Brawlers ---
     elif r_type == "brawler":
-        # Placeholder ID. 
         brawler_id = f"random_{reward['rarity']}_brawler" 
-        
         status = await add_brawler_to_user(user_id, brawler_id)
         
         if status == "new":
-            return f"**NEW BRAWLER! ({reward['rarity'].title()})**"
+            return f"{icon} **NEW BRAWLER! ({reward['rarity'].title()})**"
         else:
             fb_amount = reward.get("fallback_credits", 100)
             await add_credits(user_id, fb_amount)
-            return f"**Fallback Reward: {fb_amount} Credits** (Duplicate {reward['rarity'].title()} Brawler)"
+            # Uses the credits icon for fallback
+            return f"{EMOJIS.get('credits')} **Fallback: {fb_amount} Credits** (Duplicate {reward['rarity'].title()})"
 
 async def open_mega_box(user_id: str):
     """Opens a Mega Box with 10 items."""
