@@ -26,17 +26,20 @@ else:
 async def get_user_data(user_id: str):
     """Fetch user doc, creating default if missing."""
     if db is None: return {}
-    doc = await db.users.find_one({"_id": user_id})
+    doc = await db.users.find_one({"_id": str(user_id)})
     if not doc:
         doc = {
-            "_id": user_id, 
+            "_id": str(user_id), 
             "balance": 0,       
             "level": 1, 
             "exp": 0, 
             "inventory": {},    
-            
-            # --- BRAWL GAME DATA ---
-            "brawlers": {},     
+            "brawlers": {
+                "shelly": {
+                    "level": 1,
+                    "obtained_at": datetime.utcnow()
+                }
+            },     
             "currencies": {     
                 "coins": 0,         
                 "power_points": 0,  
@@ -337,10 +340,19 @@ async def add_brawler_to_user(user_id: str, brawler_id: str):
         return "new"
 
 async def get_user_brawlers(user_id: str):
-    """Returns the user's brawler collection."""
-    doc = await get_user_data(user_id)
-    # Safely get 'brawlers', default to empty dict if missing
-    return doc.get("brawlers", {})
+    """Correctly fetches the list of brawler IDs and ensures Shelly is present."""
+    if db is None: return []
+    user_data = await db.users.find_one({"_id": str(user_id)})
+    
+    if user_data and "brawlers" in user_data:
+        owned = list(user_data["brawlers"].keys())
+        # Force add 'shelly' to the list if she's missing for some reason
+        if "shelly" not in [id.lower() for id in owned]:
+            owned.append("shelly")
+        return owned
+    
+    # If user doesn't exist yet, they still technically own Shelly
+    return ["shelly"]
 
 # --- BRAWL CURRENCY HELPERS ---
 
