@@ -132,7 +132,7 @@ This bot requires Python 3.10+ and a MongoDB Atlas database.
 - Brawl Stars Collectible Game (Large)
   - Phase 1: Data & Models
     - [x] Create JSON file for Brawler stats and assets
-    - [ ] Define Python dataclass to load Brawler data
+    - [x] Define Python dataclass to load Brawler data
     - [ ] Update MongoDB schema to support user inventory
     - [ ] Create helper function to fetch user collection
   - Phase 2: The Gacha (Summoning)

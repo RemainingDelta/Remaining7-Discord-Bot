@@ -30,10 +30,18 @@ async def get_user_data(user_id: str):
     if not doc:
         doc = {
             "_id": user_id, 
-            "balance": 0, 
+            "balance": 0,       # R7 Tokens (Global Economy)
             "level": 1, 
             "exp": 0, 
-            "inventory": {} 
+            "inventory": {},    # Global Items (Tickets, etc.)
+            
+            # --- BRAWL GAME DATA ---
+            "brawlers": {},     # Brawler Collection
+            "currencies": {     # Brawl Specific Currencies
+                "coins": 0,         # Brawl Coins (for upgrading brawlers)
+                "power_points": 0,  # Universal Power Points
+                "gems": 0           # Brawl Gems
+            }
         }
         await db.users.insert_one(doc)
     return doc
@@ -287,3 +295,79 @@ async def get_all_blacklisted_users():
     if db is None: return []
     cursor = db.blacklist.find().sort("timestamp", -1)
     return await cursor.to_list(length=None)
+
+
+# --- BRAWLER COLLECTION HELPERS ---
+
+async def add_brawler_to_user(user_id: str, brawler_id: str):
+    """
+    Adds a brawler to the 'brawlers' field.
+    If they already have it, gives Power Points instead.
+    """
+    if db is None: return
+
+    # 1. Check if user already has this brawler in the 'brawlers' object
+    #    We check "brawlers.shelly" instead of "inventory.shelly"
+    user_doc = await db.users.find_one(
+        {"_id": user_id, f"brawlers.{brawler_id}": {"$exists": True}}
+    )
+
+    if user_doc:
+        # --- DUPLICATE LOGIC ---
+        # Give 15 Power Points (stored in currencies)
+        await db.users.update_one(
+            {"_id": user_id},
+            {"$inc": {"currencies.power_points": 15}}
+        )
+        return "duplicate"
+    else:
+        # --- NEW BRAWLER LOGIC ---
+        # Add the brawler object to the 'brawlers' field
+        new_brawler_entry = {
+            "level": 1,
+            "obtained_at": datetime.utcnow()
+        }
+        
+        await db.users.update_one(
+            {"_id": user_id},
+            {"$set": {f"brawlers.{brawler_id}": new_brawler_entry}},
+            upsert=True
+        )
+        return "new"
+
+async def get_user_brawlers(user_id: str):
+    """Returns the user's brawler collection."""
+    doc = await get_user_data(user_id)
+    # Safely get 'brawlers', default to empty dict if missing
+    return doc.get("brawlers", {})
+
+# --- BRAWL CURRENCY HELPERS ---
+
+async def add_brawl_coins(user_id: str, amount: int):
+    """Adds (or removes) Brawl Coins."""
+    if db is None: return
+    await db.users.update_one(
+        {"_id": user_id},
+        {"$inc": {"currencies.coins": amount}}
+    )
+
+async def add_power_points(user_id: str, amount: int):
+    """Adds Universal Power Points."""
+    if db is None: return
+    await db.users.update_one(
+        {"_id": user_id},
+        {"$inc": {"currencies.power_points": amount}}
+    )
+
+async def add_brawl_gems(user_id: str, amount: int):
+    """Adds Brawl Gems."""
+    if db is None: return
+    await db.users.update_one(
+        {"_id": user_id},
+        {"$inc": {"currencies.gems": amount}}
+    )
+    
+async def get_brawl_currencies(user_id: str):
+    """Returns a dictionary of all brawl currencies."""
+    doc = await get_user_data(user_id)
+    return doc.get("currencies", {"coins": 0, "power_points": 0, "gems": 0})
