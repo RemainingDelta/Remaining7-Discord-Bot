@@ -77,6 +77,85 @@ class BrawlerPagination(discord.ui.View):
     @discord.ui.button(label="Page 2", style=discord.ButtonStyle.primary)
     async def page_two(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.edit_message(embed=self.create_embed(2), view=self)
+
+class BrawlerShopSelect(discord.ui.Select):
+    def __init__(self, user_id, rarity, brawlers_to_buy, price):
+        self.user_id = user_id
+        self.price = price
+        # Create select options only for brawlers the user doesn't own
+        options = [
+            discord.SelectOption(
+                label=b.name, 
+                value=b.id, 
+                description=f"Unlock {b.name} for {price} Credits"
+            )
+            for b in brawlers_to_buy[:25] # Discord select limit
+        ]
+        super().__init__(placeholder=f"Pick a {rarity} Brawler to buy...", options=options)
+
+    async def callback(self, interaction: discord.Interaction):
+        if str(interaction.user.id) != self.user_id:
+            return await interaction.response.send_message("You can't use someone else's shop!", ephemeral=True)
+
+        brawler_id = self.values[0]
+        from database.mongo import deduct_credits, add_brawler_to_user
+        
+        # Double check credits and deduct
+        success = await deduct_credits(self.user_id, self.price)
+        if not success:
+            return await interaction.response.send_message(f"❌ You need {self.price} Credits to buy this brawler!", ephemeral=True)
+
+        await add_brawler_to_user(self.user_id, brawler_id)
+        
+        # Find brawler name for the success message
+        b_name = next(b.name for b in BRAWLER_ROSTER if b.id == brawler_id)
+        await interaction.response.send_message(f"🎉 Success! You've unlocked **{b_name}** for **{self.price}** Credits!")
+
+class BuyBrawlerView(discord.ui.View):
+    def __init__(self, user_id, owned_ids):
+        super().__init__(timeout=60)
+        self.user_id = user_id
+        self.owned_ids = owned_ids
+
+    async def open_rarity_shop(self, interaction: discord.Interaction, rarity: str):
+        from features.config import BRAWLER_PRICES
+        price = BRAWLER_PRICES.get(rarity, 0)
+        
+        # Filter: Only brawlers of this rarity NOT in user's owned list
+        available = [b for b in BRAWLER_ROSTER if b.rarity == rarity and b.id.lower() not in self.owned_ids]
+        
+        if not available:
+            return await interaction.response.send_message(f"✨ Impressive! You already own all {rarity} brawlers.", ephemeral=True)
+
+        view = discord.ui.View()
+        view.add_item(BrawlerShopSelect(self.user_id, rarity, available, price))
+        
+        embed = discord.Embed(
+            title=f"🛒 {rarity} Brawler Shop", 
+            description=f"Each brawler here costs **{price} Credits**.\nSelect one below to purchase.", 
+            color=discord.Color.gold()
+        )
+        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+
+    @discord.ui.button(label="Rare", style=discord.ButtonStyle.success)
+    async def buy_rare(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.open_rarity_shop(interaction, "Rare")
+
+    @discord.ui.button(label="Super Rare", style=discord.ButtonStyle.primary)
+    async def buy_super_rare(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.open_rarity_shop(interaction, "Super Rare")
+
+    @discord.ui.button(label="Epic", style=discord.ButtonStyle.secondary)
+    async def buy_epic(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.open_rarity_shop(interaction, "Epic")
+
+    @discord.ui.button(label="Mythic", style=discord.ButtonStyle.danger)
+    async def buy_mythic(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.open_rarity_shop(interaction, "Mythic")
+
+    @discord.ui.button(label="Legendary", style=discord.ButtonStyle.gray)
+    async def buy_legendary(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.open_rarity_shop(interaction, "Legendary")
         
 class BrawlCommands(commands.Cog):
     def __init__(self, bot):
@@ -146,6 +225,73 @@ class BrawlCommands(commands.Cog):
         embed = view.create_embed(1) # Start on Page 1
         
         await interaction.followup.send(embed=embed, view=view)
+        
+    @app_commands.command(name="profile", description="View your Brawl Stars profile and currencies")
+    async def profile(self, interaction: discord.Interaction, user: discord.User = None):
+        await interaction.response.defer()
+        
+        # Use mentioned user or the person running the command
+        target_user = user or interaction.user
+        user_id = str(target_user.id)
+        
+        # 1. Fetch Currency Data
+        from database.mongo import get_brawl_currencies, get_user_brawlers
+        currencies = await get_brawl_currencies(user_id)
+        
+        # 2. Fetch Brawler Progress
+        owned_list = await get_user_brawlers(user_id)
+        total_brawlers = len(BRAWLER_ROSTER)
+        owned_count = len(owned_list)
+        
+        # 3. Get Emojis from Config
+        from features.config import EMOJIS_CURRENCY
+        c_emoji = EMOJIS_CURRENCY.get("coins", "💰")
+        pp_emoji = EMOJIS_CURRENCY.get("power_points", "⚡")
+        cr_emoji = EMOJIS_CURRENCY.get("credits", "💳")
+        gem_emoji = EMOJIS_CURRENCY.get("gems", "💎")
+
+        embed = discord.Embed(
+            title=f"👤 {target_user.name}'s Profile",
+            color=discord.Color.green()
+        )
+        
+        # Display Brawler Progress
+        embed.add_field(
+            name="🗃️ Brawlers Unlocked", 
+            value=f"**{owned_count} / {total_brawlers}**", 
+            inline=False
+        )
+        
+        # Display Currencies
+        currency_text = (
+            f"{c_emoji} **Coins:** {currencies.get('coins', 0):,}\n"
+            f"{pp_emoji} **Power Points:** {currencies.get('power_points', 0):,}\n"
+            f"{cr_emoji} **Credits:** {currencies.get('credits', 0):,}\n"
+        )
+        embed.add_field(name="💰 Currencies", value=currency_text, inline=True)
+
+        if target_user.avatar:
+            embed.set_thumbnail(url=target_user.avatar.url)
+            
+        await interaction.followup.send(embed=embed)
+    
+    @app_commands.command(name="buy_brawler", description="Purchase specific brawlers using your Credits")
+    async def buy_brawler(self, interaction: discord.Interaction):
+        user_id = str(interaction.user.id)
+        # Fetch the current list of owned brawlers
+        owned_ids = await get_user_brawlers(user_id)
+        
+        # Initialize the view with lowercase IDs for easier matching
+        view = BuyBrawlerView(user_id, [id.lower() for id in owned_ids])
+        
+        embed = discord.Embed(
+            title="🛒 Brawler Shop",
+            description="Pick a rarity to see brawlers you haven't unlocked yet!",
+            color=discord.Color.blue()
+        )
+        await interaction.response.send_message(embed=embed, view=view)
+    
+
         
 # This function is required for main.py to load this file as an extension
 async def setup(bot):
