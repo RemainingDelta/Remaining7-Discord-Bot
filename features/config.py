@@ -342,23 +342,21 @@ SHOP_DATA = {
 }
 
 MEGA_BOX_LOOT = [
-    {"type": "coins", "amount": 50, "weight": 34.00},
-    {"type": "coins", "amount": 1000, "weight": 0.10},  # Jackpot Coins
-    {"type": "coins", "amount": 500, "weight": 0.50},   # Fallback for Gadget
-    {"type": "coins", "amount": 1000, "weight": 0.30},  # Fallback for Star Power
-    {"type": "coins", "amount": 1000, "weight": 0.10},  # Fallback for Hypercharge
-    {"type": "power_points", "amount": 25, "weight": 20.00},
-    {"type": "power_points", "amount": 1000, "weight": 0.10},
-    {"type": "credits", "amount": 10, "weight": 15.00},
-    {"type": "credits", "amount": 30, "weight": 1.00},
-    # Brawlers (Weight matches drop rate)
-    {"type": "brawler", "rarity": "rare", "fallback_credits": 100, "weight": 1.00},
-    {"type": "brawler", "rarity": "super_rare", "fallback_credits": 200, "weight": 0.50},
-    {"type": "brawler", "rarity": "epic", "fallback_credits": 500, "weight": 0.30},
-    {"type": "brawler", "rarity": "mythic", "fallback_credits": 1000, "weight": 0.20},
-    {"type": "brawler", "rarity": "legendary", "fallback_credits": 2000, "weight": 0.10},
-]
+    {"type": "coins", "amount": 50, "weight": 60.00},
+    {"type": "power_points", "amount": 25, "weight": 30.00},
+    {"type": "credits", "amount": 5, "weight": 10.00},
 
+    {"type": "credits", "amount": 30, "weight": 0.50},
+    {"type": "coins", "amount": 500, "weight": 0.25},
+    {"type": "coins", "amount": 1000, "weight": 0.05},
+
+    {"type": "brawler", "rarity": "rare", "fallback_credits": 100, "weight": 0.50},
+    {"type": "brawler", "rarity": "super_rare", "fallback_credits": 200, "weight": 0.25},
+    {"type": "brawler", "rarity": "epic", "fallback_credits": 500, "weight": 0.15},
+    {"type": "brawler", "rarity": "mythic", "fallback_credits": 1000, "weight": 0.08},
+    {"type": "brawler", "rarity": "legendary", "fallback_credits": 2000, "weight": 0.02},
+    {"type": "brawler", "rarity": "ultra legendary", "fallback_credits": 3000, "weight": 0.01}, 
+]
 # 2. STARR DROP RARITY CHANCES
 STARR_DROP_RARITIES = {
     "Rare": 50,
