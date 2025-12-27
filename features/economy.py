@@ -174,7 +174,7 @@ class DropView(discord.ui.View):
         await interaction.response.defer(ephemeral=True)
         
         if any(role.id == MODERATOR_ROLE_ID for role in interaction.user.roles):
-            await interaction.followup.send("❌ Staff cannot claim supply drops!", ephemeral=True)
+            await interaction.followup.send("❌ Staff cannot claim supply drops!", ephemeral=False)
             return
         
         if self.claimed:
