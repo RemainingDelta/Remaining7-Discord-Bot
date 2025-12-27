@@ -30,17 +30,18 @@ async def get_user_data(user_id: str):
     if not doc:
         doc = {
             "_id": user_id, 
-            "balance": 0,       # R7 Tokens (Global Economy)
+            "balance": 0,       
             "level": 1, 
             "exp": 0, 
-            "inventory": {},    # Global Items (Tickets, etc.)
+            "inventory": {},    
             
             # --- BRAWL GAME DATA ---
-            "brawlers": {},     # Brawler Collection
-            "currencies": {     # Brawl Specific Currencies
-                "coins": 0,         # Brawl Coins (for upgrading brawlers)
-                "power_points": 0,  # Universal Power Points
-                "gems": 0           # Brawl Gems
+            "brawlers": {},     
+            "currencies": {     
+                "coins": 0,         
+                "power_points": 0,  
+                "gems": 0,
+                "credits": 0       
             }
         }
         await db.users.insert_one(doc)
@@ -367,7 +368,20 @@ async def add_brawl_gems(user_id: str, amount: int):
         {"$inc": {"currencies.gems": amount}}
     )
     
+async def add_credits(user_id: str, amount: int):
+    """Adds (or removes) Credits for unlocking Brawlers."""
+    if db is None: return
+    await db.users.update_one(
+        {"_id": user_id},
+        {"$inc": {"currencies.credits": amount}}
+    )
+    
 async def get_brawl_currencies(user_id: str):
     """Returns a dictionary of all brawl currencies."""
     doc = await get_user_data(user_id)
-    return doc.get("currencies", {"coins": 0, "power_points": 0, "gems": 0})
+    return doc.get("currencies", {
+        "coins": 0, 
+        "power_points": 0, 
+        "gems": 0, 
+        "credits": 0 
+    })
