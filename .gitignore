@@ -3,7 +3,7 @@ config.json
 discloud.config 
 *.db
 *.sqlite
-*.json
+
 
 __pycache__/
 *.pyc
