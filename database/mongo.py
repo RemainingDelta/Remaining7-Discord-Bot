@@ -24,31 +24,41 @@ else:
 # --- CORE USER HELPERS ---
 
 async def get_user_data(user_id: str):
-    """Fetch user doc, creating default if missing."""
-    if db is None: return {}
-    doc = await db.users.find_one({"_id": str(user_id)})
-    if not doc:
-        doc = {
-            "_id": str(user_id), 
-            "balance": 0,       
-            "level": 1, 
-            "exp": 0, 
-            "inventory": {},    
-            "brawlers": {
-                "shelly": {
-                    "level": 1,
-                    "obtained_at": datetime.utcnow()
-                }
-            },     
-            "currencies": {     
-                "coins": 0,         
-                "power_points": 0,  
-                "gems": 0,
-                "credits": 0       
-            }
+    """
+    Fetches user data and performs self-healing checks 
+    to ensure Shelly is always present.
+    """
+    if db is None: return None
+    
+    data = await db.users.find_one({"_id": str(user_id)})
+    
+    if not data:
+        # New User: Create with Shelly Level 1
+        new_user = {
+            "_id": str(user_id),
+            "currencies": {"coins": 100, "power_points": 0, "credits": 0, "gems": 0},
+            "brawlers": {"shelly": {"level": 1}} 
         }
-        await db.users.insert_one(doc)
-    return doc
+        await db.users.insert_one(new_user)
+        return new_user
+
+    # --- SELF-HEALING LOGIC ---
+    # Check if user is missing Shelly (case-insensitive check)
+    brawlers = data.get("brawlers", {})
+    has_shelly = any(k.lower() == "shelly" for k in brawlers.keys())
+    
+    if not has_shelly:
+        # Force write Shelly to the database immediately
+        await db.users.update_one(
+            {"_id": str(user_id)},
+            {"$set": {"brawlers.shelly": {"level": 1}}}
+        )
+        # Update our local data variable so the bot sees it right now
+        if "brawlers" not in data: data["brawlers"] = {}
+        data["brawlers"]["shelly"] = {"level": 1}
+        print(f"✅ Auto-fixed missing Shelly for user {user_id}")
+        
+    return data
 
 async def get_user_balance(user_id: str) -> int:
     doc = await get_user_data(user_id)
@@ -412,3 +422,65 @@ async def deduct_credits(user_id: str, amount: int) -> bool:
         {"$inc": {"currencies.credits": -amount}}
     )
     return True
+
+async def upgrade_brawler_level(user_id: str, brawler_id: str):
+    """
+    Attempts to upgrade a brawler. 
+    Returns a tuple: (Success: bool, Message: str, NewLevel: int)
+    """
+    if db is None: return False, "Database not connected", 0
+    
+    # 1. Fetch User Data
+    user_data = await get_user_data(user_id)
+    if not user_data: return False, "User not found", 0
+    
+    brawlers = user_data.get("brawlers", {})
+    if brawler_id not in brawlers:
+        return False, "You don't own this brawler!", 0
+        
+    current_level = brawlers[brawler_id].get("level", 1)
+    
+    if current_level >= 11:
+        return False, "This brawler is already at MAX Level (11)!", 11
+        
+    # 2. Determine Costs & Import Emojis
+    from features.config import BRAWLER_UPGRADE_COSTS, EMOJIS_CURRENCY
+    
+    # Get custom icons
+    pp_icon = EMOJIS_CURRENCY.get("power_points", "⚡")
+    coin_icon = EMOJIS_CURRENCY.get("coins", "💰")
+    
+    next_level = current_level + 1
+    costs = BRAWLER_UPGRADE_COSTS.get(next_level)
+    
+    if not costs:
+        return False, "Error calculating upgrade costs.", current_level
+
+    required_pp = costs["pp"]
+    required_coins = costs["coins"]
+    
+    user_pp = user_data.get("currencies", {}).get("power_points", 0)
+    user_coins = user_data.get("currencies", {}).get("coins", 0)
+
+    # 3. Check Balances with Custom Emojis
+    if user_pp < required_pp:
+        missing = required_pp - user_pp
+        return False, f"Not enough Power Points! Need **{missing}** more {pp_icon}.", current_level
+        
+    if user_coins < required_coins:
+        missing = required_coins - user_coins
+        return False, f"Not enough Coins! Need **{missing}** more {coin_icon}.", current_level
+
+    # 4. Perform Transaction
+    await db.users.update_one(
+        {"_id": str(user_id)},
+        {
+            "$inc": {
+                "currencies.power_points": -required_pp,
+                "currencies.coins": -required_coins,
+                f"brawlers.{brawler_id}.level": 1
+            }
+        }
+    )
+    
+    return True, "Upgrade Successful!", next_level

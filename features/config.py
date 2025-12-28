@@ -413,3 +413,15 @@ BRAWLER_PRICES = {
     "Ultra Legendary": 5500
 }
 
+BRAWLER_UPGRADE_COSTS = {
+    2:  {"pp": 20,   "coins": 20},
+    3:  {"pp": 30,   "coins": 35},
+    4:  {"pp": 50,   "coins": 75},
+    5:  {"pp": 80,   "coins": 140},
+    6:  {"pp": 130,  "coins": 290},
+    7:  {"pp": 210,  "coins": 480},
+    8:  {"pp": 340,  "coins": 800},
+    9:  {"pp": 550,  "coins": 1250},
+    10: {"pp": 890,  "coins": 1875},
+    11: {"pp": 1440, "coins": 2800}
+}
