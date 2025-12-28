@@ -6,6 +6,8 @@ from .brawlers import BRAWLER_ROSTER
 from .drops import open_mega_box, open_starr_drop
 from database.mongo import get_user_brawlers
 
+SUPERCELL_DISCLAIMER = "This material is unofficial and is not endorsed by Supercell. For more information see Supercell's Fan Content Policy: www.supercell.com/fan-content-policy."
+
 class BrawlerPagination(discord.ui.View):
     """View class to handle switching between Page 1 and Page 2 using buttons."""
     def __init__(self, user_name: str, brawlers_data: dict):
@@ -73,7 +75,8 @@ class BrawlerPagination(discord.ui.View):
                 f_name = f"{r_emoji} {rarity_name}" + (f" (Part {part})" if part > 1 else "")
                 embed.add_field(name=f_name, value=field_value, inline=True)
 
-        embed.set_footer(text=f"Page {page}/2 • Total Owned: {len(self.owned_ids)}")
+        footer_text = f"Page {page}/2 • Total: {len(self.owned_ids)}\n{SUPERCELL_DISCLAIMER}"
+        embed.set_footer(text=footer_text)
         return embed
 
     @discord.ui.button(label="Page 1", style=discord.ButtonStyle.primary)
@@ -238,9 +241,9 @@ class BrawlerUpgradeView(discord.ui.View):
                 self.children[0].disabled = False
                 self.children[0].label = f"Upgrade to Lvl {next_level}"
 
+        embed.set_footer(text=SUPERCELL_DISCLAIMER)
         return embed
 
-    # --- THESE WERE MISSING IN YOUR CODE ---
     @discord.ui.button(label="Upgrade", style=discord.ButtonStyle.green)
     async def upgrade_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         if str(interaction.user.id) != self.user_id:
@@ -287,7 +290,7 @@ class BrawlCommands(commands.Cog):
             description=rewards_text,
             color=discord.Color.red()
         )
-        embed.set_footer(text=f"Opened by {interaction.user.name}", icon_url=interaction.user.avatar.url if interaction.user.avatar else None)
+        embed.set_footer(text=f"Opened by {interaction.user.name}\n{SUPERCELL_DISCLAIMER}", icon_url=interaction.user.avatar.url if interaction.user.avatar else None)
         await interaction.followup.send(embed=embed)
 
     @app_commands.command(name="starrdrop", description="Open a random Starr Drop!")
@@ -315,6 +318,7 @@ class BrawlCommands(commands.Cog):
             description=f"{rarity_emoji} You got: {reward_text}",
             color=colors.get(rarity, 0xffffff)
         )
+        embed.set_footer(text=SUPERCELL_DISCLAIMER)
         await interaction.followup.send(embed=embed)
         
     @app_commands.command(name="brawlers", description="View your collection with levels")
@@ -334,6 +338,7 @@ class BrawlCommands(commands.Cog):
         view = BrawlerPagination(interaction.user.name, brawlers_data)
         embed = view.create_embed(1) 
         
+        embed.set_footer(text=SUPERCELL_DISCLAIMER)
         await interaction.followup.send(embed=embed, view=view)
         
     @app_commands.command(name="profile", description="View your Brawl Stars profile and currencies")
@@ -383,6 +388,7 @@ class BrawlCommands(commands.Cog):
         if target_user.avatar:
             embed.set_thumbnail(url=target_user.avatar.url)
             
+        embed.set_footer(text=SUPERCELL_DISCLAIMER)
         await interaction.followup.send(embed=embed)
     
     @app_commands.command(name="buy_brawler", description="Purchase specific brawlers using your Credits")
@@ -399,6 +405,8 @@ class BrawlCommands(commands.Cog):
             description="Pick a rarity to see brawlers you haven't unlocked yet!",
             color=discord.Color.blue()
         )
+        
+        embed.set_footer(text=SUPERCELL_DISCLAIMER)
         await interaction.response.send_message(embed=embed, view=view)
     
     async def brawler_autocomplete(self, interaction: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
@@ -467,6 +475,7 @@ class BrawlCommands(commands.Cog):
         # Generate initial embed state
         embed = await view.generate_embed()
         
+        embed.set_footer(text=SUPERCELL_DISCLAIMER)
         await interaction.response.send_message(embed=embed, view=view)
     
 
