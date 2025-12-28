@@ -142,6 +142,8 @@ This bot requires Python 3.10+ and a MongoDB Atlas database.
     - [x] Design embed to display summoned Brawler image
   - Phase 3: Inventory Management
     - [x] Create inventory command with pagination view
-    - [ ] Implement command to view specific Brawler details
-    - [ ] Add functionality to lock and favorite Brawlers
-    - [ ] Create command to sort inventory by rarity
+  - Phase 4: Extra additions
+    - [x] Add leveling to brawlers
+    - [ ] Add gadgets
+    - [ ] Add starpowers
+    - [ ] Add hypercharges

@@ -8,13 +8,17 @@ from database.mongo import get_user_brawlers
 
 class BrawlerPagination(discord.ui.View):
     """View class to handle switching between Page 1 and Page 2 using buttons."""
-    def __init__(self, user_name: str, owned_ids: list):
+    def __init__(self, user_name: str, brawlers_data: dict):
         super().__init__(timeout=60)
         self.user_name = user_name
-        # Force all owned IDs to lowercase and strip spaces for safety
-        self.owned_ids = [str(i).lower().strip() for i in owned_ids]
+        
+        # Normalize keys to lowercase to ensure matching works
+        # brawlers_data looks like: {"shelly": {"level": 5}, "colt": {"level": 1}}
+        self.brawlers_data = {k.lower(): v for k, v in brawlers_data.items()}
+        self.owned_ids = list(self.brawlers_data.keys())
 
     def create_embed(self, page: int):
+        # 1. Define Page Groups
         if page == 1:
             rarity_order = ["Starting", "Rare", "Super Rare", "Epic"]
             title_suffix = "(Common - Epic)"
@@ -34,27 +38,29 @@ class BrawlerPagination(discord.ui.View):
         )
 
         for rarity_name in rarity_order:
-            if rarity_name not in categories:
-                continue
-                
-            brawlers_in_rarity = categories[rarity_name]
+            if rarity_name not in categories: continue
+            
             rarity_key = rarity_name.lower().replace(" ", "_")
             r_emoji = EMOJIS_RARITIES.get(rarity_key, "⚪")
             
             field_value = ""
             part = 1
             
-            for b in brawlers_in_rarity:
-                # Compare lowercase ID from JSON to lowercase IDs from DB
+            for b in categories[rarity_name]:
                 b_id_lower = b.id.lower().strip()
                 b_emoji = EMOJIS_BRAWLERS.get(b_id_lower, "❓")
                 
                 # Check ownership
                 is_owned = b_id_lower in self.owned_ids
-                status_icon = "✅" if is_owned else "🔒"
                 
-                line = f"{b_emoji} {b.name} {status_icon}\n"
+                if is_owned:
+                    # Retrieve Level from the dictionary data
+                    lvl = self.brawlers_data[b_id_lower].get("level", 1)
+                    line = f"{b_emoji} **{b.name}** `Lvl {lvl}` ✅\n"
+                else:
+                    line = f"{b_emoji} {b.name} 🔒\n"
 
+                # Safety Check for Field Length
                 if len(field_value) + len(line) > 1000:
                     f_name = f"{r_emoji} {rarity_name}" + (f" (Part {part})" if part > 1 else "")
                     embed.add_field(name=f_name, value=field_value, inline=True)
@@ -77,7 +83,7 @@ class BrawlerPagination(discord.ui.View):
     @discord.ui.button(label="Page 2", style=discord.ButtonStyle.primary)
     async def page_two(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.edit_message(embed=self.create_embed(2), view=self)
-
+        
 class BrawlerShopSelect(discord.ui.Select):
     def __init__(self, user_id, rarity, brawlers_to_buy, price):
         self.user_id = user_id
@@ -157,6 +163,110 @@ class BuyBrawlerView(discord.ui.View):
     async def buy_legendary(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.open_rarity_shop(interaction, "Legendary")
         
+class BrawlerUpgradeView(discord.ui.View):
+    def __init__(self, user_id, brawler_id, brawler_name, brawler_emoji):
+        super().__init__(timeout=120)
+        self.user_id = user_id
+        self.brawler_id = brawler_id
+        self.brawler_name = brawler_name
+        self.brawler_emoji = brawler_emoji
+
+    async def generate_embed(self):
+        """Generates the dashboard showing current stats and upgrade costs."""
+        from database.mongo import get_user_data
+        from features.config import BRAWLER_UPGRADE_COSTS, EMOJIS_CURRENCY
+
+        # 1. Fetch fresh data
+        user_data = await get_user_data(self.user_id)
+        brawlers = user_data.get("brawlers", {})
+        currencies = user_data.get("currencies", {})
+        
+        # 2. Get Stats
+        current_level = brawlers.get(self.brawler_id, {}).get("level", 1)
+        user_coins = currencies.get("coins", 0)
+        user_pp = currencies.get("power_points", 0)
+        
+        # Emojis
+        coin_icon = EMOJIS_CURRENCY.get("coins", "💰")
+        pp_icon = EMOJIS_CURRENCY.get("power_points", "⚡")
+
+        # 3. Build Embed
+        embed = discord.Embed(
+            title=f"{self.brawler_emoji} Upgrade {self.brawler_name}",
+            color=discord.Color.gold()
+        )
+        
+        # Resource Wallet
+        embed.add_field(
+            name="🏦 Your Resources",
+            value=f"{pp_icon} **{user_pp:,}**\n{coin_icon} **{user_coins:,}**",
+            inline=True
+        )
+
+        # 4. Determine Next Level logic
+        if current_level >= 11:
+            embed.description = "🔥 **MAXIMUM LEVEL REACHED!** 🔥"
+            embed.color = discord.Color.red()
+            
+            # Disable upgrade button if maxed
+            # We check if children exist to be safe, but they should exist now!
+            if self.children:
+                self.children[0].disabled = True
+                self.children[0].label = "Max Level"
+        else:
+            next_level = current_level + 1
+            costs = BRAWLER_UPGRADE_COSTS.get(next_level, {"coins": 99999, "pp": 99999})
+            c_cost = costs['coins']
+            pp_cost = costs['pp']
+            
+            # Level Transition Visual
+            embed.add_field(
+                name="🆙 Level Progress",
+                value=f"**Lvl {current_level}** ➡️ **Lvl {next_level}**",
+                inline=True
+            )
+            
+            # Cost Visual
+            embed.add_field(
+                name="📉 Upgrade Cost",
+                value=f"{pp_icon} **{pp_cost:,}**\n{coin_icon} **{c_cost:,}**",
+                inline=True
+            )
+            
+            # Enable button and set label
+            if self.children:
+                self.children[0].disabled = False
+                self.children[0].label = f"Upgrade to Lvl {next_level}"
+
+        return embed
+
+    # --- THESE WERE MISSING IN YOUR CODE ---
+    @discord.ui.button(label="Upgrade", style=discord.ButtonStyle.green)
+    async def upgrade_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if str(interaction.user.id) != self.user_id:
+            return await interaction.response.send_message("This isn't your session!", ephemeral=True)
+
+        from database.mongo import upgrade_brawler_level
+        
+        # Perform the DB upgrade
+        success, msg, new_level = await upgrade_brawler_level(self.user_id, self.brawler_id)
+        
+        if success:
+            # Refresh the view to show the NEW level and NEXT costs
+            embed = await self.generate_embed()
+            await interaction.response.edit_message(embed=embed, view=self)
+        else:
+            # Send error ephemeral so we don't ruin the nice dashboard
+            await interaction.response.send_message(f"❌ {msg}", ephemeral=True)
+
+    @discord.ui.button(label="Exit", style=discord.ButtonStyle.red)
+    async def exit_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if str(interaction.user.id) != self.user_id:
+            return await interaction.response.send_message("This isn't your session!", ephemeral=True)
+        
+        await interaction.response.edit_message(content="❌ **Upgrade Session Closed.**", view=None, embed=None)
+        self.stop()
+             
 class BrawlCommands(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
@@ -207,22 +317,22 @@ class BrawlCommands(commands.Cog):
         )
         await interaction.followup.send(embed=embed)
         
-    @app_commands.command(name="brawlers", description="View your collection with buttons")
+    @app_commands.command(name="brawlers", description="View your collection with levels")
     async def brawlers(self, interaction: discord.Interaction):
         await interaction.response.defer()
         
         user_id = str(interaction.user.id)
-        # Fetch data from mongo.py
-        raw_owned = await get_user_brawlers(user_id)
         
-        # Extract keys if raw_owned is a dictionary, otherwise use as list
-        if isinstance(raw_owned, dict):
-            owned_ids = list(raw_owned.keys())
-        else:
-            owned_ids = raw_owned
-            
-        view = BrawlerPagination(interaction.user.name, owned_ids)
-        embed = view.create_embed(1) # Start on Page 1
+        # Import get_user_data to fetch the full dictionary (including levels)
+        from database.mongo import get_user_data
+        
+        user_doc = await get_user_data(user_id)
+        # Get the brawlers dict, e.g., {'shelly': {'level': 1}, 'colt': {'level': 5}}
+        brawlers_data = user_doc.get("brawlers", {})
+        
+        # Pass the dictionary to the view
+        view = BrawlerPagination(interaction.user.name, brawlers_data)
+        embed = view.create_embed(1) 
         
         await interaction.followup.send(embed=embed, view=view)
         
@@ -289,6 +399,74 @@ class BrawlCommands(commands.Cog):
             description="Pick a rarity to see brawlers you haven't unlocked yet!",
             color=discord.Color.blue()
         )
+        await interaction.response.send_message(embed=embed, view=view)
+    
+    async def brawler_autocomplete(self, interaction: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
+        try:
+            user_id = str(interaction.user.id)
+            # Fetch user's data
+            owned_raw = await get_user_brawlers(user_id)
+            
+            # CRITICAL FIX: Handle both Dictionary (new system) and List (old system)
+            if isinstance(owned_raw, dict):
+                owned_ids = list(owned_raw.keys())
+            elif isinstance(owned_raw, list):
+                owned_ids = owned_raw
+            else:
+                return [] 
+                
+            choices = []
+            for b_id in owned_ids:
+                # Normalize DB ID to lowercase string for safe matching
+                clean_id = str(b_id).lower()
+                
+                # Robust Search: Find brawler in roster matching the ID (case-insensitive)
+                b_obj = next((b for b in BRAWLER_ROSTER if b.id.lower() == clean_id), None)
+                
+                if b_obj:
+                    # Filter: Check if user's typed text matches the Brawler's Name
+                    if current.lower() in b_obj.name.lower():
+                        choices.append(app_commands.Choice(name=b_obj.name, value=b_obj.id))
+            
+            return choices[:25] # Discord limit
+            
+        except Exception as e:
+            # This prevents the "Loading options failed" popup
+            print(f"Autocomplete Error: {e}")
+            return []
+
+    @app_commands.command(name="upgrade", description="Interactive upgrade menu for your brawlers")
+    @app_commands.autocomplete(brawler=brawler_autocomplete) # Uses your existing autocomplete
+    async def upgrade(self, interaction: discord.Interaction, brawler: str):
+        # 'brawler' is the ID from autocomplete
+        brawler_id = brawler.lower()
+        
+        # Get basic info for the view setup
+        b_obj = next((b for b in BRAWLER_ROSTER if b.id.lower() == brawler_id), None)
+        
+        if not b_obj:
+            return await interaction.response.send_message("❌ Brawler not found.", ephemeral=True)
+
+        user_id = str(interaction.user.id)
+        
+        # Check if they own it first
+        from database.mongo import get_user_brawlers
+        owned_list = await get_user_brawlers(user_id)
+        
+        # Handle dict vs list return types from previous mongo iterations
+        if isinstance(owned_list, dict): owned_list = list(owned_list.keys())
+        owned_list = [x.lower() for x in owned_list]
+
+        if brawler_id not in owned_list:
+            return await interaction.response.send_message(f"🔒 You don't own **{b_obj.name}** yet!", ephemeral=True)
+
+        # Initialize View
+        b_emoji = EMOJIS_BRAWLERS.get(brawler_id, "✨")
+        view = BrawlerUpgradeView(user_id, brawler_id, b_obj.name, b_emoji)
+        
+        # Generate initial embed state
+        embed = await view.generate_embed()
+        
         await interaction.response.send_message(embed=embed, view=view)
     
 
