@@ -2,13 +2,17 @@ import random
 # Import your new config dictionaries
 from features.config import (
     MEGA_BOX_LOOT, STARR_DROP_RARITIES, STARR_DROP_LOOT, 
-    EMOJIS_CURRENCY, EMOJIS_RARITIES, EMOJIS_BRAWLERS
+    EMOJIS_CURRENCY, EMOJIS_RARITIES, EMOJIS_BRAWLERS,     
+    EMOJI_GADGET_DEFAULT, EMOJI_STARPOWER_DEFAULT 
 )
 from database.mongo import (
     add_brawl_coins, 
     add_power_points, 
     add_credits, 
-    add_brawler_to_user
+    add_brawler_to_user,
+    get_user_data,           # Add these
+    add_gadget_to_user, 
+    add_star_power_to_user
 )
 from .brawlers import load_brawlers
 
@@ -35,35 +39,69 @@ async def process_reward(user_id: str, reward: dict):
 
     # --- Specific Brawler Selection ---
     elif r_type == "brawler":
-        # NORMALIZATION: Convert "super_rare" -> "Super Rare" to match JSON
         raw_rarity = reward['rarity']
         formatted_rarity = raw_rarity.replace("_", " ").title()
-        
         rarity_key = raw_rarity.lower().replace(" ", "_")
         rarity_emoji = EMOJIS_RARITIES.get(rarity_key, "🥊")
 
-        # Filter the roster using a case-insensitive match against the formatted name
         eligible = [b for b in BRAWLER_ROSTER if b.rarity.lower() == formatted_rarity.lower()]
         
         if not eligible:
-            # Debugging error to help identify exactly what failed
-            return f"❌ Error: No brawlers found for rarity '{formatted_rarity}' (from {raw_rarity})"
+            return f"❌ Error: No brawlers found for rarity '{formatted_rarity}'"
 
-        # Pick a random brawler from that rarity
         selected_brawler = random.choice(eligible)
-        b_emoji = EMOJIS_BRAWLERS.get(selected_brawler.id.lower(), "🥊")
-
-        # Try to add to DB (logic handles "new" vs "duplicate")
         status = await add_brawler_to_user(user_id, selected_brawler.id.lower())
         
         if status == "new":
             return f"{rarity_emoji} **NEW BRAWLER! {selected_brawler.name} ({formatted_rarity})**"
         else:
-            # Duplicate fallback logic: Give credits if user already owns the brawler
             fb_amount = reward.get("fallback_credits", 100)
             await add_credits(user_id, fb_amount)
             credit_icon = EMOJIS_CURRENCY.get("credits", "💳")
             return f"{credit_icon} **{fb_amount} Credits** (Duplicate {selected_brawler.name})"
+
+    # --- Gadget & Star Power Logic ---
+    if r_type in ["gadget", "star_power"]:
+        # Use the global get_user_data imported at the top
+        user_doc = await get_user_data(user_id)
+        owned_brawlers = user_doc.get("brawlers", {})
+
+        req_lvl = 7 if r_type == "gadget" else 9
+        db_field = "gadgets" if r_type == "gadget" else "star_powers"
+        
+        # Use the global default icons imported at the top
+        default_icon = EMOJI_GADGET_DEFAULT if r_type == "gadget" else EMOJI_STARPOWER_DEFAULT
+        
+        eligible = []
+        for b_id, data in owned_brawlers.items():
+            b_info = next((b for b in BRAWLER_ROSTER if b.id == b_id), None)
+            if not b_info: continue
+            
+            master_list = b_info.gadgets if r_type == "gadget" else b_info.star_powers
+            current_owned = data.get(db_field, [])
+            
+            if data.get("level", 1) >= req_lvl and len(current_owned) < len(master_list):
+                missing = [item for item in master_list if item not in current_owned]
+                if missing:
+                    eligible.append((b_id, b_info.name, missing))
+
+        if not eligible:
+            coin_icon = EMOJIS_CURRENCY.get("coins", "💰")
+            await add_brawl_coins(user_id, 1000)
+            return f"{coin_icon} **1,000 Coins** (No eligible brawlers)"
+
+        b_id, b_name, missing = random.choice(eligible)
+        choice = random.choice(missing)
+        
+        # Update database using globally imported functions
+        if r_type == "gadget":
+            await add_gadget_to_user(user_id, b_id, choice)
+        else:
+            await add_star_power_to_user(user_id, b_id, choice)
+
+        readable_type = r_type.replace('_', ' ').upper()
+        return f"{default_icon} **NEW {readable_type}: {choice}** ({b_name})"
+
     return "🎁 **Reward Received**"
 
 # --- These functions MUST be defined here for commands.py to find them ---
