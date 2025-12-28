@@ -3,7 +3,7 @@
 ## Overview 
 **Name:** Remaining7 Discord Bot      
 **Contributors:** nightwarrior5, remainingdelta    
-**Objective:** To provide comprehensive economy, moderation, leveling, and event management features for the Remaining7 community Discord server, supporting over 15k members. The bot centralizes server engagement by offering an R7 token system, automatic rewards, a redemption shop with real-world item tracking, and tools for competitive tournament management.   
+**Objective:** To provide comprehensive economy, moderation, leveling, and event management features for the Remaining7 community Discord server, supporting over 15k members. The bot centralizes server engagement by offering an R7 token system, automatic rewards, a redemption shop with real-world item tracking, tools for competitive tournament management, and an interactive Brawl Stars collection minigame.
 **Server Link:** https://discord.gg/6MzrjS2X8k
 
 ---
@@ -81,6 +81,17 @@
 - **Recovery:** `/unhacked` removes the timeout and database flag once the user recovers their account.
 - **Visibility:** `/hackedlist` displays all currently flagged/compromised users.
 
+### Brawl Stars Collection System
+- **Gacha Summoning:** 
+  - `/megabox`: Simulates opening a Brawl Stars Mega Box with weighted rarity drops (Rare to Ultra Legendary) and multiple items per pull.
+  - `/starrdrop`: Opens a single Starr Drop with rarity upgrade animations.
+  - **Drop Logic:** Features intelligent RNG that handles duplicate brawlers (converting them to resources) and tracks user inventory in MongoDB.
+- **Collection Management:** - `/brawlers`: Displays the user's owned brawlers in a paginated, interactive embed view.
+  - **Dynamic Status:** Visual indicators for locked vs. unlocked brawlers and current level display.
+- **Progression & Leveling:** 
+  - **Leveling System:** Users can upgrade brawlers from Level 1 using resources (Coins/Power Points).
+  - **Resource Management:** Dedicated tracking for game-specific currencies distinct from the main R7 Token economy.
+
 ### Admin Tools
 - **Permissions:** `/perm` (Admin) Add/Remove ability to use staff commands.
 
@@ -142,8 +153,8 @@ This bot requires Python 3.10+ and a MongoDB Atlas database.
     - [x] Design embed to display summoned Brawler image
   - Phase 3: Inventory Management
     - [x] Create inventory command with pagination view
-  - Phase 4: Extra additions
-    - [x] Add leveling to brawlers
+  - Phase 4: Expansion & Depth
+    - [x] Add leveling system to brawlers
     - [ ] Add gadgets
     - [ ] Add starpowers
     - [ ] Add hypercharges
