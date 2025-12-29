@@ -159,6 +159,10 @@ if MODE == "REAL":
         "gus": "<:brawler_gus:1454345452161077248>",
         "sam": "<:brawler_sam:1454345450646798487>"
     }
+    
+    EMOJI_GADGET_DEFAULT = "<:gadget_default:1454928295970738237>"
+    EMOJI_STARPOWER_DEFAULT = "<:starpower_default:1454928295035670713>"
+    
 else:
     TOURNEY_CATEGORY_ID = 1442029102185054290    
     PRE_TOURNEY_CATEGORY_ID = 1448871112598618203
@@ -311,6 +315,9 @@ else:
         "gus": "<:brawler_gus:1454327981685080178>",
         "sam": "<:brawler_sam:1454327979894247566>"
     }
+    
+    EMOJI_GADGET_DEFAULT = "<:gadget_default:1454928324945121523>"
+    EMOJI_STARPOWER_DEFAULT = "<:starpower_default:1454928324248993952>"
 
 ALLOWED_STAFF_ROLES = [
     TOURNEY_ADMIN_ROLE_ID,
@@ -345,6 +352,9 @@ MEGA_BOX_LOOT = [
     {"type": "coins", "amount": 50, "weight": 60.00},
     {"type": "power_points", "amount": 25, "weight": 30.00},
     {"type": "credits", "amount": 5, "weight": 10.00},
+    
+    {"type": "gadget", "weight": 2.00},  
+    {"type": "star_power", "weight": 1.00},
 
     {"type": "credits", "amount": 30, "weight": 0.50},
     {"type": "coins", "amount": 500, "weight": 0.25},
@@ -389,18 +399,17 @@ STARR_DROP_LOOT = {
         {"type": "coins", "amount": 500, "weight": 15.8}, # Gadget Fallback
     ],
     "Mythic": [
-        {"type": "coins", "amount": 500, "weight": 9.5},
-        {"type": "power_points", "amount": 200, "weight": 19.0},
-        {"type": "credits", "amount": 500, "weight": 6.3}, # High credits
-        {"type": "brawler", "rarity": "mythic", "fallback_credits": 1000, "weight": 2.5},
-        {"type": "coins", "amount": 1000, "weight": 3.2}, # SP Fallback
+        {"type": "gadget", "weight": 15.82}, # Added direct Gadget roll
+        {"type": "coins", "amount": 500, "weight": 9.49},
+        {"type": "power_points", "amount": 200, "weight": 18.99},
+        {"type": "credits", "amount": 500, "weight": 6.33},
+        {"type": "brawler", "rarity": "mythic", "fallback_credits": 1000, "weight": 2.53},
     ],
     "Legendary": [
-        {"type": "credits", "amount": 1000, "weight": 2.17}, # Fallback for Legendary Brawler logic often handled here
+        {"type": "star_power", "weight": 38.04}, # Added direct Star Power roll
         {"type": "brawler", "rarity": "legendary", "fallback_credits": 2000, "weight": 2.17}, 
         {"type": "brawler", "rarity": "epic", "fallback_credits": 500, "weight": 8.86}, 
-        {"type": "coins", "amount": 1000, "weight": 16.3}, # Hypercharge Fallback
-        {"type": "coins", "amount": 1000, "weight": 38.0}, # Star Power Fallback
+        {"type": "credits", "amount": 1000, "weight": 2.17},
     ]
 }
 
