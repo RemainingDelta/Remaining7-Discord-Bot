@@ -33,11 +33,17 @@ async def get_user_data(user_id: str):
     data = await db.users.find_one({"_id": str(user_id)})
     
     if not data:
-        # New User: Create with Shelly Level 1
+        # New User: Create with Shelly Level 1 and empty lists
         new_user = {
             "_id": str(user_id),
             "currencies": {"coins": 100, "power_points": 0, "credits": 0, "gems": 0},
-            "brawlers": {"shelly": {"level": 1}} 
+            "brawlers": {
+                "shelly": {
+                    "level": 1, 
+                    "gadgets": [], 
+                    "star_powers": []
+                }
+            } 
         }
         await db.users.insert_one(new_user)
         return new_user
@@ -48,15 +54,10 @@ async def get_user_data(user_id: str):
     has_shelly = any(k.lower() == "shelly" for k in brawlers.keys())
     
     if not has_shelly:
-        # Force write Shelly to the database immediately
         await db.users.update_one(
             {"_id": str(user_id)},
-            {"$set": {"brawlers.shelly": {"level": 1}}}
+            {"$set": {"brawlers.shelly": {"level": 1, "gadgets": [], "star_powers": []}}}
         )
-        # Update our local data variable so the bot sees it right now
-        if "brawlers" not in data: data["brawlers"] = {}
-        data["brawlers"]["shelly"] = {"level": 1}
-        print(f"✅ Auto-fixed missing Shelly for user {user_id}")
         
     return data
 
@@ -484,3 +485,19 @@ async def upgrade_brawler_level(user_id: str, brawler_id: str):
     )
     
     return True, "Upgrade Successful!", next_level
+
+async def add_gadget_to_user(user_id: str, brawler_id: str, gadget_name: str):
+    """Adds a gadget to a brawler's gadgets array."""
+    if db is None: return
+    await db.users.update_one(
+        {"_id": str(user_id)},
+        {"$addToSet": {f"brawlers.{brawler_id}.gadgets": gadget_name}} # Prevents duplicates
+    )
+
+async def add_star_power_to_user(user_id: str, brawler_id: str, sp_name: str):
+    """Adds a star power to a brawler's star_powers array."""
+    if db is None: return
+    await db.users.update_one(
+        {"_id": str(user_id)},
+        {"$addToSet": {f"brawlers.{brawler_id}.star_powers": sp_name}}
+    )

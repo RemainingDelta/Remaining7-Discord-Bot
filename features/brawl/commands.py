@@ -1,7 +1,7 @@
 import discord
 from discord import app_commands
 from discord.ext import commands
-from features.config import EMOJIS_BRAWLERS, EMOJIS_RARITIES, EMOJIS_DROPS
+from features.config import EMOJI_GADGET_DEFAULT, EMOJI_STARPOWER_DEFAULT, EMOJIS_BRAWLERS, EMOJIS_RARITIES, EMOJIS_DROPS
 from .brawlers import BRAWLER_ROSTER
 from .drops import open_mega_box, open_starr_drop
 from database.mongo import get_user_brawlers
@@ -55,21 +55,31 @@ class BrawlerPagination(discord.ui.View):
                 # Check ownership
                 is_owned = b_id_lower in self.owned_ids
                 
+                # Inside commands.py -> BrawlerPagination -> create_embed
                 if is_owned:
-                    # Retrieve Level from the dictionary data
-                    lvl = self.brawlers_data[b_id_lower].get("level", 1)
-                    line = f"{b_emoji} **{b.name}** `Lvl {lvl}` ✅\n"
-                else:
-                    line = f"{b_emoji} {b.name} 🔒\n"
+                    # Retrieve Level and specialized items from the brawler data
+                    b_data = self.brawlers_data[b_id_lower]
+                    lvl = b_data.get("level", 1)
+                    owned_gadgets = b_data.get("gadgets", []) # New field
+                    owned_sps = b_data.get("star_powers", []) # New field
+                    
+                    # Create a small status string: e.g., "Lvl 7 | 🟢 1/2 | ⭐ 0/2"
+                    status = f"`Lvl {lvl}`"
+                    if owned_gadgets:
+                        status += f" | {EMOJI_GADGET_DEFAULT} {len(owned_gadgets)}/2"
+                    if owned_sps:
+                        status += f" | {EMOJI_STARPOWER_DEFAULT} {len(owned_sps)}/2"
+                        
+                    line = f"{b_emoji} **{b.name}** {status} ✅\n"
 
-                # Safety Check for Field Length
-                if len(field_value) + len(line) > 1000:
-                    f_name = f"{r_emoji} {rarity_name}" + (f" (Part {part})" if part > 1 else "")
-                    embed.add_field(name=f_name, value=field_value, inline=True)
-                    field_value = line
-                    part += 1
-                else:
-                    field_value += line
+                    # Safety Check for Field Length
+                    if len(field_value) + len(line) > 1000:
+                        f_name = f"{r_emoji} {rarity_name}" + (f" (Part {part})" if part > 1 else "")
+                        embed.add_field(name=f_name, value=field_value, inline=True)
+                        field_value = line
+                        part += 1
+                    else:
+                        field_value += line
 
             if field_value:
                 f_name = f"{r_emoji} {rarity_name}" + (f" (Part {part})" if part > 1 else "")
@@ -211,35 +221,45 @@ class BrawlerUpgradeView(discord.ui.View):
             embed.description = "🔥 **MAXIMUM LEVEL REACHED!** 🔥"
             embed.color = discord.Color.red()
             
-            # Disable upgrade button if maxed
-            # We check if children exist to be safe, but they should exist now!
             if self.children:
                 self.children[0].disabled = True
                 self.children[0].label = "Max Level"
         else:
+            # next_level is ONLY defined here
             next_level = current_level + 1
             costs = BRAWLER_UPGRADE_COSTS.get(next_level, {"coins": 99999, "pp": 99999})
             c_cost = costs['coins']
             pp_cost = costs['pp']
             
-            # Level Transition Visual
             embed.add_field(
                 name="🆙 Level Progress",
                 value=f"**Lvl {current_level}** ➡️ **Lvl {next_level}**",
                 inline=True
             )
             
-            # Cost Visual
             embed.add_field(
                 name="📉 Upgrade Cost",
                 value=f"{pp_icon} **{pp_cost:,}**\n{coin_icon} **{c_cost:,}**",
                 inline=True
             )
             
-            # Enable button and set label
             if self.children:
                 self.children[0].disabled = False
                 self.children[0].label = f"Upgrade to Lvl {next_level}"
+
+            # MOVE THE MILESTONE CHECKS INSIDE THIS ELSE BLOCK
+            if next_level == 7:
+                embed.add_field(
+                    name="🔓 Milestone Unlock", 
+                    value=f"At Level 7, you can now find **Gadgets** {EMOJI_GADGET_DEFAULT} in boxes!", 
+                    inline=False
+                )
+            elif next_level == 9:
+                embed.add_field(
+                    name="🔓 Milestone Unlock", 
+                    value=f"At Level 9, you can now find **Star Powers** {EMOJI_STARPOWER_DEFAULT} in boxes!", 
+                    inline=False
+                )
 
         embed.set_footer(text=SUPERCELL_DISCLAIMER)
         return embed
@@ -290,7 +310,7 @@ class BrawlCommands(commands.Cog):
             description=rewards_text,
             color=discord.Color.red()
         )
-        embed.set_footer(text=f"Opened by {interaction.user.name}\n{SUPERCELL_DISCLAIMER}", icon_url=interaction.user.avatar.url if interaction.user.avatar else None)
+        embed.set_footer(text=SUPERCELL_DISCLAIMER)
         await interaction.followup.send(embed=embed)
 
     @app_commands.command(name="starrdrop", description="Open a random Starr Drop!")
@@ -345,39 +365,50 @@ class BrawlCommands(commands.Cog):
     async def profile(self, interaction: discord.Interaction, user: discord.User = None):
         await interaction.response.defer()
         
-        # Use mentioned user or the person running the command
         target_user = user or interaction.user
         user_id = str(target_user.id)
         
-        # 1. Fetch Currency Data
-        from database.mongo import get_brawl_currencies, get_user_brawlers
-        currencies = await get_brawl_currencies(user_id)
+        # 1. Fetch Data
+        from database.mongo import get_user_data
+        user_doc = await get_user_data(user_id)
         
-        # 2. Fetch Brawler Progress
-        owned_list = await get_user_brawlers(user_id)
+        currencies = user_doc.get("currencies", {})
+        brawlers_data = user_doc.get("brawlers", {})
+        
+        # 2. Calculate Progress
         total_brawlers = len(BRAWLER_ROSTER)
-        owned_count = len(owned_list)
+        owned_count = len(brawlers_data)
         
-        # 3. Get Emojis from Config
-        from features.config import EMOJIS_CURRENCY
+        total_gadgets_owned = 0
+        total_sps_owned = 0
+        
+        for b_id, data in brawlers_data.items():
+            total_gadgets_owned += len(data.get("gadgets", []))
+            total_sps_owned += len(data.get("star_powers", []))
+            
+        # Max possible is total_brawlers * 2
+        max_items = total_brawlers * 2
+
+        # 3. Get Emojis
+        from features.config import EMOJIS_CURRENCY, EMOJI_GADGET_DEFAULT, EMOJI_STARPOWER_DEFAULT
         c_emoji = EMOJIS_CURRENCY.get("coins", "💰")
         pp_emoji = EMOJIS_CURRENCY.get("power_points", "⚡")
         cr_emoji = EMOJIS_CURRENCY.get("credits", "💳")
-        gem_emoji = EMOJIS_CURRENCY.get("gems", "💎")
 
         embed = discord.Embed(
             title=f"👤 {target_user.name}'s Profile",
             color=discord.Color.green()
         )
         
-        # Display Brawler Progress
-        embed.add_field(
-            name="🗃️ Brawlers Unlocked", 
-            value=f"**{owned_count} / {total_brawlers}**", 
-            inline=False
+        # Collection Stats Field
+        collection_text = (
+            f"🗃️ **Brawlers:** {owned_count} / {total_brawlers}\n"
+            f"{EMOJI_GADGET_DEFAULT} **Gadgets:** {total_gadgets_owned} / {max_items}\n"
+            f"{EMOJI_STARPOWER_DEFAULT} **Star Powers:** {total_sps_owned} / {max_items}"
         )
+        embed.add_field(name="📊 Collection Progress", value=collection_text, inline=False)
         
-        # Display Currencies
+        # Currencies Field
         currency_text = (
             f"{c_emoji} **Coins:** {currencies.get('coins', 0):,}\n"
             f"{pp_emoji} **Power Points:** {currencies.get('power_points', 0):,}\n"
