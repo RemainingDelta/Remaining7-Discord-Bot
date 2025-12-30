@@ -501,3 +501,11 @@ async def add_star_power_to_user(user_id: str, brawler_id: str, sp_name: str):
         {"_id": str(user_id)},
         {"$addToSet": {f"brawlers.{brawler_id}.star_powers": sp_name}}
     )
+
+async def add_hypercharge_to_user(user_id: str, brawler_id: str, hc_name: str):
+    """Adds a hypercharge to a brawler's data."""
+    if db is None: return
+    await db.users.update_one(
+        {"_id": str(user_id)},
+        {"$set": {f"brawlers.{brawler_id}.hypercharge": hc_name}}
+    )

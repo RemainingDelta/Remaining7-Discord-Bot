@@ -3,16 +3,18 @@ import random
 from features.config import (
     MEGA_BOX_LOOT, STARR_DROP_RARITIES, STARR_DROP_LOOT, 
     EMOJIS_CURRENCY, EMOJIS_RARITIES, EMOJIS_BRAWLERS,     
-    EMOJI_GADGET_DEFAULT, EMOJI_STARPOWER_DEFAULT 
+    EMOJI_GADGET_DEFAULT, EMOJI_STARPOWER_DEFAULT, 
+    EMOJI_HYPERCHARGE_DEFAULT
 )
 from database.mongo import (
     add_brawl_coins, 
     add_power_points, 
     add_credits, 
     add_brawler_to_user,
-    get_user_data,           # Add these
+    get_user_data,           
     add_gadget_to_user, 
-    add_star_power_to_user
+    add_star_power_to_user,
+    add_hypercharge_to_user
 )
 from .brawlers import load_brawlers
 
@@ -60,50 +62,63 @@ async def process_reward(user_id: str, reward: dict):
             credit_icon = EMOJIS_CURRENCY.get("credits", "💳")
             return f"{credit_icon} **{fb_amount} Credits** (Duplicate {selected_brawler.name})"
 
-    # --- Gadget & Star Power Logic ---
-    if r_type in ["gadget", "star_power"]:
-        # Use the global get_user_data imported at the top
+    # --- Gadget, Star Power, & Hypercharge Logic ---
+    if r_type in ["gadget", "star_power", "hypercharge"]:
         user_doc = await get_user_data(user_id)
         owned_brawlers = user_doc.get("brawlers", {})
 
-        req_lvl = 7 if r_type == "gadget" else 9
-        db_field = "gadgets" if r_type == "gadget" else "star_powers"
-        
-        # Use the global default icons imported at the top
-        default_icon = EMOJI_GADGET_DEFAULT if r_type == "gadget" else EMOJI_STARPOWER_DEFAULT
+        # Determine level requirement
+        if r_type == "gadget": req_lvl = 7
+        elif r_type == "star_power": req_lvl = 9
+        else: req_lvl = 11  # Hypercharge requirement
+
+        icon = EMOJI_GADGET_DEFAULT if r_type == "gadget" else \
+               EMOJI_STARPOWER_DEFAULT if r_type == "star_power" else \
+               EMOJI_HYPERCHARGE_DEFAULT
         
         eligible = []
         for b_id, data in owned_brawlers.items():
-            b_info = next((b for b in BRAWLER_ROSTER if b.id == b_id), None)
+            # Robust matching: ensure b_id from DB matches roster
+            b_info = next((b for b in BRAWLER_ROSTER if b.id.lower() == b_id.lower()), None)
             if not b_info: continue
             
-            master_list = b_info.gadgets if r_type == "gadget" else b_info.star_powers
-            current_owned = data.get(db_field, [])
-            
-            if data.get("level", 1) >= req_lvl and len(current_owned) < len(master_list):
-                missing = [item for item in master_list if item not in current_owned]
-                if missing:
-                    eligible.append((b_id, b_info.name, missing))
+            b_level = data.get("level", 1)
+
+            if r_type == "hypercharge":
+                # Ensure the JSON brawler actually has a Hypercharge name
+                master_hc = getattr(b_info, 'hypercharge', "")
+                current_hc = data.get("hypercharge", "")
+                
+                # Check Level 11 and ensure it's not already owned
+                if b_level >= 11 and master_hc and not current_hc:
+                    eligible.append((b_id, b_info.name, master_hc))
+            else:
+                master_list = b_info.gadgets if r_type == "gadget" else b_info.star_powers
+                current_owned = data.get("gadgets" if r_type == "gadget" else "star_powers", [])
+                
+                if b_level >= req_lvl and len(current_owned) < len(master_list):
+                    missing = [item for item in master_list if item not in current_owned]
+                    if missing:
+                        eligible.append((b_id, b_info.name, random.choice(missing)))
 
         if not eligible:
             coin_icon = EMOJIS_CURRENCY.get("coins", "💰")
             await add_brawl_coins(user_id, 1000)
             return f"{coin_icon} **1,000 Coins** (No eligible brawlers)"
 
-        b_id, b_name, missing = random.choice(eligible)
-        choice = random.choice(missing)
+        # Select winner
+        target_b_id, b_name, choice = random.choice(eligible)
         
-        # Update database using globally imported functions
-        if r_type == "gadget":
-            await add_gadget_to_user(user_id, b_id, choice)
+        if r_type == "hypercharge":
+            await add_hypercharge_to_user(user_id, target_b_id, choice)
+        elif r_type == "gadget":
+            await add_gadget_to_user(user_id, target_b_id, choice)
         else:
-            await add_star_power_to_user(user_id, b_id, choice)
+            await add_star_power_to_user(user_id, target_b_id, choice)
 
-        readable_type = r_type.replace('_', ' ').upper()
-        return f"{default_icon} **NEW {readable_type}: {choice}** ({b_name})"
+        return f"{icon} **NEW {r_type.upper()}: {choice}** ({b_name})"
 
     return "🎁 **Reward Received**"
-
 # --- These functions MUST be defined here for commands.py to find them ---
 
 async def open_mega_box(user_id: str):
