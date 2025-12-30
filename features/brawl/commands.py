@@ -1,7 +1,7 @@
 import discord
 from discord import app_commands
 from discord.ext import commands
-from features.config import EMOJI_GADGET_DEFAULT, EMOJI_STARPOWER_DEFAULT, EMOJIS_BRAWLERS, EMOJIS_RARITIES, EMOJIS_DROPS
+from features.config import EMOJI_GADGET_DEFAULT, EMOJI_STARPOWER_DEFAULT, EMOJI_HYPERCHARGE_DEFAULT, EMOJIS_BRAWLERS, EMOJIS_RARITIES, EMOJIS_DROPS
 from .brawlers import BRAWLER_ROSTER
 from .drops import open_mega_box, open_starr_drop
 from database.mongo import get_user_brawlers
@@ -57,19 +57,20 @@ class BrawlerPagination(discord.ui.View):
                 
                 # Inside commands.py -> BrawlerPagination -> create_embed
                 if is_owned:
-                    # Retrieve Level and specialized items from the brawler data
                     b_data = self.brawlers_data[b_id_lower]
                     lvl = b_data.get("level", 1)
-                    owned_gadgets = b_data.get("gadgets", []) # New field
-                    owned_sps = b_data.get("star_powers", []) # New field
-                    
-                    # Create a small status string: e.g., "Lvl 7 | 🟢 1/2 | ⭐ 0/2"
+                    owned_gadgets = b_data.get("gadgets", [])
+                    owned_sps = b_data.get("star_powers", [])
+                    has_hc = b_data.get("hypercharge") # Check if they own the HC
+
                     status = f"`Lvl {lvl}`"
                     if owned_gadgets:
                         status += f" | {EMOJI_GADGET_DEFAULT} {len(owned_gadgets)}/2"
                     if owned_sps:
                         status += f" | {EMOJI_STARPOWER_DEFAULT} {len(owned_sps)}/2"
-                        
+                    if has_hc:
+                        status += f" | {EMOJI_HYPERCHARGE_DEFAULT} 1/1"
+                    
                     line = f"{b_emoji} **{b.name}** {status} ✅\n"
 
                     # Safety Check for Field Length
@@ -249,17 +250,11 @@ class BrawlerUpgradeView(discord.ui.View):
 
             # MOVE THE MILESTONE CHECKS INSIDE THIS ELSE BLOCK
             if next_level == 7:
-                embed.add_field(
-                    name="🔓 Milestone Unlock", 
-                    value=f"At Level 7, you can now find **Gadgets** {EMOJI_GADGET_DEFAULT} in boxes!", 
-                    inline=False
-                )
+                embed.add_field(name="🔓 Unlock", value=f"Lvl 7 unlocks **Gadgets** {EMOJI_GADGET_DEFAULT}", inline=False)
             elif next_level == 9:
-                embed.add_field(
-                    name="🔓 Milestone Unlock", 
-                    value=f"At Level 9, you can now find **Star Powers** {EMOJI_STARPOWER_DEFAULT} in boxes!", 
-                    inline=False
-                )
+                embed.add_field(name="🔓 Unlock", value=f"Lvl 9 unlocks **Star Powers** {EMOJI_STARPOWER_DEFAULT}", inline=False)
+            elif next_level == 11:
+                embed.add_field(name="🔓 Unlock", value=f"Lvl 11 unlocks **Hypercharges** {EMOJI_HYPERCHARGE_DEFAULT}", inline=False)
 
         embed.set_footer(text=SUPERCELL_DISCLAIMER)
         return embed
@@ -381,10 +376,19 @@ class BrawlCommands(commands.Cog):
         
         total_gadgets_owned = 0
         total_sps_owned = 0
+        total_hcs_owned = 0
+        total_hcs_possible = 0
         
         for b_id, data in brawlers_data.items():
             total_gadgets_owned += len(data.get("gadgets", []))
             total_sps_owned += len(data.get("star_powers", []))
+            
+            if data.get("hypercharge"): total_hcs_owned += 1
+    
+            # Check JSON to see how many brawlers actually have a Hypercharge defined
+            b_info = next((b for b in BRAWLER_ROSTER if b.id == b_id), None)
+            if b_info and getattr(b_info, 'hypercharge', ""):
+                total_hcs_possible += 1
             
         # Max possible is total_brawlers * 2
         max_items = total_brawlers * 2
@@ -404,7 +408,8 @@ class BrawlCommands(commands.Cog):
         collection_text = (
             f"🗃️ **Brawlers:** {owned_count} / {total_brawlers}\n"
             f"{EMOJI_GADGET_DEFAULT} **Gadgets:** {total_gadgets_owned} / {max_items}\n"
-            f"{EMOJI_STARPOWER_DEFAULT} **Star Powers:** {total_sps_owned} / {max_items}"
+            f"{EMOJI_STARPOWER_DEFAULT} **Star Powers:** {total_sps_owned} / {max_items}\n"
+            f"{EMOJI_HYPERCHARGE_DEFAULT} **Hypercharges:** {total_hcs_owned} / {total_hcs_possible}"
         )
         embed.add_field(name="📊 Collection Progress", value=collection_text, inline=False)
         

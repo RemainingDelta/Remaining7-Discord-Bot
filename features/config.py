@@ -162,6 +162,7 @@ if MODE == "REAL":
     
     EMOJI_GADGET_DEFAULT = "<:gadget_default:1454928295970738237>"
     EMOJI_STARPOWER_DEFAULT = "<:starpower_default:1454928295035670713>"
+    EMOJI_HYPERCHARGE_DEFAULT = "<:hypercharge_default:1455686351466004694>"
     
 else:
     TOURNEY_CATEGORY_ID = 1442029102185054290    
@@ -318,6 +319,7 @@ else:
     
     EMOJI_GADGET_DEFAULT = "<:gadget_default:1454928324945121523>"
     EMOJI_STARPOWER_DEFAULT = "<:starpower_default:1454928324248993952>"
+    EMOJI_HYPERCHARGE_DEFAULT = "<:hypercharge_default:1455686652017115196>"
 
 ALLOWED_STAFF_ROLES = [
     TOURNEY_ADMIN_ROLE_ID,
@@ -349,16 +351,19 @@ SHOP_DATA = {
 }
 
 MEGA_BOX_LOOT = [
-    {"type": "coins", "amount": 50, "weight": 60.00},
-    {"type": "power_points", "amount": 25, "weight": 30.00},
+    {"type": "coins", "amount": 50, "weight": 45.00},
+    {"type": "power_points", "amount": 25, "weight": 45.00},
     {"type": "credits", "amount": 5, "weight": 10.00},
     
-    {"type": "gadget", "weight": 2.00},  
-    {"type": "star_power", "weight": 1.00},
+    {"type": "gadget", "weight": 0.20},  
+    {"type": "star_power", "weight": 0.10},
+    {"type": "hypercharge", "weight": 0.02},
 
     {"type": "credits", "amount": 30, "weight": 0.50},
     {"type": "coins", "amount": 500, "weight": 0.25},
     {"type": "coins", "amount": 1000, "weight": 0.05},
+    {"type": "power_points", "amount": 500, "weight": 0.25},
+    {"type": "power_points", "amount": 1000, "weight": 0.05},
 
     {"type": "brawler", "rarity": "rare", "fallback_credits": 100, "weight": 0.50},
     {"type": "brawler", "rarity": "super_rare", "fallback_credits": 200, "weight": 0.25},
@@ -406,7 +411,8 @@ STARR_DROP_LOOT = {
         {"type": "brawler", "rarity": "mythic", "fallback_credits": 1000, "weight": 2.53},
     ],
     "Legendary": [
-        {"type": "star_power", "weight": 38.04}, # Added direct Star Power roll
+        {"type": "hypercharge", "weight": 16.3},
+        {"type": "star_power", "weight": 38.04}, 
         {"type": "brawler", "rarity": "legendary", "fallback_credits": 2000, "weight": 2.17}, 
         {"type": "brawler", "rarity": "epic", "fallback_credits": 500, "weight": 8.86}, 
         {"type": "credits", "amount": 1000, "weight": 2.17},
