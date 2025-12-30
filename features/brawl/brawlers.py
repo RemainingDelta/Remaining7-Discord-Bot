@@ -10,6 +10,7 @@ class Brawler:
     emoji_name: str
     gadgets: list    
     star_powers: list
+    hypercharge: str
 
 def load_brawlers():
     script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -24,7 +25,8 @@ def load_brawlers():
             rarity=item['rarity'], 
             emoji_name=item['emoji_name'],
             gadgets=item.get('gadgets', []),      
-            star_powers=item.get('star_powers', []) 
+            star_powers=item.get('star_powers', []),
+            hypercharge=item.get('hypercharge', "")
         ) for item in data]
     except Exception as e:
         print(f"Error loading brawlers: {e}")

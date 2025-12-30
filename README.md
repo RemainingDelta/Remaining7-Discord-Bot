@@ -3,7 +3,7 @@
 ## Overview 
 **Name:** Remaining7 Discord Bot      
 **Contributors:** nightwarrior5, remainingdelta    
-**Objective:** To provide comprehensive economy, moderation, leveling, and event management features for the Remaining7 community Discord server, supporting over 15k members. The bot centralizes server engagement by offering an R7 token system, automatic rewards, a redemption shop with real-world item tracking, tools for competitive tournament management, and an interactive Brawl Stars collection minigame.
+**Objective:** To provide comprehensive economy, moderation, leveling, and event management features for the Remaining7 community Discord server, supporting over 15k members. The bot centralizes server engagement by offering an R7 token system, automatic rewards, a redemption shop with real-world item tracking, tools for competitive tournament management, and an interactive Brawl Stars collection minigame.    
 **Server Link:** https://discord.gg/6MzrjS2X8k
 
 ---
@@ -156,6 +156,8 @@ This bot requires Python 3.10+ and a MongoDB Atlas database.
     - [x] Create inventory command with pagination view
   - Phase 4: Expansion & Depth
     - [x] Add leveling system to brawlers
-    - [ ] Add gadgets
-    - [ ] Add starpowers
-    - [ ] Add hypercharges
+    - [x] Add gadgets
+    - [x] Add starpowers
+    - [x] Add hypercharges
+    - [ ] Update drops to also include brawler emoji when unlocking a new brawlwe
+    - [ ] Add buying gadgets, starpowers, hypercharges
