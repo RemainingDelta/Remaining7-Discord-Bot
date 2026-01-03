@@ -54,8 +54,12 @@ async def process_reward(user_id: str, reward: dict):
         selected_brawler = random.choice(eligible)
         status = await add_brawler_to_user(user_id, selected_brawler.id.lower())
         
+        # Get the specific brawler emoji
+        b_emoji = EMOJIS_BRAWLERS.get(selected_brawler.id.lower(), "❓")
+        
         if status == "new":
-            return f"{rarity_emoji} **NEW BRAWLER! {selected_brawler.name} ({formatted_rarity})**"
+            # Format: <rarity emoji> NEW BRAWLER! <brawler emoji> <brawler> (<rarity>)
+            return f"{rarity_emoji} **NEW BRAWLER!** {b_emoji} **{selected_brawler.name}** ({formatted_rarity})"
         else:
             fb_amount = reward.get("fallback_credits", 100)
             await add_credits(user_id, fb_amount)
