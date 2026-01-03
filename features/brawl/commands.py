@@ -377,18 +377,14 @@ class BrawlCommands(commands.Cog):
         total_gadgets_owned = 0
         total_sps_owned = 0
         total_hcs_owned = 0
-        total_hcs_possible = 0
         
-        for b_id, data in brawlers_data.items():
+        total_hcs_possible = sum(1 for b in BRAWLER_ROSTER if getattr(b, 'hypercharge', None))
+        
+        for data in brawlers_data.values():
             total_gadgets_owned += len(data.get("gadgets", []))
             total_sps_owned += len(data.get("star_powers", []))
             
             if data.get("hypercharge"): total_hcs_owned += 1
-    
-            # Check JSON to see how many brawlers actually have a Hypercharge defined
-            b_info = next((b for b in BRAWLER_ROSTER if b.id == b_id), None)
-            if b_info and getattr(b_info, 'hypercharge', ""):
-                total_hcs_possible += 1
             
         # Max possible is total_brawlers * 2
         max_items = total_brawlers * 2
