@@ -79,7 +79,7 @@
     { "id": "moe", "name": "Moe", "rarity": "Mythic", "emoji_name": "brawler_moe", "gadgets": ["Rat Pack", "Drill Rush"], "star_powers": ["Squeaky Clean", "Deep Digger"], "hypercharge": "The Big Cheese" },
     { "id": "clancy", "name": "Clancy", "rarity": "Mythic", "emoji_name": "brawler_clancy", "gadgets": ["Snappy Shooting", "Tactical Roll"], "star_powers": ["Heavy Hitter", "Recoil Control"], "hypercharge": "Recall of Duty" },
     { "id": "juju", "name": "Juju", "rarity": "Mythic", "emoji_name": "brawler_juju", "gadgets": ["Spirit Guide", "Ethereal Dash"], "star_powers": ["Soul Link", "Shadow Cloak"], "hypercharge": "Bokor" },
-    { "id": "gigi", "name": "Gigi", "rarity": "Mythic", "emoji_name": "brawler_gigi", "gadgets": ["Star Shine", "Glitter Bomb"], "star_powers": ["Main Stage", "Spotlight"], "hypercharge": "" },
+    { "id": "gigi", "name": "Gigi", "rarity": "Mythic", "emoji_name": "brawler_gigi", "gadgets": ["Star Shine", "Glitter Bomb"], "star_powers": ["Main Stage", "Spotlight"], "hypercharge": "Pas De Deux" },
     { "id": "finx", "name": "Finx", "rarity": "Mythic", "emoji_name": "brawler_finx", "gadgets": ["Quick Fix", "Blade Storm"], "star_powers": ["Sharp Edge", "Swift Strike"], "hypercharge": "Temporal Traveling" },
     { "id": "ollie", "name": "Ollie", "rarity": "Mythic", "emoji_name": "brawler_ollie", "gadgets": ["Oil Slick", "Flash Bang"], "star_powers": ["Slippery", "High Octane"], "hypercharge": "Ain't No Half-Supering" },
     { "id": "lumi", "name": "Lumi", "rarity": "Mythic", "emoji_name": "brawler_lumi", "gadgets": ["Light Show", "Prism Wall"], "star_powers": ["Refraction", "Spectrum"], "hypercharge": "Drum Solo" },
