@@ -159,5 +159,6 @@ This bot requires Python 3.10+ and a MongoDB Atlas database.
     - [x] Add gadgets
     - [x] Add starpowers
     - [x] Add hypercharges 
-    - [ ] Update drops to also include brawler emoji when unlocking a new brawler
-    - [ ] Add buying gadgets, starpowers, hypercharges
+    - [x] Update drops to also include brawler emoji when unlocking a new brawler
+    - [x] Add buying gadgets, starpowers, hypercharges
+    - [ ] View for specific brawler 
