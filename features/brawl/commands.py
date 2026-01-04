@@ -284,6 +284,224 @@ class BrawlerUpgradeView(discord.ui.View):
         
         await interaction.response.edit_message(content="❌ **Upgrade Session Closed.**", view=None, embed=None)
         self.stop()
+        
+class ConfirmPurchaseView(discord.ui.View):
+    def __init__(self, user_id, item_name, item_type, cost, brawler_id, parent_view):
+        super().__init__(timeout=30)
+        self.user_id = user_id
+        self.item_name = item_name
+        self.item_type = item_type
+        self.cost = cost
+        self.brawler_id = brawler_id
+        self.parent_view = parent_view # Reference to the shop view to go back
+
+    @discord.ui.button(label="Confirm Purchase", style=discord.ButtonStyle.green, emoji="🛒")
+    async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if str(interaction.user.id) != self.user_id: return
+        
+        from database.mongo import (
+            deduct_coins, add_gadget_to_user, 
+            add_star_power_to_user, add_hypercharge_to_user
+        )
+
+        # 1. Try to pay
+        success = await deduct_coins(self.user_id, self.cost)
+        if not success:
+            return await interaction.response.send_message("❌ Insufficient Coins!", ephemeral=True)
+
+        # 2. Add the Item
+        if self.item_type == "gadget":
+            await add_gadget_to_user(self.user_id, self.brawler_id, self.item_name)
+        elif self.item_type == "star_power":
+            await add_star_power_to_user(self.user_id, self.brawler_id, self.item_name)
+        elif self.item_type == "hypercharge":
+            await add_hypercharge_to_user(self.user_id, self.brawler_id, self.item_name)
+
+        # 3. Refresh the Shop (Go back to main view)
+        await interaction.response.send_message(f"✅ Successfully bought **{self.item_name}**!", ephemeral=True)
+        
+        # Refresh the parent view's data
+        await self.parent_view.refresh_state()
+        await interaction.message.edit(embed=self.parent_view.generate_embed(), view=self.parent_view)
+
+    @discord.ui.button(label="Cancel", style=discord.ButtonStyle.red)
+    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if str(interaction.user.id) != self.user_id: return
+        # Go back to the shop without buying
+        await interaction.response.edit_message(embed=self.parent_view.generate_embed(), view=self.parent_view)
+
+class AbilitySelect(discord.ui.Select):
+    def __init__(self, options):
+        super().__init__(placeholder="Select an ability to purchase...", options=options)
+
+    async def callback(self, interaction: discord.Interaction):
+        # Extract data from the value string "type|name|cost"
+        i_type, i_name, i_cost = self.values[0].split("|")
+        cost = int(i_cost)
+        
+        view: AbilityShopView = self.view # Type hint for the parent view
+        
+        if str(interaction.user.id) != view.user_id:
+            return await interaction.response.send_message("Not your shop!", ephemeral=True)
+
+        # Create the Confirmation Embed
+        confirm_embed = discord.Embed(
+            title=f"Confirm Purchase",
+            description=(
+                f"Are you sure you want to buy **{i_name}**?\n\n"
+                f"📉 Cost: **{cost:,}** Coins\n"
+                f"💰 Your Balance: **{view.user_coins:,}** Coins"
+            ),
+            color=discord.Color.gold()
+        )
+        
+        # Swap to Confirmation View
+        confirm_view = ConfirmPurchaseView(
+            view.user_id, i_name, i_type, cost, view.brawler_id, view
+        )
+        await interaction.response.edit_message(embed=confirm_embed, view=confirm_view)
+
+class AbilityShopView(discord.ui.View):
+    def __init__(self, user_id, brawler_id, brawler_name, brawler_emoji):
+        super().__init__(timeout=120)
+        self.user_id = user_id
+        self.brawler_id = brawler_id
+        self.brawler_name = brawler_name
+        self.brawler_emoji = brawler_emoji # We need this for the Upgrade View transition
+        self.user_coins = 0
+        self.empty_state_reason = ""
+        self.can_upgrade = False
+
+    async def refresh_state(self):
+        """Fetches fresh data, builds dropdown, and determines empty state logic."""
+        from database.mongo import get_user_data
+        from features.config import (
+            EMOJI_GADGET_DEFAULT, EMOJI_STARPOWER_DEFAULT, EMOJI_HYPERCHARGE_DEFAULT
+        )
+        
+        # 1. Fetch Data
+        user_data = await get_user_data(self.user_id)
+        self.user_coins = user_data.get("currencies", {}).get("coins", 0)
+        brawler_data = user_data.get("brawlers", {}).get(self.brawler_id, {})
+        
+        # 2. Get Master Data
+        b_info = next((b for b in BRAWLER_ROSTER if b.id == self.brawler_id), None)
+        
+        current_lvl = brawler_data.get("level", 1)
+        owned_gadgets = brawler_data.get("gadgets", [])
+        owned_sps = brawler_data.get("star_powers", [])
+        has_hc = brawler_data.get("hypercharge")
+
+        # 3. Build Options & Analyze Missing Items
+        options = []
+        missing_reasons = []
+
+        # --- Gadgets Check ---
+        g_missing = [g for g in b_info.gadgets if g not in owned_gadgets]
+        if g_missing:
+            if current_lvl >= 7:
+                for g in g_missing:
+                    options.append(discord.SelectOption(
+                        label=f"Gadget: {g}", 
+                        description="Cost: 1,000 Coins",
+                        emoji=EMOJI_GADGET_DEFAULT,
+                        value=f"gadget|{g}|1000"
+                    ))
+            else:
+                missing_reasons.append(f"• Reach **Lvl 7** to unlock {len(g_missing)} Gadgets {EMOJI_GADGET_DEFAULT}")
+
+        # --- Star Power Check ---
+        sp_missing = [sp for sp in b_info.star_powers if sp not in owned_sps]
+        if sp_missing:
+            if current_lvl >= 9:
+                for sp in sp_missing:
+                    options.append(discord.SelectOption(
+                        label=f"SP: {sp}", 
+                        description="Cost: 2,000 Coins", 
+                        emoji=EMOJI_STARPOWER_DEFAULT,
+                        value=f"star_power|{sp}|2000"
+                    ))
+            else:
+                missing_reasons.append(f"• Reach **Lvl 9** to unlock {len(sp_missing)} Star Powers {EMOJI_STARPOWER_DEFAULT}")
+
+        # --- Hypercharge Check ---
+        hc_name = getattr(b_info, 'hypercharge', None)
+        if hc_name and not has_hc:
+            if current_lvl >= 11:
+                options.append(discord.SelectOption(
+                    label=f"Hypercharge: {hc_name}", 
+                    description="Cost: 5,000 Coins", 
+                    emoji=EMOJI_HYPERCHARGE_DEFAULT,
+                    value=f"hypercharge|{hc_name}|5000"
+                ))
+            else:
+                missing_reasons.append(f"• Reach **Lvl 11** to unlock Hypercharge {EMOJI_HYPERCHARGE_DEFAULT}")
+
+        # 4. Update UI Components
+        self.clear_items()
+
+        # If we have stuff to buy, show the dropdown
+        if options:
+            self.add_item(AbilitySelect(options))
+            self.empty_state_reason = ""
+            self.can_upgrade = False # Don't distract them if they can buy stuff (optional choice)
+        
+        # If no options, determine WHY
+        else:
+            if not missing_reasons:
+                self.empty_state_reason = "🎉 **Maxed Out!** You own every ability for this brawler."
+                self.can_upgrade = False
+            else:
+                # They are missing stuff but level is too low
+                self.empty_state_reason = "🔒 **Unlock Requirements:**\n" + "\n".join(missing_reasons)
+                self.can_upgrade = True
+
+        # 5. Add Dynamic Upgrade Button if needed
+        # We also allow upgrading even if options exist, just in case they want to check stats
+        # (But your prompt asked specifically "if you need to upgrade put a button")
+        if self.can_upgrade:
+            self.add_item(self.upgrade_button)
+
+    # Define the button as a property or detached method to add dynamically
+    @discord.ui.button(label="Go to Upgrade", style=discord.ButtonStyle.blurple, emoji="🆙", row=1)
+    async def upgrade_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if str(interaction.user.id) != self.user_id: 
+            return await interaction.response.send_message("Not your session!", ephemeral=True)
+            
+        # Transition to BrawlerUpgradeView
+        # We need to import it here to avoid circular dependencies if defined in same file
+        # assuming BrawlerUpgradeView is in the same file:
+        view = BrawlerUpgradeView(
+            self.user_id, 
+            self.brawler_id, 
+            self.brawler_name, 
+            self.brawler_emoji
+        )
+        embed = await view.generate_embed()
+        await interaction.response.edit_message(embed=embed, view=view)
+
+    def generate_embed(self):
+        from features.config import EMOJIS_CURRENCY, EMOJI_GADGET_DEFAULT, EMOJI_STARPOWER_DEFAULT, EMOJI_HYPERCHARGE_DEFAULT
+        c_icon = EMOJIS_CURRENCY.get("coins", "💰")
+        
+        embed = discord.Embed(
+            title=f"{EMOJI_GADGET_DEFAULT}{EMOJI_STARPOWER_DEFAULT}{EMOJI_HYPERCHARGE_DEFAULT} Ability Shop: {self.brawler_name}",
+            color=discord.Color.green()
+        )
+        
+        # Header with Wallet
+        embed.description = f"🏦 **Balance:** {c_icon} {self.user_coins:,}\n"
+
+        if self.empty_state_reason:
+            # Show the specific reason (Maxed OR Level Too Low)
+            embed.description += f"\n{self.empty_state_reason}"
+            if self.can_upgrade:
+                embed.color = discord.Color.orange()
+        else:
+            embed.description += "\nSelect an ability below to purchase it instantly."
+
+        embed.set_footer(text=SUPERCELL_DISCLAIMER)
+        return embed
              
 class BrawlCommands(commands.Cog):
     def __init__(self, bot):
@@ -508,6 +726,33 @@ class BrawlCommands(commands.Cog):
         embed = await view.generate_embed()
         
         embed.set_footer(text=SUPERCELL_DISCLAIMER)
+        await interaction.response.send_message(embed=embed, view=view)
+        
+    @app_commands.command(name="buy_ability", description="Buy Gadgets, Star Powers, and Hypercharges")
+    @app_commands.autocomplete(brawler=brawler_autocomplete) 
+    async def buy_ability(self, interaction: discord.Interaction, brawler: str):
+        brawler_id = brawler.lower()
+        
+        # 1. Validation
+        from database.mongo import get_user_brawlers
+        owned = await get_user_brawlers(str(interaction.user.id))
+        
+        if isinstance(owned, dict): owned_ids = list(owned.keys())
+        else: owned_ids = owned
+            
+        if brawler_id not in [x.lower() for x in owned_ids]:
+            return await interaction.response.send_message("❌ You don't own this brawler!", ephemeral=True)
+
+        b_obj = next((b for b in BRAWLER_ROSTER if b.id == brawler_id), None)
+        
+        # 2. Get Emoji
+        b_emoji = EMOJIS_BRAWLERS.get(brawler_id, "✨")
+
+        # 3. Setup View
+        view = AbilityShopView(str(interaction.user.id), brawler_id, b_obj.name, b_emoji)
+        await view.refresh_state() 
+        
+        embed = view.generate_embed()
         await interaction.response.send_message(embed=embed, view=view)
     
 
