@@ -424,6 +424,22 @@ async def deduct_credits(user_id: str, amount: int) -> bool:
     )
     return True
 
+async def deduct_coins(user_id, amount):
+    """Safely deducts coins if balance is sufficient."""
+    if db is None: return False
+
+    user_data = await get_user_data(user_id)
+    current_coins = user_data.get("currencies", {}).get("coins", 0)
+    
+    if current_coins >= amount:
+        new_balance = current_coins - amount
+        await db.users.update_one(
+            {"_id": str(user_id)},
+            {"$set": {"currencies.coins": new_balance}}
+        )
+        return True
+    return False
+
 async def upgrade_brawler_level(user_id: str, brawler_id: str):
     """
     Attempts to upgrade a brawler. 
