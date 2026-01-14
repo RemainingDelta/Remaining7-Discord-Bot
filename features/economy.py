@@ -326,6 +326,7 @@ class Economy(commands.Cog):
 
         tracking_keys = {
             "brawl pass": "brawlpass_redeemed_count",
+            "brawl pass+": "brawlpass+_redeemed_count",
             "nitro": "nitro_redeemed_count",
             "paypal": "paypal_redeemed_count",
             "shoutout": "shoutout_redeemed_count"
@@ -347,6 +348,7 @@ class Economy(commands.Cog):
 
             instructions = "- Provide necessary details."
             if "brawl pass" in item: instructions = "- Provide your in-game ID and a link to add you."
+            elif "brawl pass" in item: instructions = "- Provide your in-game ID and a link to add you."
             elif "nitro" in item: instructions = "- Provide the Discord account you'd like the Nitro gifted to."
             elif "paypal" in item: instructions = "- Provide your PayPal email address."
             elif "shoutout" in item: instructions = "- Provide the message you want to be shouted out."

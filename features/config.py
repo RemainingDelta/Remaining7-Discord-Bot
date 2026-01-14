@@ -329,12 +329,17 @@ ALLOWED_STAFF_ROLES = [
 
 SHOP_DATA = {
     "brawl pass": {
-        "display": "🎮 **Brawl Pass+**",
+        "display": "🎮 **Brawl Pass**",
         "desc": "Unlock exclusive rewards in Brawl Stars!",
-        "price": 17000
+        "price": 15300
+    },
+    "brawl pass+": {
+        "display": "💎 **Brawl Pass+**",
+        "desc": "Unlock even more exclusive rewards in Brawl Stars!",
+        "price": 22100
     },
     "nitro": {
-        "display": "💎 **Discord Nitro**",
+        "display": "🤖 **Discord Nitro**",
         "desc": "Get Discord Nitro for 1 month!",
         "price": 17000
     },
