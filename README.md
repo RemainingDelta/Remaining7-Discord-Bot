@@ -32,6 +32,7 @@
 
 ### R7 Token Economy
 - **Token Management:** `/balance`, `/give` (Admin), `/setbalance` (Admin).
+- **Passive Income:** Users automatically earn **2-5 R7 Tokens** for active chatting (1-minute cooldown).
 - **Daily Rewards:** `/daily` command with Level-based bonus multiplier.
 - **Supply Drop:** `/drop` (Admin) timed automatic drops (on average every 6 hours with random delay).
 
