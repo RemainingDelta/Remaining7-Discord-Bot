@@ -141,6 +141,7 @@ This bot requires Python 3.10+ and a MongoDB Atlas database.
 - Tourney stats after running `!endtourney`
 - Bug: `!endtourney` sometimes doesn't delete the live tournament queue embeded
 - Add giveaway functionality with extra entries via R7 tokens
+- Tracker for rewards given away
 - Brawl Stars Collectible Game (Large)
   - Phase 1: Data & Models
     - [x] Create JSON file for Brawler stats and assets
