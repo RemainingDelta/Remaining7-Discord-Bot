@@ -36,6 +36,12 @@
 - **Daily Rewards:** `/daily` command with Level-based bonus multiplier.
 - **Supply Drop:** `/drop` (Admin) timed automatic drops (on average every 6 hours with random delay).
 
+### Quest System
+- **Daily & Weekly Challenges:** Automated message-based quests (e.g., "Send 80 messages today", "Send 500 messages this week").
+- **Status Check:** `/quests` displays an interactive progress bar for current tasks.
+- **Automatic Rewards:** Completing quests instantly grants **R7 Tokens** and **XP** directly to the user's balance.
+- **Dynamic Assignment:** The system automatically assigns a random quest from the database if the user has none active.
+
 ### Shop & Budget System
 - **Shop Display:** `/shop` (lists items, prices, and descriptions).
 - **Purchasing:** `/buy` with strict dropdown menu of valid items and price check.
@@ -48,7 +54,6 @@
 - **Progress Check:** `/level` shows individual progress bar and next level EXP goal.
 - **Token Ranking:** `/leaderboard` for tokens
 - **Level Ranking:** `/levels_leaderboard` for levels
-
 
 ### Tournament & Ticketing
 - **Phase Management (`!starttourney`, `!endtourney`):** Tourney admin commands to switch the server between pre-tourney and main tourney phases. This includes resetting ticket counters, locking/reopening the general support channel, updating channel permissions, and automatically deleting old tickets.
@@ -137,7 +142,6 @@ This bot requires Python 3.10+ and a MongoDB Atlas database.
 
 ## Future Roadmap 
 - Budget Fixes
-- Tokens while messaging fixes
 - Update general server ticket system 
 - Tourney stats after running `!endtourney`
 - Bug: `!endtourney` sometimes doesn't delete the live tournament queue embeded
