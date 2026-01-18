@@ -525,3 +525,136 @@ async def add_hypercharge_to_user(user_id: str, brawler_id: str, hc_name: str):
         {"_id": str(user_id)},
         {"$set": {f"brawlers.{brawler_id}.hypercharge": hc_name}}
     )
+
+# --- QUEST SYSTEM HELPERS ---
+
+async def init_default_quests(default_quests_list):
+    """Ensures default quests exist in the DB (Run once)."""
+    if db is None: return
+    # Check if quests already exist to avoid duplicates
+    if await db.quests.count_documents({}) == 0:
+        for q in default_quests_list:
+            # Matches your screenshot structure
+            await db.quests.insert_one({
+                "name": q[0],
+                "description": q[1],
+                "reward_tokens": q[2],
+                "reward_exp": q[3],
+                "target_count": q[4], # Matches screenshot
+                "quest_type": q[5],   # Matches screenshot
+                "is_active": True
+            })
+        print("✅ Default Quests Initialized in MongoDB")
+
+async def get_active_quest(user_id: str, q_type: str):
+    """Retrieves the user's current active quest status."""
+    if db is None: return None
+    
+    user_q = await db.user_quests.find_one({"_id": user_id})
+    if not user_q: return None
+    
+    quest_entry = user_q.get(q_type)
+    if not quest_entry: return None
+
+    # Check expiration (Daily vs Weekly)
+    now = datetime.utcnow()
+    stored_date = quest_entry.get("date_assigned")
+    
+    # Safety check if date is missing
+    if not stored_date: return None
+
+    is_expired = False
+    if q_type == "daily":
+        # Expired if the stored date is NOT today
+        if stored_date.date() != now.date(): is_expired = True
+    elif q_type == "weekly":
+        # Expired if the stored week number is NOT this week
+        if stored_date.isocalendar()[1] != now.isocalendar()[1]: is_expired = True
+        
+    if is_expired:
+        return None # Time for a new one!
+        
+    # FIX: Return the quest even if it's completed, so we don't assign a new one today.
+    return quest_entry
+
+async def assign_random_quest(user_id: str, q_type: str):
+    """Picks a random active quest from the DB and assigns it to the user."""
+    if db is None: return None
+    
+    # 1. Simplified Query: Just look for the type (ignores is_active type mismatch)
+    # We also fetch EVERYTHING to see what's actually in there.
+    cursor = db.quests.find({}) 
+    all_quests = await cursor.to_list(length=None)
+    
+    # Filter in Python to be safe (handles "daily" vs "Daily" and 1 vs True)
+    matching_quests = []
+    for q in all_quests:
+        # Check 'quest_type' (or 'type' if legacy)
+        db_type = q.get("quest_type", q.get("type", "unknown"))
+        
+        if str(db_type).lower() == q_type.lower():
+            matching_quests.append(q)
+
+    # 2. Debugging Output if empty
+    if not matching_quests: 
+        print(f"⚠️ No matching '{q_type}' quests found!")
+        print(f"   └─ Total Quests in DB: {len(all_quests)}")
+        if all_quests:
+            print(f"   └─ Example Quest Keys: {list(all_quests[0].keys())}")
+            print(f"   └─ Example Quest Type: {all_quests[0].get('quest_type', 'MISSING')}")
+        return None
+    
+    # 3. Pick one randomly
+    import random
+    quest = random.choice(matching_quests)
+    
+    # 4. Create the new user entry
+    new_entry = {
+        "quest_id": quest["_id"],
+        "name": quest["name"],
+        "description": quest["description"],
+        # Handle 'target' vs 'target_count' mismatch safely
+        "target_count": quest.get("target_count", quest.get("target", 100)),
+        "reward_tokens": quest.get("reward_tokens", 0),
+        "reward_exp": quest.get("reward_exp", 0),
+        "progress": 0,
+        "completed": False,
+        "date_assigned": datetime.utcnow()
+    }
+    
+    # 5. Save to user_quests
+    await db.user_quests.update_one(
+        {"_id": user_id},
+        {"$set": {q_type: new_entry}},
+        upsert=True
+    )
+    
+    return new_entry
+
+async def update_quest_progress(user_id: str, q_type: str, amount: int = 1):
+    """Increments progress and checks for completion."""
+    if db is None: return False, None
+    
+    user_q = await db.user_quests.find_one({"_id": user_id})
+    if not user_q or q_type not in user_q: return False, None
+    
+    quest = user_q[q_type]
+    if quest["completed"]: return False, None
+    
+    new_progress = quest["progress"] + amount
+    target = quest["target_count"]
+    
+    if new_progress >= target:
+        # Complete!
+        await db.user_quests.update_one(
+            {"_id": user_id},
+            {"$set": {f"{q_type}.progress": target, f"{q_type}.completed": True}}
+        )
+        return True, quest
+    else:
+        # Update
+        await db.user_quests.update_one(
+            {"_id": user_id},
+            {"$inc": {f"{q_type}.progress": amount}}
+        )
+        return False, None
