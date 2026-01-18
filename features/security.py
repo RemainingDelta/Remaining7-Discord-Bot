@@ -6,7 +6,7 @@ import asyncio
 
 from database.mongo import add_hacked_user, get_hacked_users, remove_hacked_user
 # UPDATE: Added the new variables to the import
-from features.config import ADMIN_ROLE_ID, LOG_CHANNEL_ID, MODERATOR_ROLE_ID, MODERATOR_LOGS_CHANNEL_ID
+from features.config import ADMIN_ROLE_ID, MODERATOR_ROLE_ID, MODERATOR_LOGS_CHANNEL_ID
 
 class Security(commands.Cog):
     def __init__(self, bot):
@@ -84,18 +84,12 @@ class Security(commands.Cog):
         
         return embed
 
-    # --- HELPER: Send Logs to Multiple Channels ---
+    # --- HELPER: Send Logs to Moderator Logs Channels ---
     async def _send_security_logs(self, embed):
-        # 1. Admin Log
-        admin_log = self.bot.get_channel(LOG_CHANNEL_ID)
-        if admin_log: 
-            await admin_log.send(embed=embed)
-        
-        # 2. Mod Log (Avoid sending twice if IDs are the same)
-        if MODERATOR_LOGS_CHANNEL_ID != LOG_CHANNEL_ID:
-            mod_log = self.bot.get_channel(MODERATOR_LOGS_CHANNEL_ID)
-            if mod_log: 
-                await mod_log.send(embed=embed)
+        # Only send to the dedicated Moderator Logs Channel
+        mod_log = self.bot.get_channel(MODERATOR_LOGS_CHANNEL_ID)
+        if mod_log: 
+            await mod_log.send(embed=embed)
 
     # --- COMMAND 1: Slash Command (/hacked) ---
     @app_commands.command(name="hacked", description="MOD/ADMIN: Flag user as hacked, timeout them, and delete messages.")
