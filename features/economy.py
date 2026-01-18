@@ -1,7 +1,8 @@
+import time
 import discord
 from discord import app_commands
 from discord.ext import commands, tasks
-from datetime import datetime, timedelta
+
 import random
 from typing import Optional
 import asyncio
@@ -210,7 +211,75 @@ class Economy(commands.Cog):
 
     def cog_unload(self):
         self.supply_drop_task.cancel()
+        
+    @commands.Cog.listener()
+    async def on_message(self, message: discord.Message):
+        if message.author.bot: return
+        if message.content.startswith('!'): return
 
+        user_id = str(message.author.id)
+        current_timestamp = time.time()
+
+        # --- PART 1: TOKENS (ON 1 MINUTE COOLDOWN) ---
+        last_message_str = await get_setting(f"last_message_{user_id}")
+        should_award_tokens = False
+
+        if last_message_str:
+            try:
+                last_message_ts = float(last_message_str)
+                time_diff = current_timestamp - last_message_ts
+                
+                # Check for 60s cooldown OR bugged negative timestamps
+                if time_diff >= 60 or time_diff < -3600:
+                    should_award_tokens = True
+            except ValueError:
+                should_award_tokens = True 
+        else:
+            should_award_tokens = True
+
+        if should_award_tokens:
+            earned_tokens = random.randint(2, 5)
+
+            # Booster Bonus: 7% Chance (Avg 2% increase)
+            SERVER_BOOSTER_ROLE_ID = 647685778255642626 
+            if message.guild:
+                booster_role = message.guild.get_role(SERVER_BOOSTER_ROLE_ID)
+                if booster_role and booster_role in message.author.roles:
+                    if random.random() < 0.07:
+                        earned_tokens += 1
+
+            current_balance = await get_user_balance(user_id)
+            await update_user_balance(user_id, current_balance + earned_tokens)
+            await set_setting(f"last_message_{user_id}", str(current_timestamp))
+
+        # --- PART 2: XP & LEVELING (EVERY MESSAGE) ---
+        EXP_PER_MESSAGE = 10
+        BASE_EXP = 100
+        
+        level, exp = await get_leveling_data(user_id)
+        exp += EXP_PER_MESSAGE
+        
+        while True:
+            required_exp = int(BASE_EXP * (1.5 ** (level - 1)))
+            if exp >= required_exp:
+                exp -= required_exp
+                level += 1
+                
+                embed = discord.Embed(
+                    title="🎉 Level Up!",
+                    description=f"{message.author.mention}, you reached **Level {level}**!",
+                    color=discord.Color.green()
+                )
+                embed.add_field(name="Bonus", value="Daily rewards increased by **5%**!", inline=False)
+                try:
+                    await message.channel.send(embed=embed)
+                except discord.Forbidden:
+                    pass # Ignore if bot can't send in that channel
+            else:
+                break
+        
+        await update_leveling_data(user_id, level, exp)
+        
     # --- AUTO DROP TASK ---
     @tasks.loop(hours=6)
     async def supply_drop_task(self):
