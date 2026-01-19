@@ -148,8 +148,8 @@ class Quests(commands.Cog):
                 
                 status = "✅ Completed" if quest.get('completed') else f"{bar} {percent}%"
                 
-                val = (f"**{quest['name']}**\n"
-                       f"*{quest['description']}*\n"
+                val = (f"{quest['description']}\n"
+                       f"Rewards: Tokens: **{quest['reward_tokens']}** | XP: **{quest['reward_exp']}**\n"
                        f"Progress: `{prog}/{tgt}`\n"
                        f"{status}")
                 embed.add_field(name=title, value=val, inline=False)
