@@ -166,7 +166,7 @@ class LevelsLeaderboardView(discord.ui.View):
             
 class DropView(discord.ui.View):
     def __init__(self, amount):
-        super().__init__(timeout=1800) # 30 mins
+        super().__init__(timeout=None) 
         self.amount = amount
         self.claimed = False
 
