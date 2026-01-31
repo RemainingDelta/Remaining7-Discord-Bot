@@ -3,6 +3,7 @@ from discord import app_commands
 from discord.ext import commands, tasks
 import asyncio
 import re 
+import datetime 
 
 from database.mongo import (
     add_payout_batch,         
@@ -13,7 +14,14 @@ from database.mongo import (
     add_blacklisted_user,
     remove_blacklisted_user,
     get_all_blacklisted_users,
-    get_blacklisted_user
+    get_blacklisted_user,
+    create_tourney_session,
+    get_active_tourney_session,
+    end_tourney_session,
+    increment_tourney_message_count,
+    update_tourney_queue,
+    increment_staff_closure,
+    get_top_staff_stats
 )
 
 # Import Config and Utils
@@ -312,13 +320,15 @@ class BlacklistGroup(app_commands.Group):
 def setup_tourney_commands(bot: commands.Bot):
     print("Setting up tourney commands...")
 
-    # =========================================================================
-    #  PREFIX COMMANDS (Exact Replica from Old Main)
-    # =========================================================================
-
     @bot.command(name="close", aliases=["c"])
     async def close_command(ctx: commands.Context):
         """Close a tourney ticket (staff only)."""
+        active_session = await get_active_tourney_session()
+        if active_session:
+            await increment_staff_closure(active_session['_id'], ctx.author.id, ctx.author.name)
+            await update_tourney_queue(active_session['_id'], change=-1)
+        # -----------------------
+        
         await close_ticket_via_command(ctx)
 
     @bot.command(name="lock")
@@ -453,6 +463,13 @@ def setup_tourney_commands(bot: commands.Bot):
 
         # 1. Reset ticket numbering & Lock other channel (Existing)
         reset_ticket_counter()
+        
+        existing_session = await get_active_tourney_session()
+        if existing_session:
+            await ctx.send("⚠ **Note:** A tournament session is already active in the database.")
+        else:
+            await create_tourney_session()
+
         await lock_command(ctx)
 
         # 2. Update MAIN Tourney Support Channel
@@ -557,6 +574,48 @@ def setup_tourney_commands(bot: commands.Bot):
         guild = ctx.guild
         if guild is None:
             return
+
+        session = await get_active_tourney_session()
+        if session:
+            # 1. Calculate Duration
+            start_time = session['start_time']
+            duration = datetime.datetime.utcnow() - start_time
+            hours, remainder = divmod(int(duration.total_seconds()), 3600)
+            minutes, _ = divmod(remainder, 60)
+
+            # 2. Get Staff Leaderboard
+            top_staff = await get_top_staff_stats(session['_id'], limit=12)
+            
+            staff_msg = ""
+            
+            for i, s in enumerate(top_staff):
+                if i == 0: icon = "🥇"
+                elif i == 1: icon = "🥈"
+                elif i == 2: icon = "🥉"
+                else: icon = f"**{i+1}.**" # e.g. "4.", "5.", "6."
+                
+                staff_msg += f"{icon} **{s['username']}**: {s['tickets_closed']} tickets\n"
+            
+            if not staff_msg: staff_msg = "No tickets closed."
+
+            # 3. Send Embed
+            stat_embed = discord.Embed(title="📊 Tournament Report", color=discord.Color.gold())
+            stat_embed.add_field(name="⏱️ Duration", value=f"`{hours}h {minutes}m`", inline=True)
+            stat_embed.add_field(name="📩 Total Tickets", value=f"`{session['total_tickets']}`", inline=True)
+            stat_embed.add_field(name="💬 Total Messages", value=f"`{session['total_messages']}`", inline=True)
+            stat_embed.add_field(name="📈 Peak Queue", value=f"**{session['peak_queue']}** tickets", inline=False)
+            stat_embed.add_field(name="🏆 Top Tourney Admins", value=staff_msg, inline=False)
+                        
+            report_msg = await ctx.send(embed=stat_embed)
+            
+            try:
+                await report_msg.pin()
+            except Exception as e:
+                print(f"⚠️ Could not pin report: {e}")
+            
+            # 4. Close Session in DB
+            await end_tourney_session(session['_id'])
+        # ------------------------------
 
         await unlock_command(ctx)
 
@@ -1020,3 +1079,27 @@ def setup_tourney_commands(bot: commands.Bot):
     bot.tree.add_command(payout_history)
     bot.tree.add_command(check_queue)
     bot.tree.add_command(BlacklistGroup(bot))
+
+
+    async def background_stats_update():
+        try:
+            active = await get_active_tourney_session()
+            if active:
+                await increment_tourney_message_count(active['_id'])
+        except Exception:
+            pass # Ignore errors here so we don't spam logs
+
+    @bot.listen()
+    async def on_message(message):
+        if message.author.bot: return
+        if not isinstance(message.channel, discord.TextChannel):
+            return
+        
+        valid_categories = (TOURNEY_CATEGORY_ID, PRE_TOURNEY_CATEGORY_ID)
+        
+        # Check conditions (Fast in-memory checks)
+        if "ticket-" in message.channel.name and message.channel.category_id in valid_categories:
+            
+            # 🔥 CRITICAL CHANGE: Fire and forget!
+            # This creates a background task so the bot doesn't wait for MongoDB.
+            asyncio.create_task(background_stats_update())

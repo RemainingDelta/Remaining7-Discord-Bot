@@ -1,4 +1,9 @@
 import discord
+from database.mongo import (
+    get_active_tourney_session, 
+    update_tourney_queue, 
+    increment_staff_closure 
+)
 
 class TourneyReportModal(discord.ui.Modal, title="Tourney Support"):
     def __init__(self):
@@ -30,15 +35,20 @@ class TourneyReportModal(discord.ui.Modal, title="Tourney Support"):
         self.add_item(self.issue)
 
     async def on_submit(self, interaction: discord.Interaction):
-        # we’ll implement this helper in tourney_utils
         from .tourney_utils import create_tourney_ticket_channel
-
         await create_tourney_ticket_channel(
             interaction,
             team_name=self.team_name.value,
             bracket=self.bracket.value,
             issue=self.issue.value,
         )
+        
+        try:
+            active_session = await get_active_tourney_session()
+            if active_session:
+                await update_tourney_queue(active_session['_id'], change=1)
+        except Exception:
+            pass
 
 
 class TourneyOpenTicketView(discord.ui.View):
@@ -82,12 +92,18 @@ class PreTourneyReportModal(discord.ui.Modal, title="Pre-Tourney Support"):
 
     async def on_submit(self, interaction: discord.Interaction):
         from .tourney_utils import create_pre_tourney_ticket_channel
-
         await create_pre_tourney_ticket_channel(
             interaction,
             team_name=self.team_name.value,
             issue=self.issue.value,
         )
+    
+        try:
+            active_session = await get_active_tourney_session()
+            if active_session:
+                await update_tourney_queue(active_session['_id'], change=1)
+        except Exception:
+            pass
 
 
 class PreTourneyOpenTicketView(discord.ui.View):
