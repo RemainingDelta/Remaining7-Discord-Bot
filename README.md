@@ -142,8 +142,8 @@ This bot requires Python 3.10+ and a MongoDB Atlas database.
 
 ## Future Roadmap 
 - Budget Fixes
+- Mention match number and team name in transcript channel 
 - Update general server ticket system 
-- Tourney stats after running `!endtourney`
 - Bug: `!endtourney` sometimes doesn't delete the live tournament queue embeded
 - Add giveaway functionality with extra entries via R7 tokens
 - Tracker for rewards given away
