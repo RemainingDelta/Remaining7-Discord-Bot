@@ -658,3 +658,108 @@ async def update_quest_progress(user_id: str, q_type: str, amount: int = 1):
             {"$inc": {f"{q_type}.progress": amount}}
         )
         return False, None
+    
+# --- TOURNAMENT STATS HELPERS ---
+
+async def create_tourney_session():
+    """Starts a new tournament session."""
+    if db is None: return None
+    try:
+        new_session = {
+            "status": "active",
+            "start_time": datetime.utcnow(),
+            "total_tickets": 0,
+            "total_messages": 0,
+            "peak_queue": 0,
+            "current_queue": 0
+        }
+        result = await db.tourney_sessions.insert_one(new_session)
+        return result.inserted_id
+    except Exception as e:
+        print(f"⚠️ DB Error (Create Session): {e}")
+        return None
+
+async def get_active_tourney_session():
+    """Returns the currently active session document, or None."""
+    if db is None: return None
+    try:
+        return await db.tourney_sessions.find_one({"status": "active"})
+    except Exception as e:
+        print(f"⚠️ DB Error (Get Session): {e}")
+        return None
+
+async def end_tourney_session(session_id):
+    """Marks the session as finished."""
+    if db is None: return
+    try:
+        await db.tourney_sessions.update_one(
+            {"_id": session_id},
+            {"$set": {"status": "finished", "end_time": datetime.utcnow()}}
+        )
+    except Exception as e:
+        print(f"⚠️ DB Error (End Session): {e}")
+
+async def increment_tourney_message_count(session_id):
+    """Increments the global message counter. SILENT FAIL enabled."""
+    if db is None: return
+    try:
+        await db.tourney_sessions.update_one(
+            {"_id": session_id},
+            {"$inc": {"total_messages": 1}}
+        )
+    except Exception as e:
+        # We assume this is high-volume, so we just log and move on
+        print(f"⚠️ DB Error (Msg Count): {e}")
+
+async def update_tourney_queue(session_id, change: int):
+    """Updates current queue size. SILENT FAIL enabled."""
+    if db is None: return
+    try:
+        # Update current queue and return the new document
+        updated_doc = await db.tourney_sessions.find_one_and_update(
+            {"_id": session_id},
+            {"$inc": {"current_queue": change, "total_tickets": 1 if change > 0 else 0}},
+            return_document=True
+        )
+        
+        # Check peak queue
+        if updated_doc:
+            current = updated_doc.get("current_queue", 0)
+            peak = updated_doc.get("peak_queue", 0)
+            
+            if current > peak:
+                await db.tourney_sessions.update_one(
+                    {"_id": session_id},
+                    {"$set": {"peak_queue": current}}
+                )
+    except Exception as e:
+        print(f"⚠️ DB Error (Update Queue): {e}")
+
+async def increment_staff_closure(session_id, user_id: str, username: str):
+    """Tracks staff stats. SILENT FAIL enabled."""
+    if db is None: return
+    try:
+        await db.tourney_staff_stats.update_one(
+            {
+                "session_id": session_id,
+                "user_id": str(user_id)
+            },
+            {
+                "$inc": {"tickets_closed": 1},
+                "$set": {"username": username} 
+            },
+            upsert=True
+        )
+    except Exception as e:
+        print(f"⚠️ DB Error (Staff Closure): {e}")
+
+async def get_top_staff_stats(session_id, limit: int = 12): 
+    """Fetches the leaderboard. Default limit bumped to 12 just to be safe."""
+    if db is None: return []
+    try:
+        cursor = db.tourney_staff_stats.find({"session_id": session_id})\
+                .sort("tickets_closed", -1).limit(limit)
+        return await cursor.to_list(length=limit)
+    except Exception as e:
+        print(f"⚠️ DB Error (Get Stats): {e}")
+        return []
