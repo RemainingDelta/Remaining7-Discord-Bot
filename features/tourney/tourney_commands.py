@@ -570,6 +570,10 @@ def setup_tourney_commands(bot: commands.Bot):
         if not isinstance(ctx.author, discord.Member) or not is_staff(ctx.author):
             await ctx.reply("You don't have permission to end the tourney.")
             return
+        
+        dashboard_cog = bot.get_cog("QueueDashboard")
+        if dashboard_cog:
+            await dashboard_cog.stop_dashboard()
 
         guild = ctx.guild
         if guild is None:
@@ -705,10 +709,7 @@ def setup_tourney_commands(bot: commands.Bot):
                 )
             except Exception as e:
                 print(f"Error deleting ticket {ch.id} ({ch.name}): {e}")
-                
-        dashboard_cog = bot.get_cog("QueueDashboard")
-        if dashboard_cog:
-            await dashboard_cog.stop_dashboard()
+
 
     # =========================================================================
     #  SLASH COMMANDS (Restored from your New File)
