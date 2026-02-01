@@ -1,3 +1,4 @@
+import re
 import discord
 from discord.ext import commands
 import io
@@ -567,10 +568,31 @@ async def delete_ticket_with_transcript(
         deleter_name = deleter.name 
         opener_mention = f"<@{opener_id}>" if opener_id is not None else "Unknown"
 
+        # 1. Extract Info from Topic
+        topic = channel.topic if channel.topic else ""
+        
+        # Default values
+        team_name = "N/A"
+        match_num = "N/A"
+
+        if topic:
+            # Pattern: Look for "team:" followed by anything until a "|" or End of Line
+            team_match = re.search(r"team:(.*?)(?:\||$)", topic, re.IGNORECASE)
+            
+            # Pattern: Look for "bracket:" OR "match:" followed by anything until "|" or End of Line
+            bracket_match = re.search(r"(?:bracket|match|match number):(.*?)(?:\||$)", topic, re.IGNORECASE)
+            
+            if team_match: 
+                team_name = team_match.group(1).strip()
+            if bracket_match: 
+                match_num = bracket_match.group(1).strip()
+
+        # 👇 2. Update Content
         await log_channel.send(
             content=(
                 f"📝 Transcript for ticket **#{channel.name}** "
-                f"deleted by **{deleter_name}** (opener: {opener_mention})."
+                f"deleted by **{deleter_name}** (opener: {opener_mention}).\n"
+                f"🛡️ **Team:** `{team_name}` | 🔢 **Match:** `{match_num}`"
             ),
             file=file_for_log,
         )
