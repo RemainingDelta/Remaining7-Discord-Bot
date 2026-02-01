@@ -163,6 +163,46 @@ class LevelsLeaderboardView(discord.ui.View):
             await interaction.response.edit_message(embed=embed, view=self)
         else:
             await interaction.response.defer()
+     
+class ShopPaginationView(discord.ui.View):
+    def __init__(self, data: dict, items_per_page: int = 4):
+        super().__init__(timeout=60)
+        self.data = list(data.items())
+        self.items_per_page = items_per_page
+        self.current_page = 0
+        self.total_pages = (len(self.data) - 1) // items_per_page + 1
+
+    def create_embed(self):
+        start = self.current_page * self.items_per_page
+        end = start + self.items_per_page
+        page_items = self.data[start:end]
+
+        embed = discord.Embed(title="🛒 **R7 Token Shop** 🛒", color=discord.Color.blue())
+        embed.set_footer(text=f"Page {self.current_page + 1}/{self.total_pages} | Use /buy <item> to purchase!")
+        
+        for key, info in page_items:
+            embed.add_field(
+                name=info['display'], 
+                value=f"{info['desc']}\n**Price:** {info['price']} R7 tokens", 
+                inline=False
+            )
+        return embed
+
+    def update_buttons(self):
+        self.prev_button.disabled = (self.current_page == 0)
+        self.next_button.disabled = (self.current_page == self.total_pages - 1)
+
+    @discord.ui.button(label="◀ Previous", style=discord.ButtonStyle.blurple, disabled=True)
+    async def prev_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.current_page -= 1
+        self.update_buttons()
+        await interaction.response.edit_message(embed=self.create_embed(), view=self)
+
+    @discord.ui.button(label="Next ▶", style=discord.ButtonStyle.blurple,)
+    async def next_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.current_page += 1
+        self.update_buttons()
+        await interaction.response.edit_message(embed=self.create_embed(), view=self)     
             
 class DropView(discord.ui.View):
     def __init__(self, amount):
@@ -331,11 +371,10 @@ class Economy(commands.Cog):
 
     @app_commands.command(name="shop", description="View the R7 token shop.")
     async def shop(self, interaction: discord.Interaction):
-        embed = discord.Embed(title="🛒 **R7 Token Shop** 🛒", color=discord.Color.blue())
-        for key, info in SHOP_DATA.items():
-            embed.add_field(name=info['display'], value=f"{info['desc']}\n**Price:** {info['price']} R7 tokens", inline=False)
-        embed.set_footer(text="Use /buy <item> to purchase!")
-        await interaction.response.send_message(embed=embed)
+        # Create the view with 4 items per page
+        view = ShopPaginationView(SHOP_DATA, items_per_page=4)
+        view.update_buttons()
+        await interaction.response.send_message(embed=view.create_embed(), view=view)
 
     @app_commands.command(name="buy", description="Purchase an item from the shop.")
     @app_commands.describe(item="Select the item you want to buy.")
