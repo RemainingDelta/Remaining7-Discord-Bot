@@ -338,6 +338,16 @@ SHOP_DATA = {
         "desc": "Unlock even more exclusive rewards in Brawl Stars!",
         "price": 22100
     },
+    "coc gold pass": {
+        "display": "🛡️ **Clash of Clans Gold Pass**",
+        "desc": "Unlock the Gold Pass for the current season!",
+        "price": 11900  
+    },
+    "cr diamond pass": {
+        "display": "💠 **Clash Royale Diamond Pass**",
+        "desc": "Unlock the Diamond Pass for exclusive perks!",
+        "price": 20400  
+    },
     "nitro": {
         "display": "🤖 **Discord Nitro**",
         "desc": "Get Discord Nitro for 1 month!",
