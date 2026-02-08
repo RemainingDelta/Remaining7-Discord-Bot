@@ -269,8 +269,8 @@ class Economy(commands.Cog):
                 last_message_ts = float(last_message_str)
                 time_diff = current_timestamp - last_message_ts
                 
-                # Check for 60s cooldown OR bugged negative timestamps
-                if time_diff >= 60 or time_diff < -3600:
+                # Check for 20s cooldown OR bugged negative timestamps
+                if time_diff >= 20 or time_diff < -3600:
                     should_award_tokens = True
             except ValueError:
                 should_award_tokens = True 
