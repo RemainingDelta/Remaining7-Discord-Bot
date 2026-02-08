@@ -21,7 +21,8 @@ from features.config import (
     ADMIN_ROLE_ID,
     GENERAL_CHANNEL_ID,
     SHOP_DATA,
-    MODERATOR_ROLE_ID
+    MODERATOR_ROLE_ID,
+    TRIAL_MODERATOR_ROLE_ID,
 )
 
 shop_choices = [
@@ -380,6 +381,17 @@ class Economy(commands.Cog):
     @app_commands.describe(item="Select the item you want to buy.")
     @app_commands.choices(item=shop_choices) 
     async def buy(self, interaction: discord.Interaction, item: str):
+        
+        forbidden_roles = [TRIAL_MODERATOR_ROLE_ID, MODERATOR_ROLE_ID, ADMIN_ROLE_ID]
+        
+        # Check if the user has any of these roles
+        if any(role.id in forbidden_roles for role in interaction.user.roles):
+            await interaction.response.send_message(
+                "❌ **Access Denied:** Staff members cannot purchase shop items.", 
+                ephemeral=True
+            )
+            return
+        
         user_id = str(interaction.user.id)
         if item not in SHOP_DATA:
             await interaction.response.send_message("❌ Error: Item not found.", ephemeral=True)
@@ -414,6 +426,17 @@ class Economy(commands.Cog):
     @app_commands.describe(item="Select the item you want to redeem.")
     @app_commands.choices(item=shop_choices)
     async def redeem(self, interaction: discord.Interaction, item: str):
+        
+        forbidden_roles = [TRIAL_MODERATOR_ROLE_ID, MODERATOR_ROLE_ID, ADMIN_ROLE_ID]
+        
+        # Check if the user has any of these roles
+        if any(role.id in forbidden_roles for role in interaction.user.roles):
+            await interaction.response.send_message(
+                "❌ **Access Denied:** Staff members cannot redeem shop rewards.", 
+                ephemeral=True
+            )
+            return
+        
         user_id = str(interaction.user.id)
         if item not in SHOP_DATA:
             await interaction.response.send_message("❌ Error: Item data not found.", ephemeral=True)
@@ -449,7 +472,6 @@ class Economy(commands.Cog):
             await ch.set_permissions(interaction.guild.default_role, read_messages=False)
             await ch.set_permissions(interaction.user, read_messages=True, send_messages=True)
             
-            from features.config import ADMIN_ROLE_ID 
             staff_role = interaction.guild.get_role(ADMIN_ROLE_ID)
             if staff_role:
                 await ch.set_permissions(staff_role, read_messages=True, send_messages=True, manage_messages=True)
