@@ -99,23 +99,23 @@ class BrawlerPagination(discord.ui.View):
         await interaction.response.edit_message(embed=self.create_embed(2), view=self)
         
 class BrawlerShopSelect(discord.ui.Select):
-    def __init__(self, user_id, rarity, brawlers_to_buy, price):
+    def __init__(self, user_id, rarity, brawlers_page, price):
         self.user_id = user_id
         self.price = price
-        # Create select options only for brawlers the user doesn't own
-        options = [
-            discord.SelectOption(
+        
+        options = []
+        for b in brawlers_page:
+            options.append(discord.SelectOption(
                 label=b.name, 
                 value=b.id, 
                 description=f"Unlock {b.name} for {price} Credits"
-            )
-            for b in brawlers_to_buy[:25] # Discord select limit
-        ]
-        super().__init__(placeholder=f"Pick a {rarity} Brawler to buy...", options=options)
+            ))
+            
+        super().__init__(placeholder=f"Select a {rarity} Brawler...", options=options)
 
     async def callback(self, interaction: discord.Interaction):
         if str(interaction.user.id) != self.user_id:
-            return await interaction.response.send_message("You can't use someone else's shop!", ephemeral=True)
+            return await interaction.response.send_message("Not your shop!", ephemeral=True)
 
         brawler_id = self.values[0]
         from database.mongo import deduct_credits, add_brawler_to_user
@@ -130,6 +130,48 @@ class BrawlerShopSelect(discord.ui.Select):
         # Find brawler name for the success message
         b_name = next(b.name for b in BRAWLER_ROSTER if b.id == brawler_id)
         await interaction.response.send_message(f"🎉 Success! You've unlocked **{b_name}** for **{self.price}** Credits!")
+
+class PaginatedShopView(discord.ui.View):
+    def __init__(self, user_id, rarity, all_brawlers, price):
+        super().__init__(timeout=60)
+        self.user_id = user_id
+        self.rarity = rarity
+        self.all_brawlers = all_brawlers
+        self.price = price
+        self.page = 0
+        self.update_view()
+
+    def update_view(self):
+        self.clear_items()
+        
+        # 1. Get the 25 items for this page
+        start = self.page * 25
+        end = start + 25
+        page_items = self.all_brawlers[start:end]
+        
+        # 2. Add the Dropdown
+        self.add_item(BrawlerShopSelect(self.user_id, self.rarity, page_items, self.price))
+
+        # 3. Add Buttons if needed
+        if self.page > 0:
+            btn = discord.ui.Button(label="◀ Prev", style=discord.ButtonStyle.secondary, row=1)
+            btn.callback = self.prev_page
+            self.add_item(btn)
+            
+        if end < len(self.all_brawlers):
+            btn = discord.ui.Button(label="Next ▶", style=discord.ButtonStyle.secondary, row=1)
+            btn.callback = self.next_page
+            self.add_item(btn)
+
+    async def prev_page(self, interaction):
+        self.page -= 1
+        self.update_view()
+        await interaction.response.edit_message(view=self)
+
+    async def next_page(self, interaction):
+        self.page += 1
+        self.update_view()
+        await interaction.response.edit_message(view=self)
 
 class BuyBrawlerView(discord.ui.View):
     def __init__(self, user_id, owned_ids):
@@ -147,8 +189,7 @@ class BuyBrawlerView(discord.ui.View):
         if not available:
             return await interaction.response.send_message(f"✨ Impressive! You already own all {rarity} brawlers.", ephemeral=True)
 
-        view = discord.ui.View()
-        view.add_item(BrawlerShopSelect(self.user_id, rarity, available, price))
+        view = PaginatedShopView(self.user_id, rarity, available, price)
         
         embed = discord.Embed(
             title=f"🛒 {rarity} Brawler Shop", 
@@ -165,7 +206,7 @@ class BuyBrawlerView(discord.ui.View):
     async def buy_super_rare(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.open_rarity_shop(interaction, "Super Rare")
 
-    @discord.ui.button(label="Epic", style=discord.ButtonStyle.secondary)
+    @discord.ui.button(label="Epic", style=discord.ButtonStyle.primary)
     async def buy_epic(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.open_rarity_shop(interaction, "Epic")
 
@@ -173,7 +214,7 @@ class BuyBrawlerView(discord.ui.View):
     async def buy_mythic(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.open_rarity_shop(interaction, "Mythic")
 
-    @discord.ui.button(label="Legendary", style=discord.ButtonStyle.gray)
+    @discord.ui.button(label="Legendary", style=discord.ButtonStyle.success)
     async def buy_legendary(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.open_rarity_shop(interaction, "Legendary")
         

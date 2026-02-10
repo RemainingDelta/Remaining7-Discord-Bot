@@ -61,6 +61,7 @@ if MODE == "REAL":
     }
     
     EMOJIS_BRAWLERS = { 
+        "glowbert": "<:brawler_glowbert:1469950807267868683>",
         "pierce": "<:brawler_pierce:1454345574890606744>",
         "gigi": "<:brawler_gigi:1454345573707677746>",
         "mina": "<:brawler_mina:1454345571941875712>",
@@ -219,6 +220,7 @@ else:
     }
     
     EMOJIS_BRAWLERS = { 
+        "glowbert": "<:brawler_glowbert:1469949063175737364>",
         "pierce": "<:brawler_pierce:1454328096206487572>",
         "gigi": "<:brawler_gigi:1454328095413895168>",
         "mina": "<:brawler_mina:1454328094621176011>",
