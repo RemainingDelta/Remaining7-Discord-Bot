@@ -87,6 +87,7 @@
     { "id": "alli", "name": "Alli", "rarity": "Mythic", "emoji_name": "brawler_alli", "gadgets": ["Water Jet", "Coral Trap"], "star_powers": ["Deep Sea", "Current"], "hypercharge": "Swamp Snacking" },
     { "id": "ziggy", "name": "Ziggy", "rarity": "Mythic", "emoji_name": "brawler_ziggy", "gadgets": ["Static Shock", "Volt Jump"], "star_powers": ["High Voltage", "Conductivity"], "hypercharge": "The Grand Vortex" },
     { "id": "mina", "name": "Mina", "rarity": "Mythic", "emoji_name": "brawler_mina", "gadgets": ["Jewel Toss", "Crystal Wall"], "star_powers": ["Pure Carats", "Hard Rock"], "hypercharge": "Triplecane" },
+    { "id": "glowbert", "name": "Glowbert", "rarity": "Mythic", "emoji_name": "brawler_glowbert", "gadgets": ["Slippery Savior", "More Lumens!"], "star_powers": ["Biotic Ecosystem", "Parasitism"], "hypercharge": "" },
     
     { "id": "spike", "name": "Spike", "rarity": "Legendary", "emoji_name": "brawler_spike", "gadgets": ["Popping Pincushion", "Life Plant"], "star_powers": ["Fertilize", "Curveball"], "hypercharge": "Blooming Season" },
     { "id": "crow", "name": "Crow", "rarity": "Legendary", "emoji_name": "brawler_crow", "gadgets": ["Defense Booster", "Slowing Toxin"], "star_powers": ["Extra Toxic", "Carrion Crow"], "hypercharge": "Utility Knives" },
@@ -101,6 +102,6 @@
     { "id": "draco", "name": "Draco", "rarity": "Legendary", "emoji_name": "brawler_draco", "gadgets": ["Upper Cut", "Last Stand"], "star_powers": ["Expose", "Shredding"], "hypercharge": "Fire & Flames" },
     { "id": "kenji", "name": "Kenji", "rarity": "Legendary", "emoji_name": "brawler_kenji", "gadgets": ["Sashimi Slash", "Healing Ginger"], "star_powers": ["Nigiri Nemesis", "Wasabi Wipeout"], "hypercharge": "All You Can Eat" },
     { "id": "pierce", "name": "Pierce", "rarity": "Legendary", "emoji_name": "brawler_pierce", "gadgets": ["Armor Break", "Quick Reload"], "star_powers": ["Precision", "Vitality"], "hypercharge": "" },
-    
+
     { "id": "kaze", "name": "Kaze", "rarity": "Ultra Legendary", "emoji_name": "brawler_kaze", "gadgets": ["Wind Tunnel", "Air Blade"], "star_powers": ["Hurricane", "Sky High"], "hypercharge": "Ninja Form" }
 ]
