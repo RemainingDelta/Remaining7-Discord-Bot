@@ -1,6 +1,6 @@
 [
     { "id": "shelly", "name": "Shelly", "rarity": "Starting", "emoji_name": "brawler_shelly", "gadgets": ["Fast Forward", "Clay Pigeons"], "star_powers": ["Shell Shock", "Band-Aid"], "hypercharge": "Double Barrel" },
-    
+
     { "id": "nita", "name": "Nita", "rarity": "Rare", "emoji_name": "brawler_nita", "gadgets": ["Bear Paws", "Faux Fur"], "star_powers": ["Bear With Me", "Hyper Bear"], "hypercharge": "Hyperbearing" },
     { "id": "colt", "name": "Colt", "rarity": "Rare", "emoji_name": "brawler_colt", "gadgets": ["Speedloader", "Silver Bullet"], "star_powers": ["Slick Boots", "Magnum Special"], "hypercharge": "Dual Wielding" },
     { "id": "bull", "name": "Bull", "rarity": "Rare", "emoji_name": "brawler_bull", "gadgets": ["T-Bone Injector", "Stomper"], "star_powers": ["Berserker", "Tough Guy"], "hypercharge": "Jaws Of Steel" },
@@ -9,7 +9,7 @@
     { "id": "barley", "name": "Barley", "rarity": "Rare", "emoji_name": "brawler_barley", "gadgets": ["Sticky Syrup Mixer", "Herbal Tonic"], "star_powers": ["Medical Use", "Extra Noxious"], "hypercharge": "Bottled Up Rage" },
     { "id": "poco", "name": "Poco", "rarity": "Rare", "emoji_name": "brawler_poco", "gadgets": ["Tuning Fork", "Protective Tunes"], "star_powers": ["Da Capo!", "Screeching Solo"], "hypercharge": "Medic's Melody" },
     { "id": "rosa", "name": "Rosa", "rarity": "Rare", "emoji_name": "brawler_rosa", "gadgets": ["Grow Light", "Unfriendly Bushes"], "star_powers": ["Plant Life", "Thorny Gloves"], "hypercharge": "Grasping Roots" },
-    
+
     { "id": "jessie", "name": "Jessie", "rarity": "Super Rare", "emoji_name": "brawler_jessie", "gadgets": ["Spark Plug", "Recoil Spring"], "star_powers": ["Energize", "Shocky"], "hypercharge": "Scrappy 2.0" },
     { "id": "dynamike", "name": "Dynamike", "rarity": "Super Rare", "emoji_name": "brawler_dynamike", "gadgets": ["Fidget Spinner", "Satchel Charge"], "star_powers": ["Dyna-Jump", "Demolition"], "hypercharge": "Boomer" },
     { "id": "tick", "name": "Tick", "rarity": "Super Rare", "emoji_name": "brawler_tick", "gadgets": ["Mine Mania", "Last Hurrah"], "star_powers": ["Well Oiled", "Automa-Tick Reload"], "hypercharge": "Headstrong" },
@@ -46,11 +46,11 @@
     { "id": "pearl", "name": "Pearl", "rarity": "Epic", "emoji_name": "brawler_pearl", "gadgets": ["Overcooked", "Made with Love"], "star_powers": ["Heat Retention", "Heat Shield"], "hypercharge": "Pyrolytic" },
     { "id": "larrylawrie", "name": "Larry & Lawrie", "rarity": "Epic", "emoji_name": "brawler_larrylawrie", "gadgets": ["Order: Swap", "Order: Fall Back"], "star_powers": ["Protocol: Protect", "Protocol: Assist"], "hypercharge": "The Three-Bot Problem" },
     { "id": "angelo", "name": "Angelo", "rarity": "Epic", "emoji_name": "brawler_angelo", "gadgets": ["Stinging Flight", "Master of Puppets"], "star_powers": ["Empower", "Flow"], "hypercharge": "In my Element" },
-    { "id": "berry", "name": "Berry", "rarity": "Epic", "emoji_name": "brawler_berry", "gadgets": ["Friendship is Magic", "Healthy Mix"], "star_powers": ["Floor is Lava", "Sugar Rush"], "hypercharge": "Double Scoops" },
-    { "id": "shade", "name": "Shade", "rarity": "Epic", "emoji_name": "brawler_shade", "gadgets": ["Shadow Leap", "Ghostly Grip"], "star_powers": ["Dark Armor", "Fear Factor"], "hypercharge": "The Frightener" },
-    { "id": "meeple", "name": "Meeple", "rarity": "Epic", "emoji_name": "brawler_meeple", "gadgets": ["Bouncy Bounce", "Toy Surge"], "star_powers": ["Playtime", "Energy Boost"], "hypercharge": "The Last Rulebender" },
-    { "id": "trunk", "name": "Trunk", "rarity": "Epic", "emoji_name": "brawler_trunk", "gadgets": ["Root Trap", "Leaf Shield"], "star_powers": ["Deep Roots", "Photosynthesis"], "hypercharge": "Retread" },
-    
+    { "id": "berry", "name": "Berry", "rarity": "Epic", "emoji_name": "brawler_berry", "gadgets": ["Friendship is Great", "Healthy Additives"], "star_powers": ["Floor is Fine", "Making a Mess"], "hypercharge": "Double Scoops" },
+    { "id": "shade", "name": "Shade", "rarity": "Epic", "emoji_name": "brawler_shade", "gadgets": ["Longarms", "Jump Scare"], "star_powers": ["Spooky Speedster", "Hardened Hoodie"], "hypercharge": "The Frightener" },
+    { "id": "meeple", "name": "Meeple", "rarity": "Epic", "emoji_name": "brawler_meeple", "gadgets": ["Mansions of Meeple", "Ragequit"], "star_powers": ["Do Not Pass Go", "Rule Bending"], "hypercharge": "The Last Rulebender" },
+    { "id": "trunk", "name": "Trunk", "rarity": "Epic", "emoji_name": "brawler_trunk", "gadgets": ["For the Queen!", "Worker Ants"], "star_powers": ["New Insect Overlords", "Colony Scouts"], "hypercharge": "Retread" },
+
     { "id": "mortis", "name": "Mortis", "rarity": "Mythic", "emoji_name": "brawler_mortis", "gadgets": ["Combo Spinner", "Survival Shovel"], "star_powers": ["Creepy Harvest", "Coiled Snake"], "hypercharge": "Blood Boomerang" },
     { "id": "tara", "name": "Tara", "rarity": "Mythic", "emoji_name": "brawler_tara", "gadgets": ["Psychic Enhancer", "Support from Beyond"], "star_powers": ["Black Portal", "Healing Shade"], "hypercharge": "Supermassive" },
     { "id": "gene", "name": "Gene", "rarity": "Mythic", "emoji_name": "brawler_gene", "gadgets": ["Lamp Blowout", "Vengeful Spirits"], "star_powers": ["Magic Puffs", "Spirit Slap"], "hypercharge": "Hyper Hands" },
@@ -76,19 +76,19 @@
     { "id": "mico", "name": "Mico", "rarity": "Mythic", "emoji_name": "brawler_mico", "gadgets": ["Clipping Scream", "Presto"], "star_powers": ["Monkey Business", "Record Smash"], "hypercharge": "Sound Check" },
     { "id": "melodie", "name": "Melodie", "rarity": "Mythic", "emoji_name": "brawler_melodie", "gadgets": ["Perfect Pitch", "Intermission"], "star_powers": ["Fast Beats", "Extended Mix"], "hypercharge": "Flash Mob" },
     { "id": "lily", "name": "Lily", "rarity": "Mythic", "emoji_name": "brawler_lily", "gadgets": ["Vanish", "Pot Plant"], "star_powers": ["Spiky", "Vigilance"], "hypercharge": "Germinate" },
-    { "id": "moe", "name": "Moe", "rarity": "Mythic", "emoji_name": "brawler_moe", "gadgets": ["Rat Pack", "Drill Rush"], "star_powers": ["Squeaky Clean", "Deep Digger"], "hypercharge": "The Big Cheese" },
-    { "id": "clancy", "name": "Clancy", "rarity": "Mythic", "emoji_name": "brawler_clancy", "gadgets": ["Snappy Shooting", "Tactical Roll"], "star_powers": ["Heavy Hitter", "Recoil Control"], "hypercharge": "Recall of Duty" },
-    { "id": "juju", "name": "Juju", "rarity": "Mythic", "emoji_name": "brawler_juju", "gadgets": ["Spirit Guide", "Ethereal Dash"], "star_powers": ["Soul Link", "Shadow Cloak"], "hypercharge": "Bokor" },
-    { "id": "gigi", "name": "Gigi", "rarity": "Mythic", "emoji_name": "brawler_gigi", "gadgets": ["Star Shine", "Glitter Bomb"], "star_powers": ["Main Stage", "Spotlight"], "hypercharge": "Pas De Deux" },
-    { "id": "finx", "name": "Finx", "rarity": "Mythic", "emoji_name": "brawler_finx", "gadgets": ["Quick Fix", "Blade Storm"], "star_powers": ["Sharp Edge", "Swift Strike"], "hypercharge": "Temporal Traveling" },
-    { "id": "ollie", "name": "Ollie", "rarity": "Mythic", "emoji_name": "brawler_ollie", "gadgets": ["Oil Slick", "Flash Bang"], "star_powers": ["Slippery", "High Octane"], "hypercharge": "Ain't No Half-Supering" },
+    { "id": "moe", "name": "Moe", "rarity": "Mythic", "emoji_name": "brawler_moe", "gadgets": ["Dodgy Digging", "Rat Race"], "star_powers": ["Skipping Stones", "Speeding Ticket"], "hypercharge": "The Big Cheese" },
+    { "id": "clancy", "name": "Clancy", "rarity": "Mythic", "emoji_name": "brawler_clancy", "gadgets": ["Snappy Shooting", "Tactical Retreat"], "star_powers": ["Recon", "Pumping Up"], "hypercharge": "Recall of Duty" },
+    { "id": "juju", "name": "Juju", "rarity": "Mythic", "emoji_name": "brawler_juju", "gadgets": ["Voodoo Chile", "Elementalist"], "star_powers": ["Guarded Gris-Gris", "Numbing Needles"], "hypercharge": "Bokor" },
+    { "id": "gigi", "name": "Gigi", "rarity": "Mythic", "emoji_name": "brawler_gigi", "gadgets": ["Longer Strings", "Disappearing Act"], "star_powers": ["Plié Protection", "A Helping Hand"], "hypercharge": "Pas De Deux" },
+    { "id": "finx", "name": "Finx", "rarity": "Mythic", "emoji_name": "brawler_finx", "gadgets": ["Back to the Finxture", "No Escape"], "star_powers": ["Hieroglyph Halt", "Primer"], "hypercharge": "Temporal Traveling" },
+    { "id": "ollie", "name": "Ollie", "rarity": "Mythic", "emoji_name": "brawler_ollie", "gadgets": ["Regulate", "All Eyez on Me"], "star_powers": ["Kick, Push", "Renegade"], "hypercharge": "Ain't No Half-Supering" },
     { "id": "lumi", "name": "Lumi", "rarity": "Mythic", "emoji_name": "brawler_lumi", "gadgets": ["Light Show", "Prism Wall"], "star_powers": ["Refraction", "Spectrum"], "hypercharge": "Drum Solo" },
-    { "id": "jaeyong", "name": "Jae-Yong", "rarity": "Mythic", "emoji_name": "brawler_jaeyong", "gadgets": ["Dragon Breath", "Jade Shield"], "star_powers": ["Honor", "Legacy"], "hypercharge": "Crowd-Pleaser" },
-    { "id": "alli", "name": "Alli", "rarity": "Mythic", "emoji_name": "brawler_alli", "gadgets": ["Water Jet", "Coral Trap"], "star_powers": ["Deep Sea", "Current"], "hypercharge": "Swamp Snacking" },
-    { "id": "ziggy", "name": "Ziggy", "rarity": "Mythic", "emoji_name": "brawler_ziggy", "gadgets": ["Static Shock", "Volt Jump"], "star_powers": ["High Voltage", "Conductivity"], "hypercharge": "The Grand Vortex" },
-    { "id": "mina", "name": "Mina", "rarity": "Mythic", "emoji_name": "brawler_mina", "gadgets": ["Jewel Toss", "Crystal Wall"], "star_powers": ["Pure Carats", "Hard Rock"], "hypercharge": "Triplecane" },
-    { "id": "glowbert", "name": "Glowbert", "rarity": "Mythic", "emoji_name": "brawler_glowbert", "gadgets": ["Slippery Savior", "More Lumens!"], "star_powers": ["Biotic Ecosystem", "Parasitism"], "hypercharge": "" },
-    
+    { "id": "jaeyong", "name": "Jae-Yong", "rarity": "Mythic", "emoji_name": "brawler_jaeyong", "gadgets": ["Weekend Warrior", "Time For a Slow Song"], "star_powers": ["The Crowd Goes Mild", "Extra High Note"], "hypercharge": "Crowd-Pleaser" },
+    { "id": "alli", "name": "Alli", "rarity": "Mythic", "emoji_name": "brawler_alli", "gadgets": ["Feed the Gators", "Cold-Blooded"], "star_powers": ["Lizard Limbs", "You Better Run..."], "hypercharge": "Swamp Snacking" },
+    { "id": "ziggy", "name": "Ziggy", "rarity": "Mythic", "emoji_name": "brawler_ziggy", "gadgets": ["Electric Shuffle", "Now You See Me..."], "star_powers": ["Thunderstruck", "The Great Ziggini"], "hypercharge": "The Grand Vortex" },
+    { "id": "mina", "name": "Mina", "rarity": "Mythic", "emoji_name": "brawler_mina", "gadgets": ["Windmill", "Capo-What?"], "star_powers": ["Zum Zum Zum", "Blown Away"], "hypercharge": "Triplecane" },
+    { "id": "glowbert", "name": "Glowbert", "rarity": "Mythic", "emoji_name": "brawler_glowbert", "gadgets": ["Slippery Savior", "More Lumens!"], "star_powers": ["Biotic Ecosystem", "Parasitism"], "hypercharge": "Abiotic Ecosystem" },
+ 
     { "id": "spike", "name": "Spike", "rarity": "Legendary", "emoji_name": "brawler_spike", "gadgets": ["Popping Pincushion", "Life Plant"], "star_powers": ["Fertilize", "Curveball"], "hypercharge": "Blooming Season" },
     { "id": "crow", "name": "Crow", "rarity": "Legendary", "emoji_name": "brawler_crow", "gadgets": ["Defense Booster", "Slowing Toxin"], "star_powers": ["Extra Toxic", "Carrion Crow"], "hypercharge": "Utility Knives" },
     { "id": "leon", "name": "Leon", "rarity": "Legendary", "emoji_name": "brawler_leon", "gadgets": ["Clone Projector", "Lollipop Drop"], "star_powers": ["Smoke Trails", "Invisiheal"], "hypercharge": "Limbo" },
@@ -100,8 +100,8 @@
     { "id": "cordelius", "name": "Cordelius", "rarity": "Legendary", "emoji_name": "brawler_cordelius", "gadgets": ["Replanting", "Poison Mushroom"], "star_powers": ["Comboshrooms", "Mushroom Kingdom"], "hypercharge": "Complete Darkness" },
     { "id": "kit", "name": "Kit", "rarity": "Legendary", "emoji_name": "brawler_kit", "gadgets": ["Cardboard Box", "Cheeseburger"], "star_powers": ["Power Hungry", "Overly Attached"], "hypercharge": "Making Biscuits" },
     { "id": "draco", "name": "Draco", "rarity": "Legendary", "emoji_name": "brawler_draco", "gadgets": ["Upper Cut", "Last Stand"], "star_powers": ["Expose", "Shredding"], "hypercharge": "Fire & Flames" },
-    { "id": "kenji", "name": "Kenji", "rarity": "Legendary", "emoji_name": "brawler_kenji", "gadgets": ["Sashimi Slash", "Healing Ginger"], "star_powers": ["Nigiri Nemesis", "Wasabi Wipeout"], "hypercharge": "All You Can Eat" },
-    { "id": "pierce", "name": "Pierce", "rarity": "Legendary", "emoji_name": "brawler_pierce", "gadgets": ["Armor Break", "Quick Reload"], "star_powers": ["Precision", "Vitality"], "hypercharge": "" },
+    { "id": "kenji", "name": "Kenji", "rarity": "Legendary", "emoji_name": "brawler_kenji", "gadgets": ["Dashi Dash", "Hosomaki Healing"], "star_powers": ["Studied the Blade", "Nigiri Nemesis"], "hypercharge": "All You Can Eat" },
+    { "id": "pierce", "name": "Pierce", "rarity": "Legendary", "emoji_name": "brawler_pierce", "gadgets": ["Bottomless Mags", "You Only Brawl Twice"], "star_powers": ["Mission: Swimpossible", "Slip 'n Slide"], "hypercharge": "Hyper Wave" },
 
-    { "id": "kaze", "name": "Kaze", "rarity": "Ultra Legendary", "emoji_name": "brawler_kaze", "gadgets": ["Wind Tunnel", "Air Blade"], "star_powers": ["Hurricane", "Sky High"], "hypercharge": "Ninja Form" }
+    { "id": "kaze", "name": "Kaze", "rarity": "Ultra Legendary", "emoji_name": "brawler_kaze", "gadgets": ["Gracious Host", "Hensojutsu"], "star_powers": ["Advanced Techniques", "Gratuity Included"], "hypercharge": "Ninja Form" }
 ]
