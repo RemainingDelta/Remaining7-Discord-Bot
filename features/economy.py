@@ -71,7 +71,7 @@ class LeaderboardView(discord.ui.View):
                 else: rank = f"**#{index}**"
                 
                 # Format: 🥇 <@User> - 💰 **Balance**
-                line = f"{rank} <@{uid}> - 💰 **{bal}**"
+                line = f"{rank} <@{uid}> - 💰 **{int(bal)}**"
                 description_lines.append(line)
             
             embed.description = "\n".join(description_lines)
@@ -404,7 +404,7 @@ class Economy(commands.Cog):
         if balance < price:
             embed = discord.Embed(
                 title="❌ **Insufficient Balance**",
-                description=f"You need **{price - balance} more R7 tokens** to purchase **{item_info['display']}**.",
+                description=f"You need **{int(price - balance)} more R7 tokens** to purchase **{item_info['display']}**.",
                 color=discord.Color.red()
             )
             await interaction.response.send_message(embed=embed, ephemeral=True)
@@ -419,7 +419,7 @@ class Economy(commands.Cog):
             description=f"You have purchased **{item_info['display']}**!\nPlease use `/redeem` to claim it.",
             color=discord.Color.green()
         )
-        embed.set_footer(text=f"Your new balance: {new_balance} R7 tokens")
+        embed.set_footer(text=f"Your new balance: {int(new_balance)} R7 tokens")
         await interaction.response.send_message(embed=embed)
 
     @app_commands.command(name="redeem", description="Redeem an item you own.")
@@ -533,7 +533,7 @@ class Economy(commands.Cog):
             title="🎉 Daily Reward Claimed!",
             description=(
                 f"{interaction.user.mention} received **{final_tokens} R7 tokens** (including level bonus)!\n"
-                f"New balance: **{new_balance} R7 tokens**.\n"
+                f"New balance: **{int(new_balance)} R7 tokens**.\n"
                 f"Current level: **{level}**."
             ),
             color=discord.Color.green()
@@ -549,7 +549,7 @@ class Economy(commands.Cog):
         balance = await get_user_balance(str(target.id))
         embed = discord.Embed(
             title="💰 **R7 Token Balance**",
-            description=f"<@{target.id}> has **{balance} R7 tokens**.",
+            description=f"<@{target.id}> has **{int(balance)} R7 tokens**.",
             color=discord.Color.blue()
         )
         embed.set_footer(text=f"Requested by {interaction.user.name}", icon_url=interaction.user.display_avatar.url)
