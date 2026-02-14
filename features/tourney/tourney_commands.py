@@ -29,6 +29,7 @@ from features.config import (
     ALLOWED_STAFF_ROLES,
     OTHER_TICKET_CHANNEL_ID,
     MEMBER_ROLE_ID,
+    ADMIN_ROLE_ID,
     TOURNEY_SUPPORT_CHANNEL_ID,
     PRE_TOURNEY_SUPPORT_CHANNEL_ID,
     TOURNEY_CATEGORY_ID,
@@ -874,7 +875,7 @@ def setup_tourney_commands(bot: commands.Bot):
     ])
     async def payout_add(interaction: discord.Interaction, mode: str, amount: float, staff_mentions: str, reason: str):
         # 1. Security Check
-        if not isinstance(interaction.user, discord.Member) or not is_staff(interaction.user):
+        if not isinstance(interaction.user, discord.Member) or not any(role.id == ADMIN_ROLE_ID for role in interaction.user.roles):
             await interaction.response.send_message("❌ You do not have permission to manage payouts.", ephemeral=True)
             return
 
@@ -942,7 +943,7 @@ def setup_tourney_commands(bot: commands.Bot):
     @app_commands.command(name="payout-reset", description="Clear payouts (Cash Out).")
     @app_commands.describe(target="Leave empty to reset ALL, or tag a user to reset only them.")
     async def payout_reset(interaction: discord.Interaction, target: discord.User = None):
-        if not isinstance(interaction.user, discord.Member) or not is_staff(interaction.user):
+        if not isinstance(interaction.user, discord.Member) or not any(role.id == ADMIN_ROLE_ID for role in interaction.user.roles):
             await interaction.response.send_message("❌ Permission denied.", ephemeral=True)
             return
 
