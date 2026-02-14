@@ -254,12 +254,26 @@ class Economy(commands.Cog):
         self.supply_drop_task.cancel()
         
     @commands.Cog.listener()
+    @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
         if message.author.bot: return
         if message.content.startswith('!'): return
 
         user_id = str(message.author.id)
         current_timestamp = time.time()
+        today_date = datetime.utcnow().strftime("%Y-%m-%d")
+
+        # --- NEW: TRACK DAILY MESSAGE COUNT ---
+        # Format: "YYYY-MM-DD:COUNT" (e.g., "2026-02-14:3")
+        daily_msg_data = await get_setting(f"daily_msg_count_{user_id}", f"{today_date}:0")
+        stored_date, count = daily_msg_data.split(":")
+        
+        if stored_date == today_date:
+            new_count = int(count) + 1
+        else:
+            new_count = 1 # It's a new day, reset to 1
+            
+        await set_setting(f"daily_msg_count_{user_id}", f"{today_date}:{new_count}")
 
         # --- PART 1: TOKENS (ON 1 MINUTE COOLDOWN) ---
         last_message_str = await get_setting(f"last_message_{user_id}")
@@ -502,23 +516,46 @@ class Economy(commands.Cog):
     @app_commands.command(name="daily", description="Claim your daily R7 tokens!")
     async def daily(self, interaction: discord.Interaction):
         user_id = str(interaction.user.id)
+        today_date = datetime.utcnow().strftime("%Y-%m-%d")
         now = datetime.utcnow()
+        
+        # 1. FETCH DATA
+        daily_msg_data = await get_setting(f"daily_msg_count_{user_id}", f"{today_date}:0")
+        stored_date, count = daily_msg_data.split(":")
+        msg_count = int(count) if stored_date == today_date else 0
+        
         last_daily_str = await get_setting(f"daily_{user_id}")
+        cooldown_remaining = None
         if last_daily_str:
             last_daily = datetime.utcfromtimestamp(float(last_daily_str))
             time_since = now - last_daily
             if time_since < timedelta(days=1):
-                remaining = timedelta(days=1) - time_since
-                hours, remainder = divmod(remaining.total_seconds(), 3600)
-                minutes, seconds = divmod(remainder, 60)
-                embed = discord.Embed(
-                    title="⏳ Daily Reward Cooldown",
-                    description=f"{interaction.user.mention}, please wait **{int(hours)} hours, {int(minutes)} minutes** before claiming your daily tokens again.",
-                    color=discord.Color.red()
-                )
-                await interaction.response.send_message(embed=embed, ephemeral=False)
-                return
+                cooldown_remaining = timedelta(days=1) - time_since
 
+        # 2. COMBINED CHECK (MESSAGES OR COOLDOWN)
+        if msg_count < 5 or cooldown_remaining:
+            # Prepare the status strings
+            msg_status = f"✅ **Complete** (5/5)" if msg_count >= 5 else f"❌ **Incomplete** ({msg_count}/5)"
+            
+            if cooldown_remaining:
+                h, r = divmod(cooldown_remaining.total_seconds(), 3600)
+                m, _ = divmod(r, 60)
+                time_status = f"❌ **Cooldown:** {int(h)}h {int(m)}m remaining"
+            else:
+                time_status = "✅ **Ready to claim!**"
+
+            embed = discord.Embed(
+                title="🔒 Daily Reward Status",
+                description="You must complete both requirements to claim your tokens:",
+                color=discord.Color.orange()
+            )
+            embed.add_field(name="Chat Activity", value=msg_status, inline=False)
+            embed.add_field(name="Time Requirement", value=time_status, inline=False)
+            
+            await interaction.response.send_message(embed=embed, ephemeral=False)
+            return
+
+        # 3. GRANT REWARD (If both checks pass)
         daily_tokens = random.randint(80, 160)
         level, _ = await get_leveling_data(user_id)
         bonus_multiplier = 1 + (level - 1) * 0.05
@@ -526,21 +563,19 @@ class Economy(commands.Cog):
 
         current_balance = await get_user_balance(user_id)
         new_balance = current_balance + final_tokens
+        
         await update_user_balance(user_id, new_balance)
         await set_setting(f"daily_{user_id}", str(now.timestamp()))
 
         embed = discord.Embed(
             title="🎉 Daily Reward Claimed!",
             description=(
-                f"{interaction.user.mention} received **{final_tokens} R7 tokens** (including level bonus)!\n"
-                f"New balance: **{int(new_balance)} R7 tokens**.\n"
-                f"Current level: **{level}**."
+                f"You received **{final_tokens} R7 tokens**!\n"
+                f"New balance: **{int(new_balance)}** | Level: **{level}**"
             ),
             color=discord.Color.green()
         )
-        embed.set_footer(text="Come back in 24 hours for more rewards!")
-        await interaction.response.send_message(embed=embed, ephemeral=False)
-
+        await interaction.response.send_message(embed=embed)
     @app_commands.command(name="balance", description="Check your or another user's R7 token balance.")
     @app_commands.describe(user="The user whose balance you want to check (leave blank for your own balance).")
     async def balance(self, interaction: discord.Interaction, user: Optional[discord.User] = None):
