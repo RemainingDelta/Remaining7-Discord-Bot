@@ -4,3 +4,5 @@ motor
 dnspython
 certifi
 uuid
+deep-translator
+langdetect
