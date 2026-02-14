@@ -53,6 +53,10 @@ async def on_ready():
         await bot.load_extension("features.quests")
         print("✅ Loaded Feature: Quests")
         
+        # Load Translation Feature
+        await bot.load_extension("features.translation")
+        print("✅ Loaded Feature: Translation")
+        
     except Exception as e:
         print(f"❌ Error loading features: {e}")
 
