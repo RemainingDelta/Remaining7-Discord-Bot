@@ -42,10 +42,25 @@ class Translation(commands.Cog):
         ]
         # Discord only allows returning up to 25 choices at a time
         return choices[:25]
+    
+    def get_language_code(self, user_input: str) -> str:
+        """Matches user input to a language code from LANG_MAP."""
+        user_input = user_input.lower().strip()
+        
+        # Check if they provided the code directly (e.g., 'es')
+        if user_input in LANG_MAP:
+            return user_input
+            
+        # Check if they provided the full name (e.g., 'spanish')
+        for code, name in LANG_MAP.items():
+            if name.lower() == user_input:
+                return code
+        
+        return None
 
     # --- PREFIX COMMAND (!translate) ---
     @commands.command(name="translate", aliases=["t"])
-    async def translate_prefix(self, ctx: commands.Context):
+    async def translate_prefix(self, ctx: commands.Context, source_input: str = None):
         if not ctx.message.reference:
             await ctx.reply("❌ Please reply to a message to translate it.")
             return
@@ -61,12 +76,37 @@ class Translation(commands.Cog):
             await ctx.reply("❌ No text to translate.")
             return
 
+        # Handle Source Language Selection
+        source_code = "auto" # Default to auto-detect
+        display_name = "Auto-Detected"
+
+        if source_input:
+            # Try to match user input (e.g., "hindi" or "hi") to our LANG_MAP
+            match_code = self.get_language_code(source_input)
+            if match_code:
+                source_code = match_code
+                display_name = LANG_MAP[match_code]
+            else:
+                await ctx.reply(f"❌ Unknown language: `{source_input}`. Try something like `hindi` or `es`.")
+                return
+
         try:
-            lang_code = await asyncio.to_thread(detect, text)
-            source_lang = LANG_MAP.get(lang_code, lang_code.upper())
-            translated = await asyncio.to_thread(GoogleTranslator(source='auto', target='en').translate, text)
+            # If auto-detecting, we still want to know what it found for the embed title
+            if source_code == "auto":
+                detected_code = await asyncio.to_thread(detect, text)
+                display_name = LANG_MAP.get(detected_code, detected_code.upper())
+
+            translated = await asyncio.to_thread(
+                GoogleTranslator(source=source_code, target='en').translate, 
+                text
+            )
             
-            embed = discord.Embed(title=f"🌐 Translated from {source_lang}", color=discord.Color.blue())
+            embed = discord.Embed(title=f"🌐 Translated from {display_name}", color=discord.Color.blue())
+            
+            # Add a small note if it was forced manually
+            if source_input:
+                embed.set_author(name="Manual Language Override")
+
             embed.add_field(name="Original Message", value=f"> {text}", inline=False)
             embed.add_field(name="English Translation", value=f"**{translated}**", inline=False)
             embed.set_footer(text=f"Requested by {ctx.author.display_name}", icon_url=ctx.author.display_avatar.url)
