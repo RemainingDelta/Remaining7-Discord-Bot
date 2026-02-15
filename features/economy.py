@@ -20,6 +20,7 @@ from database.mongo import (
 from features.config import (
     ADMIN_ROLE_ID,
     GENERAL_CHANNEL_ID,
+    EVENT_ANNOUNCEMENTS_CHANNEL_ID,
     SHOP_DATA,
     MODERATOR_ROLE_ID,
     TRIAL_MODERATOR_ROLE_ID,
@@ -715,6 +716,68 @@ class Economy(commands.Cog):
                 await interaction.response.send_message(f"🗑️ **Removed:** {member.mention} has been revoked bot command permissions.")
             else:
                 await interaction.response.send_message(f"⚠️ {member.mention} did not have special permissions.", ephemeral=True)
+                
+    @app_commands.command(name="economy_help", description="A complete guide to the R7 Token economy.")
+    async def economy_help(self, interaction: discord.Interaction):
+        # Channel mentions for better UX
+        general_ch = f"<#{GENERAL_CHANNEL_ID}>"
+        event_ch = f"<#{EVENT_ANNOUNCEMENTS_CHANNEL_ID}>"
+
+        # --- EMBED 1: WELCOME & EARNING ---
+        earn_embed = discord.Embed(
+            title="💰 **R7 Economy: How to Earn**",
+            description=(
+                "Welcome to the R7 Token system! Participate in the community to earn tokens "
+                "and unlock rewards. **The reward budget resets every month!**"
+            ),
+            color=discord.Color.gold()
+        )
+        earn_text = (
+            f"💬 **Chatting:** Earn **2-5 Tokens** every message in **any channel** across the server! (20s cooldown)\n"
+            "📅 **Daily Rewards:** Use `/daily` to claim tokens every 24h. "
+            "*Requires 5 messages sent within the current UTC day.*\n"
+            f"🪂 **Supply Drops:** Random crates appear in {general_ch}! Click the button to claim.\n"
+            f"🏆 **Events:** Earn massive token rewards in {event_ch}.\n"
+            "🚀 **Booster Bonus:** Server Boosters receive a **2% increase** in coins on average."
+        )
+        earn_embed.add_field(name="📈 Earning Methods", value=earn_text, inline=False)
+        earn_embed.set_thumbnail(url=self.bot.user.display_avatar.url)
+
+        # --- EMBED 2: HOW TO SPEND ---
+        spend_embed = discord.Embed(
+            title="🛒 **R7 Economy: How to Spend**",
+            description="Turn your tokens into real-world rewards.",
+            color=discord.Color.blue()
+        )
+        spend_text = (
+            "🛒 **The Shop:** Use `/shop` to browse rewards like Brawl Pass, Discord Nitro, and PayPal.\n"
+            "💳 **Purchasing:** Use `/buy <item>` to spend your tokens on an item.\n"
+            "🎟️ **Redeeming:** Use `/redeem <item>` to open a ticket and claim your reward from staff."
+        )
+        spend_embed.add_field(name="🛍️ Shopping Flow", value=spend_text, inline=False)
+
+        # --- EMBED 3: COMMAND REFERENCE ---
+        cmd_embed = discord.Embed(
+            title="📜 **Quick Command Reference**",
+            color=discord.Color.light_grey()
+        )
+        cmd_text = (
+            "**Standard Commands:**\n"
+            "`/balance` - View your token total\n"
+            "`/daily` - Claim daily tokens & check progress\n"
+            "`/leaderboard` - See top token holders\n"
+            "`/level` - Check your rank & XP progress\n"
+            "`/levels_leaderboard` - See top server levels\n"
+            "`/shop` - Browse the token store\n"
+            "`/buy` - Purchase an item from the shop\n"
+            "`/redeem` - Claim your purchased rewards\n\n"
+            "**Utility:**\n"
+            "`/checkbudget` - See remaining monthly reward budget"
+        )
+        cmd_embed.description = cmd_text
+
+        # Sending all three embeds in a single interaction response
+        await interaction.response.send_message(embeds=[earn_embed, spend_embed, cmd_embed])
 
 async def setup(bot):
     await bot.add_cog(Economy(bot))
