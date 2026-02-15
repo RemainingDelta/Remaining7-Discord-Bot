@@ -1066,7 +1066,7 @@ def setup_tourney_commands(bot: commands.Bot):
         
         await interaction.response.send_message(embed=embed, ephemeral=True)
         
-    @app_commands.command(name="tourney_admin_help", description="STAFF ONLY: Guide to Tournament Management commands.")
+    @app_commands.command(name="tourney-admin-help", description="STAFF ONLY: Guide to Tournament Management commands.")
     async def tourney_admin_help(interaction: discord.Interaction):
         # Security Check: Only allow staff
         if not isinstance(interaction.user, discord.Member) or not is_staff(interaction.user):
