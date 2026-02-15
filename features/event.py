@@ -339,6 +339,40 @@ class Events(commands.Cog):
         
         view = PayoutConfirmView(target_message, matches, interaction.user)
         await interaction.followup.send(embed=embed, view=view)
+        
+    @app_commands.command(name="event-staff-help", description="STAFF ONLY: Guide for managing event channels.")
+    async def event_staff_help(self, interaction: discord.Interaction):
+        # 1. Permission Check
+        if not await self.has_event_permission(interaction):
+            await interaction.response.send_message("❌ Permission Denied: This command is for Event Staff only.", ephemeral=True)
+            return
+
+        embed = discord.Embed(
+            title="📋 Event Staff Guide",
+            description="Reference guide for managing live event channels and automated cleanup tasks.",
+            color=discord.Color.blue()
+        )
+
+        # --- Channel Management ---
+        mgmt_text = (
+            f"`/clear-red` - Purge all messages in <#{RED_EVENT_CHANNEL_ID}>\n"
+            f"`/clear-blue` - Purge all messages in <#{BLUE_EVENT_CHANNEL_ID}>\n"
+            f"`/clear-green` - Purge all messages in <#{GREEN_EVENT_CHANNEL_ID}>\n"
+            f"*Note: These commands must be run in <#{EVENT_STAFF_CHANNEL_ID}>.*"
+        )
+        embed.add_field(name="🧹 Manual Purge Commands", value=mgmt_text, inline=False)
+
+        # --- Automated Cleanup ---
+        cleanup_text = (
+            "Every day at **12:00 AM ET**, the bot checks for messages older than **7 days**.\n"
+            "If a channel is detected as 'stale', a **Cleanup Warning** will be posted here.\n\n"
+            "**How to handle alerts:**\n"
+            "Click the button on the alert embed to immediately purge that channel. "
+            "This keeps channels clean and prevents Discord's 14-day bulk-delete limitation."
+        )
+        embed.add_field(name="⏲️ Automated Cleanup System", value=cleanup_text, inline=False)
+
+        await interaction.response.send_message(embed=embed, ephemeral=True)
 
 async def setup(bot):
     await bot.add_cog(Events(bot))
