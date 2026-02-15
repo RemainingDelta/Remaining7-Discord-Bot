@@ -36,7 +36,8 @@ from features.config import (
     PRE_TOURNEY_CATEGORY_ID,
     TOURNEY_CLOSED_CATEGORY_ID,
     PRE_TOURNEY_CLOSED_CATEGORY_ID,
-    HALL_OF_FAME_CHANNEL_ID
+    HALL_OF_FAME_CHANNEL_ID,
+    BOT_VERSION
 )
 from .tourney_utils import (
     close_ticket_via_command,
@@ -1074,7 +1075,7 @@ def setup_tourney_commands(bot: commands.Bot):
             return
 
         embed = discord.Embed(
-            title="🛠️ Tournament Admin Guide",
+            title=f"🛠️ Tournament Admin Guide | {BOT_VERSION}",
             description="Welcome to the Tourney Staff portal. Here is your cheat sheet for managing tournaments and support tickets.",
             color=discord.Color.dark_theme()
         )
