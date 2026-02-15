@@ -255,7 +255,6 @@ class Economy(commands.Cog):
         self.supply_drop_task.cancel()
         
     @commands.Cog.listener()
-    @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
         if message.author.bot: return
         if message.content.startswith('!'): return
