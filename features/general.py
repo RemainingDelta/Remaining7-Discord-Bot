@@ -93,7 +93,57 @@ class General(commands.Cog):
         )
         embed.add_field(name="🚨 Security Protocol", value=security_text, inline=False)
 
-        embed.set_footer(text="Moderator Portal • Use tools with discretion")
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+        
+    @app_commands.command(name="admin-help", description="ADMIN ONLY: Master reference for high-level bot management.")
+    async def admin_help(self, interaction: discord.Interaction):
+        # 1. Strict Permission Check (Admins Only)
+        if not any(role.id == ADMIN_ROLE_ID for role in interaction.user.roles):
+            await interaction.response.send_message("❌ Access Denied: This command is restricted to Administrators.", ephemeral=True)
+            return
+
+        embed = discord.Embed(
+            title=f"👑 Admin Command Manual | {BOT_VERSION}",
+            description="Centralized reference for the most powerful bot functions and financial overrides.",
+            color=discord.Color.from_rgb(255, 0, 0) # Bold Red for Admin
+        )
+
+        # --- Economy Management ---
+        economy_text = (
+            "`/drop <amount>` - Manual supply drop in general.\n"
+            "`/give <user> <tokens/xp> <amount>` - Grant resources.\n"
+            "`/set-balance <user> <amount>` - Hard reset of a user's tokens.\n"
+            "`/perm <add/remove> <user>` - Manage bot command access."
+        )
+        embed.add_field(name="💰 Economy Management", value=economy_text, inline=False)
+
+        # --- Event Operations ---
+        event_text = (
+            "`/event-rewards <msg_id>` - Process token distribution from an announcement message.\n"
+            "*(Requires formatting: @User 500)*"
+        )
+        embed.add_field(name="🏆 Event Operations", value=event_text, inline=False)
+
+        # --- Security & Hacked Protocol ---
+        security_text = (
+            "`/hacked <user> [days]` - 7-day timeout + global message purge.\n"
+            "`/unhacked <user>` - Recover account (clear timeout/flag).\n"
+            "`/hacked-list` - View all currently compromised accounts."
+        )
+        embed.add_field(name="🚨 Security & Hacked Protocol", value=security_text, inline=False)
+
+        # --- Tournament & Financials ---
+        tourney_text = (
+            "`/blacklist <add/remove/list>` - Manage tournament-banned users.\n"
+            "`/payout-add` - Record group payouts for staff treasury.\n"
+            "`/payout-list` - View all pending staff payout totals.\n"
+            "`/payout-history` - View audit logs of group payouts.\n"
+            "`/payout-reset` - Clear receipts and cash out staff treasury."
+        )
+        embed.add_field(name="⚔️ Tournament & Financials", value=tourney_text, inline=False)
+
+
+        # Ephemeral = True ensures only the Admin sees this menu
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
 async def setup(bot):
