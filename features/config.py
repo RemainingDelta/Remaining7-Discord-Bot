@@ -459,3 +459,5 @@ BRAWLER_UPGRADE_COSTS = {
     10: {"pp": 890,  "coins": 1875},
     11: {"pp": 1440, "coins": 2800}
 }
+
+BOT_VERSION = "v1.2.2"
