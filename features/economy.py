@@ -629,14 +629,14 @@ class Economy(commands.Cog):
         embed.set_footer(text=footer)
         await interaction.response.send_message(embed=embed)
 
-    @app_commands.command(name="levels_leaderboard", description="View the server's level leaderboard")
+    @app_commands.command(name="levels-leaderboard", description="View the server's level leaderboard")
     async def levels_leaderboard(self, interaction: discord.Interaction):
         await interaction.response.defer()
         view = LevelsLeaderboardView(interaction.user)
         embed = await view.generate_embed()
         await interaction.followup.send(embed=embed, view=view)
 
-    @app_commands.command(name="checkbudget", description="Check the remaining budget for redemptions.")
+    @app_commands.command(name="check-budget", description="Check the remaining budget for redemptions.")
     async def check_budget(self, interaction: discord.Interaction):
         budget_str = await get_setting("monthly_budget", "50.00")
         try: TOTAL_BUDGET = float(budget_str)
@@ -689,7 +689,7 @@ class Economy(commands.Cog):
             msg = f"Gave **{amount} Levels** to {user.mention}."
         await interaction.response.send_message(embed=discord.Embed(title="✅ Given", description=msg, color=discord.Color.green()))
 
-    @app_commands.command(name="setbalance", description="Set a user's R7 token balance.")
+    @app_commands.command(name="set-balance", description="Set a user's R7 token balance.")
     async def setbalance(self, interaction: discord.Interaction, user: discord.User, amount: int):
         if not await self.has_permission(interaction):
             await interaction.response.send_message("❌ Permission Denied", ephemeral=True)
@@ -717,7 +717,7 @@ class Economy(commands.Cog):
             else:
                 await interaction.response.send_message(f"⚠️ {member.mention} did not have special permissions.", ephemeral=True)
                 
-    @app_commands.command(name="economy_help", description="A complete guide to the R7 Token economy.")
+    @app_commands.command(name="economy-help", description="A complete guide to the R7 Token economy.")
     async def economy_help(self, interaction: discord.Interaction):
         # Channel mentions for better UX
         general_ch = f"<#{GENERAL_CHANNEL_ID}>"

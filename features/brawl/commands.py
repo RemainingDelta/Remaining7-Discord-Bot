@@ -682,7 +682,7 @@ class BrawlCommands(commands.Cog):
         embed.set_footer(text=SUPERCELL_DISCLAIMER)
         await interaction.followup.send(embed=embed)
     
-    @app_commands.command(name="buy_brawler", description="Purchase specific brawlers using your Credits")
+    @app_commands.command(name="buy-brawler", description="Purchase specific brawlers using your Credits")
     async def buy_brawler(self, interaction: discord.Interaction):
         user_id = str(interaction.user.id)
         # Fetch the current list of owned brawlers
@@ -769,7 +769,7 @@ class BrawlCommands(commands.Cog):
         embed.set_footer(text=SUPERCELL_DISCLAIMER)
         await interaction.response.send_message(embed=embed, view=view)
         
-    @app_commands.command(name="buy_ability", description="Buy Gadgets, Star Powers, and Hypercharges")
+    @app_commands.command(name="buy-ability", description="Buy Gadgets, Star Powers, and Hypercharges")
     @app_commands.autocomplete(brawler=brawler_autocomplete) 
     async def buy_ability(self, interaction: discord.Interaction, brawler: str):
         brawler_id = brawler.lower()
