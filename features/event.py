@@ -13,7 +13,8 @@ from features.config import (
     BLUE_EVENT_CHANNEL_ID,
     GREEN_EVENT_CHANNEL_ID,
     EVENT_STAFF_CHANNEL_ID,
-    EVENT_ANNOUNCEMENTS_CHANNEL_ID
+    EVENT_ANNOUNCEMENTS_CHANNEL_ID,
+    BOT_VERSION
 )
 
 # Mapping for easier looping
@@ -348,7 +349,7 @@ class Events(commands.Cog):
             return
 
         embed = discord.Embed(
-            title="📋 Event Staff Guide",
+            title=f"📋 Event Staff Guide | {BOT_VERSION}",
             description="Reference guide for managing live event channels and automated cleanup tasks.",
             color=discord.Color.blue()
         )

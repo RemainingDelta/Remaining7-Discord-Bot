@@ -2,7 +2,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from features.config import BOT_VERSION 
+from features.config import ADMIN_ROLE_ID, MODERATOR_ROLE_ID, BOT_VERSION
 
 class General(commands.Cog):
     def __init__(self, bot):
@@ -62,6 +62,39 @@ class General(commands.Cog):
         embed.set_thumbnail(url=self.bot.user.display_avatar.url)
 
         await interaction.response.send_message(embed=embed)
+        
+    @app_commands.command(name="mod-help", description="STAFF ONLY: Guide for Moderator economy and security tools.")
+    async def mod_help(self, interaction: discord.Interaction):
+        # Local Permission Check
+        user_role_ids = [role.id for role in interaction.user.roles]
+        if not (ADMIN_ROLE_ID in user_role_ids or MODERATOR_ROLE_ID in user_role_ids):
+            await interaction.response.send_message("❌ Permission Denied: This command is for Staff only.", ephemeral=True)
+            return
+
+        embed = discord.Embed(
+            title=f"🛡️ Moderator Guide | {BOT_VERSION}",
+            description="Quick-reference for managing the R7 economy and server security protocols.",
+            color=discord.Color.dark_blue()
+        )
+
+        # Economy Oversight
+        economy_text = (
+            "`/give <user> <type> <amount>` - Manually grant Tokens, XP, or Levels.\n"
+            "`/set-balance <user> <amount>` - Directly set a user's token balance."
+        )
+        embed.add_field(name="💰 Economy Oversight", value=economy_text, inline=False)
+
+        # Security Protocol
+        security_text = (
+            "`/hacked <user> [days]` - Times out a user and purges recent messages.\n"
+            "`!hacked` (Prefix) - Reply to a message with this to trigger the protocol.\n"
+            "`/unhacked <user>` - Removes hacked flag and clears timeout.\n"
+            "`/hacked-list` - View all users currently flagged as compromised."
+        )
+        embed.add_field(name="🚨 Security Protocol", value=security_text, inline=False)
+
+        embed.set_footer(text="Moderator Portal • Use tools with discretion")
+        await interaction.response.send_message(embed=embed, ephemeral=True)
 
 async def setup(bot):
     await bot.add_cog(General(bot))
