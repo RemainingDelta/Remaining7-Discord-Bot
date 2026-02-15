@@ -1096,6 +1096,12 @@ def setup_tourney_commands(bot: commands.Bot):
         )
         embed.add_field(name="🎫 Ticket Control", value=ticket_text, inline=False)
 
+        treasury_text = (
+            "`/payout-list` - View your personal and team pending payout totals.\n"
+            "`/payout-history` - View the audit log for group payout additions."
+        )
+        embed.add_field(name="💰 Treasury & Logs", value=treasury_text, inline=False)
+
         # --- 3. Moderation & Results ---
         mod_text = (
             "`/blacklist` `add/remove/list` - Manage users banned from participating.\n"
@@ -1114,6 +1120,7 @@ def setup_tourney_commands(bot: commands.Bot):
 
         # Ephemeral = True ensures no one else sees this message
         await interaction.response.send_message(embed=embed, ephemeral=True)
+   
     # --- Start the Dashboard Task ---
     asyncio.create_task(bot.add_cog(QueueDashboard(bot)))
     print("✅ Queue Dashboard task started.")
