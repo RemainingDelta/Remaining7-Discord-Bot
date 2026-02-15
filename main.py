@@ -36,6 +36,10 @@ async def on_ready():
 
     # 2. Load Features (Cogs)
     try:
+        # Load General Feature
+        await bot.load_extension("features.general")
+        print("✅ Loaded Feature: General")
+        
         await bot.load_extension("features.economy")
         print("✅ Loaded Feature: Economy")
         
