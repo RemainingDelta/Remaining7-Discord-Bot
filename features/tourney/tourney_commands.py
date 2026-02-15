@@ -1065,7 +1065,54 @@ def setup_tourney_commands(bot: commands.Bot):
         embed.add_field(name="Current Status", value=status, inline=False)
         
         await interaction.response.send_message(embed=embed, ephemeral=True)
+        
+    @app_commands.command(name="tourney_admin_help", description="STAFF ONLY: Guide to Tournament Management commands.")
+    async def tourney_admin_help(interaction: discord.Interaction):
+        # Security Check: Only allow staff
+        if not isinstance(interaction.user, discord.Member) or not is_staff(interaction.user):
+            await interaction.response.send_message("❌ Permission denied. This command is for Tournament Staff only.", ephemeral=True)
+            return
 
+        embed = discord.Embed(
+            title="🛠️ Tournament Admin Guide",
+            description="Welcome to the Tourney Staff portal. Here is your cheat sheet for managing tournaments and support tickets.",
+            color=discord.Color.dark_theme()
+        )
+
+        # --- 1. Session & Channel Management ---
+        session_text = (
+            "`!starttourney` - Wipes old tickets, locks the general server support channel, and posts the live support panel.\n"
+            "`!endtourney` - Closes all active tickets, generates staff stats, posts the Pre-Tourney panel, and unlocks general support.\n"
+            "`!lock` / `!unlock` - Manually close or open the general server support channel."
+        )
+        embed.add_field(name="⚙️ Session Management", value=session_text, inline=False)
+
+        # --- 2. Ticket Commands ---
+        ticket_text = (
+            "`!close` (or `!c`) - Closes the current ticket and adds to your completed stats.\n"
+            "`!reopen` - Moves a closed ticket back to the active category.\n"
+            "`/add` / `/remove` - Add or remove a specific user to/from the current ticket."
+        )
+        embed.add_field(name="🎫 Ticket Control", value=ticket_text, inline=False)
+
+        # --- 3. Moderation & Results ---
+        mod_text = (
+            "`/blacklist` `add/remove/list` - Manage users banned from participating.\n"
+            "`/hall-of-fame` - Post tournament winners and prize splits."
+        )
+        embed.add_field(name="⚖️ Moderation & Results", value=mod_text, inline=False)
+
+        # --- 4. Workflow Guide ---
+        workflow_text = (
+            "**1. Claiming:** When a user opens a ticket, read their submitted Team Name and Issue.\n"
+            "**2. Assisting:** Request screenshot proof for no-shows or score disputes.\n"
+            "**3. Matcherino:** Perform the necessary actions (advancing teams, resetting matches, etc.) on the bracket on the Matcherino website.\n"
+            "**4. Closing:** Once the issue is resolved in the bracket, let the players know they are good to go and type `!close` to archive the channel."
+        )
+        embed.add_field(name="🔄 Support Workflow", value=workflow_text, inline=False)
+
+        # Ephemeral = True ensures no one else sees this message
+        await interaction.response.send_message(embed=embed, ephemeral=True)
     # --- Start the Dashboard Task ---
     asyncio.create_task(bot.add_cog(QueueDashboard(bot)))
     print("✅ Queue Dashboard task started.")
@@ -1080,6 +1127,7 @@ def setup_tourney_commands(bot: commands.Bot):
     bot.tree.add_command(payout_reset)
     bot.tree.add_command(payout_history)
     bot.tree.add_command(check_queue)
+    bot.tree.add_command(tourney_admin_help)
     bot.tree.add_command(BlacklistGroup(bot))
 
 
@@ -1089,7 +1137,7 @@ def setup_tourney_commands(bot: commands.Bot):
             if active:
                 await increment_tourney_message_count(active['_id'])
         except Exception:
-            pass # Ignore errors here so we don't spam logs
+            pass 
 
     @bot.listen()
     async def on_message(message):
@@ -1102,6 +1150,5 @@ def setup_tourney_commands(bot: commands.Bot):
         # Check conditions (Fast in-memory checks)
         if "ticket-" in message.channel.name and message.channel.category_id in valid_categories:
             
-            # 🔥 CRITICAL CHANGE: Fire and forget!
             # This creates a background task so the bot doesn't wait for MongoDB.
             asyncio.create_task(background_stats_update())
