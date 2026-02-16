@@ -6,3 +6,5 @@ certifi
 uuid
 deep-translator
 langdetect
+requests
+requests-cache

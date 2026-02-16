@@ -19,6 +19,7 @@ from database.mongo import (
     get_active_tourney_session,
     end_tourney_session,
     increment_tourney_message_count,
+    update_matcherino_id,
     update_tourney_queue,
     increment_staff_closure,
     get_top_staff_stats
@@ -1121,6 +1122,30 @@ def setup_tourney_commands(bot: commands.Bot):
         # Ephemeral = True ensures no one else sees this message
         await interaction.response.send_message(embed=embed, ephemeral=True)
    
+    bot.active_brackets = {} 
+
+    @app_commands.command(name="set-matcherino", description="STAFF ONLY: Set the active Matcherino ID.")
+    @app_commands.describe(m_id="The numeric Matcherino ID (e.g., 180454)")
+    async def set_matcherino(interaction: discord.Interaction, m_id: str):
+        if not is_staff(interaction.user):
+            await interaction.response.send_message("❌ Permission denied.", ephemeral=True)
+            return
+
+        active_session = await get_active_tourney_session()
+        if not active_session:
+            await interaction.response.send_message("❌ No active tourney session found. Start one first!", ephemeral=True)
+            return
+
+        # Extract only the numbers in case they paste a URL
+        clean_id = "".join(filter(str.isdigit, m_id))
+        if not clean_id:
+            await interaction.response.send_message("❌ Please provide a numeric ID.", ephemeral=True)
+            return
+            
+        await update_matcherino_id(active_session['_id'], clean_id)
+        await interaction.response.send_message(f"✅ Active Matcherino ID set to: `{clean_id}`", ephemeral=True)
+
+   
     # --- Start the Dashboard Task ---
     asyncio.create_task(bot.add_cog(QueueDashboard(bot)))
     print("✅ Queue Dashboard task started.")
@@ -1136,6 +1161,7 @@ def setup_tourney_commands(bot: commands.Bot):
     bot.tree.add_command(payout_history)
     bot.tree.add_command(check_queue)
     bot.tree.add_command(tourney_admin_help)
+    bot.tree.add_command(set_matcherino)
     bot.tree.add_command(BlacklistGroup(bot))
 
 
