@@ -16,17 +16,10 @@ from features.config import (
     TOURNEY_ADMIN_CHANNEL_ID, 
     TOURNEY_ADMIN_ROLE_ID
 )
+from features.config import TOURNEY_TEST_MODE
 
 _ticket_counter: int = 1
 _pre_tourney_ticket_counter: int = 1 
-
-# --- Rate limiting for tourney tickets ---
-
-# Max number of *open* tickets a single user can have at once
-MAX_OPEN_TICKETS_PER_USER = 10
-
-# Minimum time between ticket creations for a single user
-TICKET_COOLDOWN = timedelta(minutes=0.01) 
 
 # user_id -> set of open ticket channel IDs
 _user_open_tickets: dict[int, set[int]] = {}
@@ -58,12 +51,16 @@ def _unregister_ticket_for_user(user_id: int, channel_id: int) -> None:
 
 def _check_ticket_limits_for_user(user_id: int) -> tuple[bool, str | None]:
     """
-    Returns (ok, message_if_not_ok).
-
-    - Enforces max open tickets per user.
-    - Enforces cooldown between creating tickets.
+    Returns (ok, message_if_not_ok). Now pulls live values from config 
+    to support real-time Test Mode toggling.
     """
-    # 1) Max open tickets
+    import features.config as config  # Import live config state
+
+    # Dynamic limits based on current Test Mode state
+    MAX_OPEN_TICKETS_PER_USER = 100 if config.TOURNEY_TEST_MODE else 3
+    TICKET_COOLDOWN = 0.1 if config.TOURNEY_TEST_MODE else 180
+
+    # 1) Max open tickets check
     if _get_open_ticket_count(user_id) >= MAX_OPEN_TICKETS_PER_USER:
         return (
             False,
@@ -71,23 +68,16 @@ def _check_ticket_limits_for_user(user_id: int) -> tuple[bool, str | None]:
             f"Please close one before opening another.",
         )
 
-    # 2) Cooldown between creations
+    # 2) Cooldown between creations check
     last_opened = _user_last_ticket_open_time.get(user_id)
     if last_opened is not None:
         now = utcnow()
-        elapsed = now - last_opened
-        remaining = TICKET_COOLDOWN - elapsed
-        if remaining.total_seconds() > 0:
-            seconds = int(remaining.total_seconds())
-            minutes, seconds = divmod(seconds, 60)
-            if minutes > 0:
-                human = f"{minutes}m {seconds}s"
-            else:
-                human = f"{seconds}s"
-            return (
-                False,
-                f"Please wait {human} before opening another tourney ticket.",
-            )
+        elapsed = (now - last_opened).total_seconds()
+        if elapsed < TICKET_COOLDOWN:
+            remaining = int(TICKET_COOLDOWN - elapsed)
+            minutes, seconds = divmod(remaining, 60)
+            human = f"{minutes}m {seconds}s" if minutes > 0 else f"{seconds}s"
+            return (False, f"Please wait {human} before opening another tourney ticket.")
 
     return True, None
 
