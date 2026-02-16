@@ -38,7 +38,8 @@ from features.config import (
     TOURNEY_CLOSED_CATEGORY_ID,
     PRE_TOURNEY_CLOSED_CATEGORY_ID,
     HALL_OF_FAME_CHANNEL_ID,
-    BOT_VERSION
+    BOT_VERSION,
+    TOURNEY_TEST_MODE
 )
 from .tourney_utils import (
     close_ticket_via_command,
@@ -448,6 +449,7 @@ def setup_tourney_commands(bot: commands.Bot):
 
     @bot.command(name="starttourney")
     async def start_tourney_command(ctx: commands.Context):
+        import features.config as config
         """
         Start a tourney:
         - Reset ticket counter.
@@ -492,25 +494,34 @@ def setup_tourney_commands(bot: commands.Bot):
             await main_channel.purge()
 
             # B. Send Panel (Critical)
+            panel_text = (
+                "Experiencing a match issue? We’ve got you covered.\n"
+                "Use this if you're dealing with:\n\n"
+                "⚠️ **No-show opponents**\n"
+                "⚔️ **Score disputes**\n"
+                "🛜 **Lobby / connection problems**\n"
+                "📜 **Rule questions or clarifications**\n"
+                "🔧 **Anything else blocking your match**\n\n"
+                "Click the button below to open a **private support ticket**.\n\n"
+                "You’ll be prompted to provide:\n"
+                "📛 **Team Name**\n"
+                "🔢 **Match / Bracket Number**\n"
+                "📝 **Description of the Issue**\n\n"
+                "A Tourney Admin will assist you as soon as possible. 🛠️"
+            )
+
+            # 2. Add the Test Mode warning if it's toggled ON
+            if config.TOURNEY_TEST_MODE:
+                panel_text += "\n\n🧪 **TEST MODE ACTIVE**: Limits set to 100 tickets | 0.1s cooldown."
+
+            # 3. Create a single embed using that text
             embed = discord.Embed(
                 title="🎟️ Tournament Support Ticket",
-                description=(
-                    "Experiencing a match issue? We’ve got you covered.\n"
-                    "Use this if you're dealing with:\n\n"
-                    "⚠️ **No-show opponents**\n"
-                    "⚔️ **Score disputes**\n"
-                    "🛜 **Lobby / connection problems**\n"
-                    "📜 **Rule questions or clarifications**\n"
-                    "🔧 **Anything else blocking your match**\n\n"
-                    "Click the button below to open a **private support ticket**.\n\n"
-                    "You’ll be prompted to provide:\n"
-                    "📛 **Team Name**\n"
-                    "🔢 **Match / Bracket Number**\n"
-                    "📝 **Description of the Issue**\n\n"
-                    "A Tourney Admin will assist you as soon as possible. 🛠️"
-                ),
-                color=discord.Color.blurple()
+                description=panel_text,
+                color=discord.Color.red() if config.TOURNEY_TEST_MODE else discord.Color.blurple()
             )
+
+            # 5. Send it to the channel (using .send for TextChannels)
             await main_channel.send(embed=embed, view=TourneyOpenTicketView())
 
             # C. Attempt Rename (Background Task - Won't block if rate limited)
@@ -720,31 +731,47 @@ def setup_tourney_commands(bot: commands.Bot):
 
     @app_commands.command(name="tourney-panel", description="Post the tourney support button.")
     async def tourney_panel(interaction: discord.Interaction):
+        import features.config as config
+        
+        # 1. Permission Check
         if not interaction.user.guild_permissions.manage_guild:
             await interaction.response.send_message("You don't have permission to use this command.", ephemeral=True)
             return
         
+        # 2. Define the base description in a variable first
+        panel_desc = (
+            "Experiencing a match issue? We’ve got you covered.\n"
+            "Use this if you're dealing with:\n\n"
+            "⚠️ **No-show opponents**\n"
+            "⚔️ **Score disputes**\n"
+            "🛜 **Lobby / connection problems**\n"
+            "📜 **Rule questions or clarifications**\n"
+            "🔧 **Anything else blocking your match**\n\n"
+            "Click the button below to open a **private support ticket**.\n\n"
+            "You’ll be prompted to provide:\n"
+            "📛 **Team Name**\n"
+            "🔢 **Match / Bracket Number**\n"
+            "📝 **Description of the Issue**\n\n"
+            "A Tourney Admin will assist you as soon as possible. 🛠️"
+        )
+
+        # 3. Modify text and select color based on Test Mode
+        embed_color = discord.Color.blurple()
+        
+        if config.TOURNEY_TEST_MODE:
+            panel_desc += "\n\n🧪 **TEST MODE ACTIVE**: Limits set to 100 tickets | 0.1s cooldown."
+            embed_color = discord.Color.red()
+
+        # 4. Create the single embed object
         embed = discord.Embed(
             title="🎟️ Tournament Support Ticket",
-            description=(
-                "Experiencing a match issue? We’ve got you covered.\n"
-                "Use this if you're dealing with:\n\n"
-                "⚠️ **No-show opponents**\n"
-                "⚔️ **Score disputes**\n"
-                "🛜 **Lobby / connection problems**\n"
-                "📜 **Rule questions or clarifications**\n"
-                "🔧 **Anything else blocking your match**\n\n"
-                "Click the button below to open a **private support ticket**.\n\n"
-                "You’ll be prompted to provide:\n"
-                "📛 **Team Name**\n"
-                "🔢 **Match / Bracket Number**\n"
-                "📝 **Description of the Issue**\n\n"
-                "A Tourney Admin will assist you as soon as possible. 🛠️"
-            ),
-            color=discord.Color.blurple()
+            description=panel_desc,
+            color=embed_color
         )
-        await interaction.response.send_message(embed=embed, view=TourneyOpenTicketView())
 
+        # 6. Send the response
+        await interaction.response.send_message(embed=embed, view=TourneyOpenTicketView())
+        
     @app_commands.command(name="pre-tourney-panel", description="Post the Pre-Tourney support button.")
     async def pre_tourney_panel(interaction: discord.Interaction):
         if not interaction.user.guild_permissions.manage_guild:
@@ -1144,6 +1171,20 @@ def setup_tourney_commands(bot: commands.Bot):
             
         await update_matcherino_id(active_session['_id'], clean_id)
         await interaction.response.send_message(f"✅ Active Matcherino ID set to: `{clean_id}`", ephemeral=True)
+        
+    @app_commands.command(name="tourney-test-mode", description="Toggle 100 tickets/0.1s cooldown for testing.")
+    @app_commands.describe(enabled="True to enable test mode, False to return to production.")
+    async def tourney_test_mode(interaction: discord.Interaction, enabled: bool):
+        # Updated Security check: Now allows anyone in ALLOWED_STAFF_ROLES
+        if not is_staff(interaction.user):
+            await interaction.response.send_message("❌ Staff permissions required.", ephemeral=True)
+            return
+
+        from features import config 
+        config.TOURNEY_TEST_MODE = enabled
+        
+        status = "ENABLED 🧪 (100 tickets, 0.1s cooldown)" if enabled else "DISABLED ✅ (Production limits)"
+        await interaction.response.send_message(f"📢 Tournament Test Mode is now **{status}**.")
 
    
     # --- Start the Dashboard Task ---
@@ -1162,6 +1203,7 @@ def setup_tourney_commands(bot: commands.Bot):
     bot.tree.add_command(check_queue)
     bot.tree.add_command(tourney_admin_help)
     bot.tree.add_command(set_matcherino)
+    bot.tree.add_command(tourney_test_mode)
     bot.tree.add_command(BlacklistGroup(bot))
 
 
