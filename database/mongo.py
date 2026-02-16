@@ -16,6 +16,8 @@ else:
         # Connect to MongoDB with the Mac/SSL fix
         client = motor.motor_asyncio.AsyncIOMotorClient(MONGO_URI, tlsCAFile=certifi.where())
         db = client["r7_bot_db"]
+        global tourney_sessions
+        tourney_sessions = db["tourney_sessions"] 
         print("✅ Connected to Cloud Database (MongoDB)")
     except Exception as e:
         print(f"❌ DB Connection Error: {e}")
@@ -763,3 +765,18 @@ async def get_top_staff_stats(session_id, limit: int = 12):
     except Exception as e:
         print(f"⚠️ DB Error (Get Stats): {e}")
         return []
+
+async def update_matcherino_id(session_id: str, matcherino_id: str):
+    """Saves the Matcherino ID to the active tournament session."""
+    if tourney_sessions is None: return
+    await tourney_sessions.update_one(
+        {"_id": session_id},
+        {"$set": {"matcherino_id": matcherino_id}}
+    )
+    
+async def get_matcherino_id_from_active():
+    """Retrieves the Matcherino ID from the currently active session."""
+    session = await get_active_tourney_session()
+    if session:
+        return session.get("matcherino_id")
+    return None

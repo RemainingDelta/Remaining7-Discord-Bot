@@ -4,6 +4,7 @@ from database.mongo import (
     update_tourney_queue, 
     increment_staff_closure 
 )
+from features.tourney.matcherino import fetch_ticket_context
 
 class TourneyReportModal(discord.ui.Modal, title="Tourney Support"):
     def __init__(self):
@@ -36,7 +37,9 @@ class TourneyReportModal(discord.ui.Modal, title="Tourney Support"):
 
     async def on_submit(self, interaction: discord.Interaction):
         from .tourney_utils import create_tourney_ticket_channel
-        await create_tourney_ticket_channel(
+        from database.mongo import get_matcherino_id_from_active # Add this import
+        
+        new_channel = await create_tourney_ticket_channel(
             interaction,
             team_name=self.team_name.value,
             bracket=self.bracket.value,
@@ -49,6 +52,61 @@ class TourneyReportModal(discord.ui.Modal, title="Tourney Support"):
                 await update_tourney_queue(active_session['_id'], change=1)
         except Exception:
             pass
+        
+        if new_channel and interaction.guild_id:
+            # Pull the ID from the database instead of memory
+            m_id = await get_matcherino_id_from_active()
+            
+            if m_id:
+                bracket_url = f"https://matcherino.com/supercell/tournaments/{m_id}/bracket/bracket"
+                
+                try:
+                    match_num = int(self.bracket.value.strip())
+                    match_data = fetch_ticket_context(bracket_url, match_num)
+                    
+                    # Build the Embed
+                    embed = discord.Embed(
+                        title=f"📊 Matcherino Data: Match #{match_num}",
+                        color=discord.Color.gold()
+                    )
+
+                    if match_data.get("status") == "success":
+                        # Status only - "Last Update" removed
+                        embed.add_field(name="Match Status", value=f"`{match_data['match_status'].upper()}`", inline=True)
+                        embed.add_field(name="\u200b", value="\u200b", inline=True)
+                        embed.add_field(name="\u200b", value="\u200b", inline=True)
+                        
+                        team_a = match_data['team_a']
+                        team_b = match_data['team_b']
+                        
+                        players_a = "\n".join([f"• {p}" for p in team_a['players']]) or "• *No players found*"
+                        players_b = "\n".join([f"• {p}" for p in team_b['players']]) or "• *No players found*"
+
+                        # Team A Column
+                        embed.add_field(
+                            name=f"🔵 {team_a['name']} (Score: {team_a['score']})", 
+                            value=f"**Matcherino Names:**\n{players_a}", 
+                            inline=True
+                        )
+                        # Middle Spacer
+                        embed.add_field(name="⚔️", value="\u200b", inline=True)
+                        # Team B Column
+                        embed.add_field(
+                            name=f"🔴 {team_b['name']} (Score: {team_b['score']})", 
+                            value=f"**Matcherino Names:**\n{players_b}", 
+                            inline=True
+                        )
+                            
+                    else:
+                        # Handle API Errors gracefully
+                        embed.color = discord.Color.red()
+                        embed.description = f"⚠️ **Could not fetch match data:** {match_data.get('error')}"
+
+                    await new_channel.send(embed=embed)
+                    
+                except ValueError:
+                    # User didn't enter a valid integer for the match number
+                    pass
 
 
 class TourneyOpenTicketView(discord.ui.View):

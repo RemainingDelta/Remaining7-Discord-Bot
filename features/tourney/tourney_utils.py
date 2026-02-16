@@ -23,10 +23,10 @@ _pre_tourney_ticket_counter: int = 1
 # --- Rate limiting for tourney tickets ---
 
 # Max number of *open* tickets a single user can have at once
-MAX_OPEN_TICKETS_PER_USER = 3
+MAX_OPEN_TICKETS_PER_USER = 10
 
 # Minimum time between ticket creations for a single user
-TICKET_COOLDOWN = timedelta(minutes=3) 
+TICKET_COOLDOWN = timedelta(minutes=0.01) 
 
 # user_id -> set of open ticket channel IDs
 _user_open_tickets: dict[int, set[int]] = {}
@@ -248,6 +248,8 @@ async def create_tourney_ticket_channel(
     )
     
     await check_and_alert_blacklist(guild, interaction.user, channel)
+    
+    return channel
 
 
 def _is_staff(member: discord.abc.User | discord.Member) -> bool:
