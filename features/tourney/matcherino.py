@@ -142,18 +142,28 @@ def fetch_ticket_context(url: str, target_match_number: int) -> dict:
             if str(v_num) == str(target_match_number):
                 continue
                 
-            t_a = get_team_info(match.get('entrantA'))
-            t_b = get_team_info(match.get('entrantB'))
+            t_a_past = get_team_info(match.get('entrantA'))
+            t_b_past = get_team_info(match.get('entrantB'))
             
-            if team_a['name'] not in ["TBD", "BYE"] and team_a['name'] in (t_a['name'], t_b['name']):
-                opponent = t_b['name'] if t_a['name'] == team_a['name'] else t_a['name']
-                if opponent.upper() not in ["BYE", "TBD"]:
-                    team_a_history.append(f"Match {v_num}: vs {opponent} ({t_a['score']} - {t_b['score']})")
+            # Process History for Team A from the current matchup
+            if team_a['name'] not in ["TBD", "BYE"] and team_a['name'] in (t_a_past['name'], t_b_past['name']):
+                is_pos_a = t_a_past['name'] == team_a['name']
+                opp_name = t_b_past['name'] if is_pos_a else t_a_past['name']
+                
+                if opp_name.upper() not in ["BYE", "TBD"]:
+                    t_score = t_a_past['score'] if is_pos_a else t_b_past['score']
+                    o_score = t_b_past['score'] if is_pos_a else t_a_past['score']
+                    team_a_history.append(f"Match {v_num}: {team_a['name']} vs {opp_name} ({t_score} - {o_score})")
 
-            if team_b['name'] not in ["TBD", "BYE"] and team_b['name'] in (t_a['name'], t_b['name']):
-                opponent = t_b['name'] if t_a['name'] == team_b['name'] else t_a['name']
-                if opponent.upper() not in ["BYE", "TBD"]:
-                    team_b_history.append(f"Match {v_num}: vs {opponent} ({t_a['score']} - {t_b['score']})")
+            # Process History for Team B from the current matchup
+            if team_b['name'] not in ["TBD", "BYE"] and team_b['name'] in (t_a_past['name'], t_b_past['name']):
+                is_pos_a = t_a_past['name'] == team_b['name']
+                opp_name = t_b_past['name'] if is_pos_a else t_a_past['name']
+                
+                if opp_name.upper() not in ["BYE", "TBD"]:
+                    t_score = t_a_past['score'] if is_pos_a else t_b_past['score']
+                    o_score = t_b_past['score'] if is_pos_a else t_a_past['score']
+                    team_b_history.append(f"Match {v_num}: {team_b['name']} vs {opp_name} ({t_score} - {o_score})")
 
         return {
             "status": "success",
