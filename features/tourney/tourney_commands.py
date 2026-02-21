@@ -4,6 +4,7 @@ from discord.ext import commands, tasks
 import asyncio
 import re 
 import datetime 
+from .matcherino import fetch_ticket_context 
 
 from database.mongo import (
     add_payout_batch,         
@@ -1186,6 +1187,63 @@ def setup_tourney_commands(bot: commands.Bot):
         status = "ENABLED 🧪 (100 tickets, 0.1s cooldown)" if enabled else "DISABLED ✅ (Production limits)"
         await interaction.response.send_message(f"📢 Tournament Test Mode is now **{status}**.")
 
+    @app_commands.command(name="match-info", description="Display roster for a specific match.")
+    @app_commands.describe(match_num="The Match Number from the bracket (e.g. 189)")
+    async def match_info(interaction: discord.Interaction, match_num: int):
+        if not is_staff(interaction.user):
+            await interaction.response.send_message("❌ Staff permissions required.", ephemeral=True)
+            return
+
+        # Get the Matcherino ID from the active session
+        session = await get_active_tourney_session()
+        if not session or not session.get("matcherino_id"):
+            await interaction.response.send_message("❌ No active Matcherino ID set. Use `/set-matcherino` first.", ephemeral=True)
+            return
+
+        await interaction.response.defer()
+
+        m_id = session["matcherino_id"]
+        bracket_url = f"https://matcherino.com/tournaments/{m_id}/bracket"
+        
+        # Use your established production function
+        match_data = fetch_ticket_context(bracket_url, match_num)
+
+        if match_data.get("status") != "success":
+            await interaction.followup.send(f"❌ **Error:** {match_data.get('error')}")
+            return
+
+        # Build the Embed to match the screenshot exactly
+        embed = discord.Embed(
+            title=f"📊 Matcherino Data: Match #{match_num}",
+            color=discord.Color.gold()
+        )
+
+        # Match Status Section
+        embed.add_field(name="Match Status", value=f"`{match_data['match_status'].upper()}`", inline=True)
+        embed.add_field(name="\u200b", value="\u200b", inline=True)
+        embed.add_field(name="\u200b", value="\u200b", inline=True)
+
+        team_a = match_data['team_a']
+        team_b = match_data['team_b']
+
+        players_a = "\n".join([f"• {p}" for p in team_a['players']]) or "• *No players found*"
+        players_b = "\n".join([f"• {p}" for p in team_b['players']]) or "• *No players found*"
+
+        # Three-Column Layout: Team A | vs | Team B
+        embed.add_field(
+            name=f"🔵 {team_a['name']} (Score: {team_a['score']})", 
+            value=f"**Matcherino Names:**\n{players_a}", 
+            inline=True
+        )
+        embed.add_field(name="⚔️", value="\u200b", inline=True)
+        embed.add_field(
+            name=f"🔴 {team_b['name']} (Score: {team_b['score']})", 
+            value=f"**Matcherino Names:**\n{players_b}", 
+            inline=True
+        )
+
+        embed.set_footer(text=f"Matcherino ID: {m_id} | Tourney Admin: {interaction.user.name}")
+        await interaction.followup.send(embed=embed)
    
     # --- Start the Dashboard Task ---
     asyncio.create_task(bot.add_cog(QueueDashboard(bot)))
@@ -1204,6 +1262,7 @@ def setup_tourney_commands(bot: commands.Bot):
     bot.tree.add_command(tourney_admin_help)
     bot.tree.add_command(set_matcherino)
     bot.tree.add_command(tourney_test_mode)
+    bot.tree.add_command(match_info)
     bot.tree.add_command(BlacklistGroup(bot))
 
 
