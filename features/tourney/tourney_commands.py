@@ -1245,6 +1245,61 @@ def setup_tourney_commands(bot: commands.Bot):
         embed.set_footer(text=f"Matcherino ID: {m_id} | Tourney Admin: {interaction.user.name}")
         await interaction.followup.send(embed=embed)
    
+    @app_commands.command(name="match-history", description="View the standardized tournament run of teams in a matchup.")
+    @app_commands.describe(match_num="The visual match number from the bracket (e.g. 189)")
+    async def match_history(interaction: discord.Interaction, match_num: int):
+        # 1. Staff Check
+        if not is_staff(interaction.user):
+            await interaction.response.send_message("❌ Staff permissions required.", ephemeral=True)
+            return
+
+        # 2. Get Matcherino ID from active session
+        session = await get_active_tourney_session()
+        if not session or not session.get("matcherino_id"):
+            await interaction.response.send_message("❌ No active Matcherino ID set. Use `/set-matcherino` first.", ephemeral=True)
+            return
+
+        await interaction.response.defer()
+
+        m_id = session["matcherino_id"]
+        bracket_url = f"https://matcherino.com/tournaments/{m_id}/bracket"
+        
+        # 3. Fetch data using the updated standardized logic in matcherino.py
+        data = fetch_ticket_context(bracket_url, match_num)
+
+        if data.get("status") != "success":
+            await interaction.followup.send(f"❌ **Error:** {data.get('error')}")
+            return
+
+        # 4. Construct the Embed
+        embed = discord.Embed(
+            title=f"📜 Match History: Match #{match_num}",
+            color=discord.Color.blue(),
+            timestamp=discord.utils.utcnow()
+        )
+
+        team_a_name = data['team_a']['name']
+        team_b_name = data['team_b']['name']
+        
+        # Join history lists with newlines
+        hist_a = "\n".join(data.get('team_a_history', []))
+        hist_b = "\n".join(data.get('team_b_history', []))
+
+        # Add fields with "First Round" fallback
+        embed.add_field(
+            name=f"🔵 {team_a_name}", 
+            value=hist_a if hist_a else "*No previous matches (First Round)*", 
+            inline=False
+        )
+        embed.add_field(
+            name=f"🔴 {team_b_name}", 
+            value=hist_b if hist_b else "*No previous matches (First Round)*", 
+            inline=False
+        )
+
+        embed.set_footer(text=f"Matcherino ID: {m_id}")
+        await interaction.followup.send(embed=embed)
+        
     # --- Start the Dashboard Task ---
     asyncio.create_task(bot.add_cog(QueueDashboard(bot)))
     print("✅ Queue Dashboard task started.")
@@ -1263,6 +1318,7 @@ def setup_tourney_commands(bot: commands.Bot):
     bot.tree.add_command(set_matcherino)
     bot.tree.add_command(tourney_test_mode)
     bot.tree.add_command(match_info)
+    bot.tree.add_command(match_history)
     bot.tree.add_command(BlacklistGroup(bot))
 
 
