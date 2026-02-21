@@ -62,16 +62,20 @@ class TourneyReportModal(discord.ui.Modal, title="Tourney Support"):
                 
                 try:
                     match_num = int(self.bracket.value.strip())
-                    match_data = fetch_ticket_context(bracket_url, match_num)
+                    topic_team = (self.team_name.value or "").strip()
+                    match_data = fetch_ticket_context(bracket_url, match_num, topic_team_name=topic_team or None)
                     
-                    # Build the Embed
+                    # Build the Embed (same title as refresher so it gets updated in place, not duplicated)
+                    is_mismatch = match_data.get("team_name_mismatch", False)
+                    best_match_team = match_data.get("team_name_best_match")
+                    now_ts = int(discord.utils.utcnow().timestamp())
                     embed = discord.Embed(
-                        title=f"📊 Matcherino Data: Match #{match_num}",
-                        color=discord.Color.gold()
+                        title=f"📊 Live Match Update: Match #{match_num}",
+                        description=f"**Last Update:** <t:{now_ts}:R>",
+                        color=discord.Color.red() if is_mismatch else discord.Color.gold()
                     )
 
                     if match_data.get("status") == "success":
-                        # Status only - "Last Update" removed
                         embed.add_field(name="Match Status", value=f"`{match_data['match_status'].upper()}`", inline=True)
                         embed.add_field(name="\u200b", value="\u200b", inline=True)
                         embed.add_field(name="\u200b", value="\u200b", inline=True)
@@ -82,26 +86,41 @@ class TourneyReportModal(discord.ui.Modal, title="Tourney Support"):
                         players_a = "\n".join([f"• {p}" for p in team_a['players']]) or "• *No players found*"
                         players_b = "\n".join([f"• {p}" for p in team_b['players']]) or "• *No players found*"
 
-                        # Team A Column
                         embed.add_field(
-                            name=f"🔵 {team_a['name']} (Score: {team_a['score']})", 
-                            value=f"**Matcherino Names:**\n{players_a}", 
+                            name=f"🔵 {team_a['name']} ({team_a['score']})",
+                            value=f"**Roster:**\n{players_a}",
                             inline=True
                         )
-                        # Middle Spacer
                         embed.add_field(name="⚔️", value="\u200b", inline=True)
-                        # Team B Column
                         embed.add_field(
-                            name=f"🔴 {team_b['name']} (Score: {team_b['score']})", 
-                            value=f"**Matcherino Names:**\n{players_b}", 
+                            name=f"🔴 {team_b['name']} ({team_b['score']})",
+                            value=f"**Roster:**\n{players_b}",
                             inline=True
                         )
+
+                        if is_mismatch:
+                            warning_text = "The team name for this ticket does not closely match either team in the bracket for this match."
+                            if topic_team:
+                                warning_text += f"\nTeam entered: `{topic_team}`"
+                            warning_text += "\nStaff can correct with `/set-ticket-match`."
+
+                            embed.add_field(
+                                name="⚠️ Team name / Match number Mismatch",
+                                value=warning_text,
+                                inline=False,
+                            )
+                        elif topic_team and best_match_team:
+                            embed.add_field(
+                                name="Detected Team",
+                                value=f"```\n{best_match_team}\n```",
+                                inline=False,
+                            )
                             
                     else:
-                        # Handle API Errors gracefully
                         embed.color = discord.Color.red()
                         embed.description = f"⚠️ **Could not fetch match data:** {match_data.get('error')}"
 
+                    embed.set_footer(text=f"Matcherino ID: {m_id}")
                     await new_channel.send(embed=embed)
                     
                 except ValueError:

@@ -1,3 +1,4 @@
+import difflib
 import json
 import re
 import time
@@ -20,7 +21,52 @@ session = requests_cache.CachedSession(
 )
 session.headers.update(HEADERS)
 
-def fetch_ticket_context(url: str, target_match_number: int) -> dict:
+# Fuzzy match: ratio >= this → accept (minor typos). Below → team name mismatch warning.
+TEAM_NAME_SIMILARITY_THRESHOLD = 0.60
+
+def _normalize_for_compare(s: str) -> str:
+    """Normalize string for similarity: strip, lower, collapse whitespace."""
+    if not s or not isinstance(s, str):
+        return ""
+    return " ".join(s.lower().strip().split())
+
+def _team_name_matches(
+    topic_team: str,
+    team_a_name: str,
+    team_b_name: str,
+) -> tuple[bool, float, str | None]:
+    """
+    Compare topic team name to bracket team names using SequenceMatcher.
+    Returns (matches_either, best_ratio, best_match_team_name).
+    Minor typos (e.g. 'Fire Boys' vs 'FireBoys') pass.
+    """
+    topic_n = _normalize_for_compare(topic_team)
+    if not topic_n:
+        return True, 1.0, None  # No topic name to check
+
+    a_n = _normalize_for_compare(team_a_name)
+    b_n = _normalize_for_compare(team_b_name)
+    # Skip mismatch check when bracket has no real team names
+    if a_n in ("tbd", "bye") and b_n in ("tbd", "bye"):
+        return True, 1.0, None
+
+    ratio_a = difflib.SequenceMatcher(None, topic_n, a_n).ratio() if a_n not in ("tbd", "bye") else 0.0
+    ratio_b = difflib.SequenceMatcher(None, topic_n, b_n).ratio() if b_n not in ("tbd", "bye") else 0.0
+
+    best_ratio = 0.0
+    best_name: str | None = None
+
+    if a_n not in ("tbd", "bye"):
+        best_ratio = ratio_a
+        best_name = team_a_name
+    if b_n not in ("tbd", "bye") and ratio_b > best_ratio:
+        best_ratio = ratio_b
+        best_name = team_b_name
+
+    matches = best_ratio >= TEAM_NAME_SIMILARITY_THRESHOLD
+    return matches, best_ratio, best_name
+
+def fetch_ticket_context(url: str, target_match_number: int, topic_team_name: str | None = None) -> dict:
     """
     Parses a Matcherino URL, hits their hidden API for live bracket data, 
     maps entrant IDs to team names, calculates the VISUAL match numbers,
@@ -165,6 +211,20 @@ def fetch_ticket_context(url: str, target_match_number: int) -> dict:
                     o_score = t_b_past['score'] if is_pos_a else t_a_past['score']
                     team_b_history.append(f"Match {v_num}: {team_b['name']} vs {opp_name} ({t_score} - {o_score})")
 
+        # Fuzzy match: compare topic team name to bracket teams; flag mismatch for staff
+        team_name_mismatch = False
+        team_name_best_match = None
+        team_name_best_match_ratio = None
+        if topic_team_name and (topic_team_name := topic_team_name.strip()):
+            matches, best_ratio, best_name = _team_name_matches(
+                topic_team_name,
+                team_a["name"],
+                team_b["name"],
+            )
+            team_name_mismatch = not matches
+            team_name_best_match = best_name
+            team_name_best_match_ratio = best_ratio
+
         return {
             "status": "success",
             "match_number": target_match_number,
@@ -174,7 +234,10 @@ def fetch_ticket_context(url: str, target_match_number: int) -> dict:
             "team_a": team_a,
             "team_b": team_b,
             "team_a_history": team_a_history,
-            "team_b_history": team_b_history
+            "team_b_history": team_b_history,
+            "team_name_mismatch": team_name_mismatch,
+            "team_name_best_match": team_name_best_match,
+            "team_name_best_match_ratio": team_name_best_match_ratio,
         }
 
     except Exception as e:

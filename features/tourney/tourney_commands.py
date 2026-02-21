@@ -174,7 +174,8 @@ class QueueDashboard(commands.Cog):
                     old_dashboard_msg = m
                     break
 
-            last_message = [msg async for msg in channel.history(limit=1)][0] if await channel.history(limit=1).flatten() else None
+            msgs = [msg async for msg in channel.history(limit=1)]
+            last_message = msgs[0] if msgs else None
 
             if old_dashboard_msg and last_message and last_message.id == old_dashboard_msg.id:
                 await old_dashboard_msg.edit(embed=embed)
@@ -213,27 +214,33 @@ class QueueDashboard(commands.Cog):
             if "👍" in channel.name or "❗" not in channel.name:
                 continue
 
-            # Parse Match Number from topic
+            # Parse Match Number and Team Name from topic
             match_num = None
+            topic_team_name = None
             if channel.topic:
                 match_res = re.search(r"bracket:(\d+)", channel.topic)
                 if match_res:
                     try: match_num = int(match_res.group(1))
                     except: continue
-            
+                team_res = re.search(r"team:(.*?)(?:\||$)", channel.topic)
+                if team_res:
+                    topic_team_name = team_res.group(1).strip() or None
+
             if match_num is None: continue
 
-            # 4. Fetch Fresh Match Data
-            data = fetch_ticket_context(bracket_url, match_num)
+            # 4. Fetch Fresh Match Data (with topic team for fuzzy mismatch check)
+            data = fetch_ticket_context(bracket_url, match_num, topic_team_name=topic_team_name)
             if data.get("status") != "success":
                 continue
 
             # 5. Construct the Live Embed with Relative Timestamp
             now_ts = int(discord.utils.utcnow().timestamp())
+            is_mismatch = data.get("team_name_mismatch", False)
+            best_match_team = data.get("team_name_best_match")
             embed = discord.Embed(
-                title=f"📊 Live Match Update: Match #{match_num}", 
+                title=f"📊 Live Match Update: Match #{match_num}",
                 description=f"**Last Update:** <t:{now_ts}:R>",
-                color=discord.Color.gold()
+                color=discord.Color.red() if is_mismatch else discord.Color.gold()
             )
 
             embed.add_field(name="Match Status", value=f"`{data['match_status'].upper()}`", inline=True)
@@ -247,30 +254,42 @@ class QueueDashboard(commands.Cog):
             embed.add_field(name=f"🔵 {team_a['name']} ({team_a['score']})", value=f"**Roster:**\n{p_a}", inline=True)
             embed.add_field(name="⚔️", value="\u200b", inline=True)
             embed.add_field(name=f"🔴 {team_b['name']} ({team_b['score']})", value=f"**Roster:**\n{p_b}", inline=True)
-            
+
+            # For mismatches, keep the warning simple.
+            if is_mismatch:
+                warning_text = "The team name in this ticket does not closely match either team in the bracket for this match."
+                if topic_team_name:
+                    warning_text += f"\nTeam entered: `{topic_team_name}`"
+                warning_text += "\nUse `/set-ticket-match` to correct the match number or team name."
+
+                embed.add_field(
+                    name="⚠️ Team name / Match number Mismatch",
+                    value=warning_text,
+                    inline=False,
+                )
+            # For close/exact matches, show the suspected bracket team in a code block for easy copy/paste.
+            elif topic_team_name and best_match_team:
+                embed.add_field(
+                    name="Detected Team",
+                    value=f"```\n{best_match_team}\n```",
+                    inline=False,
+                )
+
             embed.set_footer(text=f"Matcherino ID: {m_id}")
 
-            # 6. Visibility Logic: Edit vs. Resend
+            # 6. Single live message: always edit in place when found, otherwise send once
             try:
                 old_info_msg = None
-                async for msg in channel.history(limit=10):
+                async for msg in channel.history(limit=20):
                     if msg.author == self.bot.user and msg.embeds:
                         title = msg.embeds[0].title or ""
                         if "Matcherino Data" in title or "Live Match Update" in title:
                             old_info_msg = msg
                             break
                 
-                # Get the last message in the channel
-                msgs = [m async for m in channel.history(limit=1)]
-                last_msg = msgs[0] if msgs else None
-                
-                # If bot embed is already at the bottom: Edit
-                if old_info_msg and last_msg and old_info_msg.id == last_msg.id:
+                if old_info_msg:
                     await old_info_msg.edit(embed=embed)
                 else:
-                    # If conversation buried it: Delete old and Resend to surface at bottom
-                    if old_info_msg:
-                        await old_info_msg.delete()
                     await channel.send(embed=embed)
                 
                 # Sequential delay to avoid global rate limits
@@ -368,7 +387,6 @@ class BlacklistGroup(app_commands.Group):
         await interaction.response.send_message(embed=embed)
                                     
 def setup_tourney_commands(bot: commands.Bot):
-    print("Setting up tourney commands...")
 
     @bot.command(name="close", aliases=["c"])
     async def close_command(ctx: commands.Context):
@@ -1249,18 +1267,25 @@ def setup_tourney_commands(bot: commands.Bot):
 
         m_id = session["matcherino_id"]
         bracket_url = f"https://matcherino.com/tournaments/{m_id}/bracket"
-        
-        # Use your established production function
-        match_data = fetch_ticket_context(bracket_url, match_num)
+
+        # If run in a ticket, pass topic team name for fuzzy mismatch check
+        topic_team_name = None
+        if isinstance(interaction.channel, discord.TextChannel) and interaction.channel.topic:
+            team_res = re.search(r"team:(.*?)(?:\||$)", interaction.channel.topic)
+            if team_res:
+                topic_team_name = team_res.group(1).strip() or None
+
+        match_data = fetch_ticket_context(bracket_url, match_num, topic_team_name=topic_team_name)
 
         if match_data.get("status") != "success":
             await interaction.followup.send(f"❌ **Error:** {match_data.get('error')}")
             return
 
-        # Build the Embed to match the screenshot exactly
+        is_mismatch = match_data.get("team_name_mismatch", False)
+        best_match_team = match_data.get("team_name_best_match")
         embed = discord.Embed(
             title=f"📊 Matcherino Data: Match #{match_num}",
-            color=discord.Color.gold()
+            color=discord.Color.red() if is_mismatch else discord.Color.gold()
         )
 
         # Match Status Section
@@ -1286,6 +1311,24 @@ def setup_tourney_commands(bot: commands.Bot):
             value=f"**Matcherino Names:**\n{players_b}", 
             inline=True
         )
+
+        if is_mismatch:
+            warning_text = "The team name in this ticket does not closely match either team in the bracket for this match."
+            if topic_team_name:
+                warning_text += f"\nTeam entered: `{topic_team_name}`"
+            warning_text += "\nUse `/set-ticket-match` to correct the match number or team name."
+
+            embed.add_field(
+                name="⚠️ Team name / Match number Mismatch",
+                value=warning_text,
+                inline=False,
+            )
+        elif topic_team_name and best_match_team:
+            embed.add_field(
+                name="Detected Team",
+                value=f"```\n{best_match_team}\n```",
+                inline=False,
+            )
 
         embed.set_footer(text=f"Matcherino ID: {m_id} | Tourney Admin: {interaction.user.name}")
         await interaction.followup.send(embed=embed)
@@ -1421,7 +1464,7 @@ def setup_tourney_commands(bot: commands.Bot):
                 embed=discord.Embed(
                     title="⚙️ Ticket Details Adjusted",
                     description=f"Changes applied successfully:\n\n{update_list}\n\n"
-                                f"The live scoreboard will update in the next 5-minute cycle.",
+                                f"The live scoreboard will update in the next 1-minute cycle.",
                     color=discord.Color.green()
                 )
             )
