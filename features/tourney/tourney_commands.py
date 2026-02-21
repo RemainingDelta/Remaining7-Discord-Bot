@@ -277,15 +277,20 @@ class QueueDashboard(commands.Cog):
 
             embed.set_footer(text=f"Matcherino ID: {m_id}")
 
-            # 6. Single live message: always edit in place when found, otherwise send once
+            # 6. Single live message: only edit the embed that shows THIS channel's match (from topic)
             try:
                 old_info_msg = None
                 async for msg in channel.history(limit=20):
-                    if msg.author == self.bot.user and msg.embeds:
-                        title = msg.embeds[0].title or ""
-                        if "Matcherino Data" in title or "Live Match Update" in title:
-                            old_info_msg = msg
-                            break
+                    if msg.author != self.bot.user or not msg.embeds:
+                        continue
+                    title = msg.embeds[0].title or ""
+                    if "Matcherino Data" not in title and "Live Match Update" not in title:
+                        continue
+                    # Only update a message that already shows this channel's match number
+                    title_match = re.search(r"Match #(\d+)", title)
+                    if title_match and int(title_match.group(1)) == match_num:
+                        old_info_msg = msg
+                        break
                 
                 if old_info_msg:
                     await old_info_msg.edit(embed=embed)
