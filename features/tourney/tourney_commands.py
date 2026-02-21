@@ -1193,6 +1193,15 @@ def setup_tourney_commands(bot: commands.Bot):
         )
         embed.add_field(name="🎫 Ticket Control", value=ticket_text, inline=False)
 
+        # --- Live Bracket / Matcherino ---
+        matcherino_text = (
+            "`/set-matcherino` - Set the active Matcherino bracket ID for the session.\n"
+            "`/match-info` - Show live rosters, scores, and match status for a match number.\n"
+            "`/match-history` - Show a team's previous rounds for a given match.\n"
+            "`/set-ticket-match` - Correct this ticket's match number or team name."
+        )
+        embed.add_field(name="📊 Live Bracket / Matcherino", value=matcherino_text, inline=False)
+
         treasury_text = (
             "`/payout-list` - View your personal and team pending payout totals.\n"
             "`/payout-history` - View the audit log for group payout additions."
