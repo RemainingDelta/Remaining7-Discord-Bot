@@ -23,7 +23,8 @@ from database.mongo import (
     update_matcherino_id,
     update_tourney_queue,
     increment_staff_closure,
-    get_top_staff_stats
+    get_top_staff_stats,
+    get_matcherino_id_from_active
 )
 
 # Import Config and Utils
@@ -79,24 +80,26 @@ class PayoutResetConfirmView(discord.ui.View):
 class QueueDashboard(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        # self.dashboard_task.start()  <-- Manual start via !starttourney
+        # The dashboard_task is still manually started via !starttourney
+        # The match_refresher starts automatically to monitor any active tickets
+        self.match_refresher_task.start()
 
     def cog_unload(self):
         self.dashboard_task.cancel()
+        self.match_refresher_task.cancel()
 
     async def start_dashboard(self):
-        """Starts the loop if not already running."""
+        """Starts the queue loop if not already running."""
         if not self.dashboard_task.is_running():
             self.dashboard_task.start()
             print("📊 Queue Dashboard Started")
 
     async def stop_dashboard(self):
-        """Stops the loop and deletes the message."""
+        """Stops the queue loop and deletes the dashboard message."""
         if self.dashboard_task.is_running():
             self.dashboard_task.cancel()
             print("📊 Queue Dashboard Stopped")
         
-        # Cleanup
         channel = self.bot.get_channel(TOURNEY_SUPPORT_CHANNEL_ID)
         if channel and isinstance(channel, discord.TextChannel):
             try:
@@ -109,50 +112,38 @@ class QueueDashboard(commands.Cog):
 
     @tasks.loop(seconds=15)
     async def dashboard_task(self):
-        """Updates the live queue status in the main support channel."""
+        """Original 15-second loop: Updates the live queue status in support channel."""
         await self.bot.wait_until_ready()
         
         channel = self.bot.get_channel(TOURNEY_SUPPORT_CHANNEL_ID)
         if not channel or not isinstance(channel, discord.TextChannel):
             return
 
-        # 1. Get Active Tickets
         guild = channel.guild
         cat = guild.get_channel(TOURNEY_CATEGORY_ID)
         
         active_tickets = []
-        active_nums = [] # List to store just the integers (e.g., [3, 4, 5])
+        active_nums = []
 
         if cat and isinstance(cat, discord.CategoryChannel):
             active_tickets = [c for c in cat.channels if isinstance(c, discord.TextChannel) and "ticket-" in c.name]
-            # Sort by creation time to establish line order
             active_tickets.sort(key=lambda c: c.created_at)
 
-            # Extract numbers from active tickets for logic checks
             for t in active_tickets:
                 match = re.search(r"ticket-(\d+)", t.name)
                 if match:
-                    try:
-                        active_nums.append(int(match.group(1)))
-                    except ValueError:
-                        pass
-            
-            # Sort numbers just in case creation time didn't match numbering perfectly
+                    try: active_nums.append(int(match.group(1)))
+                    except: pass
             active_nums.sort()
 
         count = len(active_tickets)
-
-        # 2. Determine Message Content
         embed = discord.Embed(title="📊 Live Tournament Queue", color=discord.Color.blurple())
         
-        # --- LOGIC START ---
-        # If no tickets are open at all, show the "Green" state immediately
         if count == 0:
             embed.color = discord.Color.green()
             embed.description = "✅ **No tickets currently in the queue.**\nStaff are standing by!"
-            serving_display = None # Flag to skip adding fields
+            serving_display = None
         else:
-            # Calculate Max Closed Number
             max_closed_num = 0
             closed_cat = guild.get_channel(TOURNEY_CLOSED_CATEGORY_ID)
             if closed_cat and isinstance(closed_cat, discord.CategoryChannel):
@@ -161,78 +152,132 @@ class QueueDashboard(commands.Cog):
                     if match:
                         try:
                             num = int(match.group(1))
-                            if num > max_closed_num:
-                                max_closed_num = num
-                        except:
-                            pass
+                            if num > max_closed_num: max_closed_num = num
+                        except: pass
             
-            # Logic: Determine who we are serving
             target_num = max_closed_num + 1
-            
-            if target_num in active_nums:
-                # Ideally, we serve the next number in sequence
-                final_serving_num = target_num
-            else:
-                # EDGE CASE: 
-                # The target (MaxClosed + 1) does not exist in active tickets.
-                # In this case, serve the LOWEST available open ticket.
-                if len(active_nums) > 0:
-                    final_serving_num = min(active_nums)
-                else:
-                    # Should be caught by the (count == 0) check above, but safe fallback
-                    final_serving_num = 0 
-
+            final_serving_num = target_num if target_num in active_nums else (min(active_nums) if active_nums else 0)
             serving_display = f"ticket-{final_serving_num:03d}"
             embed.color = discord.Color.orange()
 
-        # 3. Add Timestamp & Fields
         current_timestamp = int(discord.utils.utcnow().timestamp())
-        
-        # --- FIX IS HERE ---
-        # Initialize description to empty string if it is None
-        if embed.description is None:
-            embed.description = ""
-            
-        embed.description = f"**Last Updated:** <t:{current_timestamp}:R>\n\n{embed.description}"
-        # -------------------
+        embed.description = f"**Last Updated:** <t:{current_timestamp}:R>\n\n{embed.description or ''}"
 
         if serving_display:
-            embed.add_field(
-                name="🟢 Currently Serving", 
-                value=f"**{serving_display}**", 
-                inline=True
-            )
-            embed.add_field(
-                name="👥 In Line", 
-                value=f"**{count}** tickets waiting", 
-                inline=True
-            )
-            
+            embed.add_field(name="🟢 Currently Serving", value=f"**{serving_display}**", inline=True)
+            embed.add_field(name="👥 In Line", value=f"**{count}** tickets waiting", inline=True)
 
-        # 4. Jump-to-Bottom Logic (Edit or Resend)
         try:
-            last_message = None
-            async for m in channel.history(limit=1):
-                last_message = m
-                break 
-
             old_dashboard_msg = None
             async for m in channel.history(limit=10):
                 if m.author == self.bot.user and m.embeds and m.embeds[0].title == "📊 Live Tournament Queue":
                     old_dashboard_msg = m
                     break
 
-            if last_message and old_dashboard_msg and last_message.id == old_dashboard_msg.id:
-                try: await old_dashboard_msg.edit(embed=embed)
-                except discord.HTTPException: pass 
-            else:
-                if old_dashboard_msg:
-                    try: await old_dashboard_msg.delete()
-                    except: pass
-                await channel.send(embed=embed)
+            last_message = [msg async for msg in channel.history(limit=1)][0] if await channel.history(limit=1).flatten() else None
 
+            if old_dashboard_msg and last_message and last_message.id == old_dashboard_msg.id:
+                await old_dashboard_msg.edit(embed=embed)
+            else:
+                if old_dashboard_msg: await old_dashboard_msg.delete()
+                await channel.send(embed=embed)
         except Exception as e:
             print(f"Queue Dashboard Error: {e}")
+
+    @tasks.loop(minutes=1)
+    async def match_refresher_task(self):
+        """Refreshes Matcherino scores in active tickets every 1 minutes."""
+        await self.bot.wait_until_ready()
+        
+        # 1. Get Matcherino ID from database
+        m_id = await get_matcherino_id_from_active()
+        if not m_id:
+            return
+
+        bracket_url = f"https://matcherino.com/tournaments/{m_id}/bracket"
+        
+        # 2. Locate the active guild safely
+        dashboard_channel = self.bot.get_channel(TOURNEY_SUPPORT_CHANNEL_ID)
+        if not dashboard_channel: return
+        guild = dashboard_channel.guild
+        category = guild.get_channel(TOURNEY_CATEGORY_ID)
+        
+        if not category or not isinstance(category, discord.CategoryChannel):
+            return
+
+        # 3. Process each ticket channel
+        for channel in category.channels:
+            # Skip if not a ticket, or if it is closed (👍) or inactive
+            if not isinstance(channel, discord.TextChannel) or "ticket-" not in channel.name:
+                continue
+            if "👍" in channel.name or "❗" not in channel.name:
+                continue
+
+            # Parse Match Number from topic
+            match_num = None
+            if channel.topic:
+                match_res = re.search(r"bracket:(\d+)", channel.topic)
+                if match_res:
+                    try: match_num = int(match_res.group(1))
+                    except: continue
+            
+            if match_num is None: continue
+
+            # 4. Fetch Fresh Match Data
+            data = fetch_ticket_context(bracket_url, match_num)
+            if data.get("status") != "success":
+                continue
+
+            # 5. Construct the Live Embed with Relative Timestamp
+            now_ts = int(discord.utils.utcnow().timestamp())
+            embed = discord.Embed(
+                title=f"📊 Live Match Update: Match #{match_num}", 
+                description=f"**Last Update:** <t:{now_ts}:R>",
+                color=discord.Color.gold()
+            )
+
+            embed.add_field(name="Match Status", value=f"`{data['match_status'].upper()}`", inline=True)
+            embed.add_field(name="\u200b", value="\u200b", inline=True)
+            embed.add_field(name="\u200b", value="\u200b", inline=True)
+
+            team_a, team_b = data['team_a'], data['team_b']
+            p_a = "\n".join([f"• {p}" for p in team_a['players']]) or "• *No players*"
+            p_b = "\n".join([f"• {p}" for p in team_b['players']]) or "• *No players*"
+
+            embed.add_field(name=f"🔵 {team_a['name']} ({team_a['score']})", value=f"**Roster:**\n{p_a}", inline=True)
+            embed.add_field(name="⚔️", value="\u200b", inline=True)
+            embed.add_field(name=f"🔴 {team_b['name']} ({team_b['score']})", value=f"**Roster:**\n{p_b}", inline=True)
+            
+            embed.set_footer(text=f"Matcherino ID: {m_id}")
+
+            # 6. Visibility Logic: Edit vs. Resend
+            try:
+                old_info_msg = None
+                async for msg in channel.history(limit=10):
+                    if msg.author == self.bot.user and msg.embeds:
+                        title = msg.embeds[0].title or ""
+                        if "Matcherino Data" in title or "Live Match Update" in title:
+                            old_info_msg = msg
+                            break
+                
+                # Get the last message in the channel
+                msgs = [m async for m in channel.history(limit=1)]
+                last_msg = msgs[0] if msgs else None
+                
+                # If bot embed is already at the bottom: Edit
+                if old_info_msg and last_msg and old_info_msg.id == last_msg.id:
+                    await old_info_msg.edit(embed=embed)
+                else:
+                    # If conversation buried it: Delete old and Resend to surface at bottom
+                    if old_info_msg:
+                        await old_info_msg.delete()
+                    await channel.send(embed=embed)
+                
+                # Sequential delay to avoid global rate limits
+                await asyncio.sleep(1.5)
+
+            except Exception as e:
+                print(f"Refresher error in {channel.name}: {e}")
             
 class BlacklistGroup(app_commands.Group):
     def __init__(self, bot: commands.Bot):
@@ -1300,6 +1345,90 @@ def setup_tourney_commands(bot: commands.Bot):
         embed.set_footer(text=f"Matcherino ID: {m_id}")
         await interaction.followup.send(embed=embed)
         
+    @app_commands.command(name="set-ticket-match", description="STAFF ONLY: Update match # or team name for this specific ticket.")
+    @app_commands.describe(
+        match_num="The correct visual match number (e.g., 42)",
+        team_name="The correct Matcherino team name for this ticket"
+    )
+    async def set_ticket_match(
+        interaction: discord.Interaction, 
+        match_num: int = None, 
+        team_name: str = None
+    ):
+        # 1. Permission and Channel Validation
+        if not is_staff(interaction.user):
+            await interaction.response.send_message("❌ Staff permissions required.", ephemeral=True)
+            return
+
+        channel = interaction.channel
+        if not isinstance(channel, discord.TextChannel) or "ticket-" not in channel.name:
+            await interaction.response.send_message("❌ This command must be used inside a ticket channel.", ephemeral=True)
+            return
+
+        if match_num is None and team_name is None:
+            await interaction.response.send_message("⚠️ Provide at least one field to update.", ephemeral=True)
+            return
+
+        # Defer so we have time to handle the potential wait
+        await interaction.response.defer()
+
+        # 2. Prepare the new Metadata
+        topic = channel.topic or ""
+        updates = []
+
+        if match_num is not None:
+            topic = re.sub(r"bracket:[^|]+", f"bracket:{match_num}", topic) if "bracket:" in topic else f"{topic}|bracket:{match_num}"
+            updates.append(f"Match Number: **#{match_num}**")
+
+        if team_name is not None:
+            topic = re.sub(r"team:[^|]+", f"team:{team_name}", topic) if "team:" in topic else f"{topic}|team:{team_name}"
+            updates.append(f"Team Name: **{team_name}**")
+
+        new_name = f"「❗」ticket-{match_num:03d}" if match_num else channel.name
+
+        # 3. Execution with Rate Limit "Kill Switch"
+        try:
+            # We create a task for the edit so we can cancel it if it hits the 10-minute wall
+            edit_task = asyncio.create_task(channel.edit(
+                topic=topic, 
+                name=new_name,
+                reason=f"Details updated by {interaction.user.name}"
+            ))
+            
+            try:
+                # Wait only 2 seconds. If Discord is rate-limiting us, this will time out.
+                await asyncio.wait_for(asyncio.shield(edit_task), timeout=2.0)
+            except asyncio.TimeoutError:
+                # STOP the bot from waiting 10 minutes
+                edit_task.cancel()
+                
+                await interaction.followup.send(
+                    embed=discord.Embed(
+                        title="🚫 Discord Rate Limit Hit",
+                        description=(
+                            "Discord allows only **2 channel edits every 10 minutes**.\n\n"
+                            "The bot has **cancelled** this update to avoid hanging for 10 minutes. "
+                            "Please wait a few minutes and try again."
+                        ),
+                        color=discord.Color.red()
+                    )
+                )
+                return
+
+            # 4. Success Response
+            update_list = "\n".join([f"✅ {item}" for item in updates])
+            await interaction.followup.send(
+                embed=discord.Embed(
+                    title="⚙️ Ticket Details Adjusted",
+                    description=f"Changes applied successfully:\n\n{update_list}\n\n"
+                                f"The live scoreboard will update in the next 5-minute cycle.",
+                    color=discord.Color.green()
+                )
+            )
+
+        except Exception as e:
+            await interaction.followup.send(f"❌ Failed to update channel: {e}")
+        
     # --- Start the Dashboard Task ---
     asyncio.create_task(bot.add_cog(QueueDashboard(bot)))
     print("✅ Queue Dashboard task started.")
@@ -1319,6 +1448,7 @@ def setup_tourney_commands(bot: commands.Bot):
     bot.tree.add_command(tourney_test_mode)
     bot.tree.add_command(match_info)
     bot.tree.add_command(match_history)
+    bot.tree.add_command(set_ticket_match)
     bot.tree.add_command(BlacklistGroup(bot))
 
 
