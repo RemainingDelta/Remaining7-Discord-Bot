@@ -165,10 +165,12 @@ async def create_tourney_ticket_channel(
     # Build permission overwrites
     overwrites: dict[discord.abc.Snowflake, discord.PermissionOverwrite] = {
         guild.default_role: discord.PermissionOverwrite(view_channel=False),
+        # Ticket opener: full access plus slash commands inside this channel
         interaction.user: discord.PermissionOverwrite(
             view_channel=True,
             send_messages=True,
             read_message_history=True,
+            use_application_commands=True,
         ),
     }
 
@@ -180,6 +182,7 @@ async def create_tourney_ticket_channel(
                 send_messages=True,
                 read_message_history=True,
                 manage_messages=True,
+                use_application_commands=True,
             )
 
     channel = await guild.create_text_channel(
@@ -297,13 +300,19 @@ async def create_pre_tourney_ticket_channel(
     # (Keep the rest of your existing code here)
     overwrites = {
         guild.default_role: discord.PermissionOverwrite(view_channel=False),
-        interaction.user: discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True),
+        # Ticket opener: full access plus slash commands inside this channel
+        interaction.user: discord.PermissionOverwrite(
+            view_channel=True,
+            send_messages=True,
+            read_message_history=True,
+            use_application_commands=True,
+        ),
     }
 
     for role_id in ALLOWED_STAFF_ROLES:
         role = guild.get_role(role_id)
         if role:
-            overwrites[role] = discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True, manage_messages=True)
+            overwrites[role] = discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True, manage_messages=True, use_application_commands=True)
 
     display_team = team_name if team_name else "N/A"
 

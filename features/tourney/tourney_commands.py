@@ -879,7 +879,13 @@ def setup_tourney_commands(bot: commands.Bot):
             await interaction.response.send_message("This command can only be used inside a tourney ticket channel.", ephemeral=True)
             return
 
-        await channel.set_permissions(user, view_channel=True, send_messages=True, read_message_history=True)
+        await channel.set_permissions(
+            user,
+            view_channel=True,
+            send_messages=True,
+            read_message_history=True,
+            use_application_commands=True,
+        )
         await interaction.response.send_message(f"✅ Added {user.mention} to this ticket.", ephemeral=True)
         await channel.send(f"{user.mention} has been added to this ticket by {interaction.user.mention}.")
     
