@@ -1,7 +1,7 @@
 import difflib
-import json
 import re
 import time
+from bs4 import BeautifulSoup
 import requests
 import requests_cache
 from datetime import timedelta, datetime, timezone
@@ -242,3 +242,96 @@ def fetch_ticket_context(url: str, target_match_number: int, topic_team_name: st
 
     except Exception as e:
         return {"error": f"An unexpected error occurred: {e}"}
+    
+    
+def fetch_payout_report(tournament_id: str) -> dict:
+    """
+    Scrapes Tourney Name & Prize Pool from HTML.
+    Targeting specific classes for white-labeled tournament pages.
+    """
+    url = f"https://matcherino.com/tournaments/{tournament_id}"
+    total_prize = 0.0
+    tourney_name = "Tournament Results"
+    
+    # 1. Scrape Name & Amount from HTML
+    try:
+        page_res = requests.get(url, headers=HEADERS, timeout=10)
+        soup = BeautifulSoup(page_res.text, 'html.parser')
+        
+        # --- GET TOURNAMENT NAME ---
+        # 1st Choice: The specific class you identified
+        name_tag = soup.find('div', class_='title mr-08')
+        
+        # 2nd Choice: Fallback to the title container class found in the sidebars
+        if not name_tag:
+            name_tag = soup.find('div', class_='title-container')
+            
+        if name_tag:
+            # We strip to remove extra spaces/newlines
+            tourney_name = name_tag.get_text(strip=True)
+            
+        # --- GET PRIZE POOL ---
+        amt_container = soup.find('div', class_='prize-pool-amt')
+        if amt_container:
+            raw_text = amt_container.find('span').text
+            total_prize = float(raw_text.replace('$', '').replace(',', ''))
+            
+    except Exception as e:
+        print(f"Scraping Error: {e}")
+
+    # 2. Fetch API Bracket Data
+    api_url = f"https://api.matcherino.com/__api/brackets?bountyId={tournament_id}&id=0&isAdmin=false"
+    try:
+        response = session.get(api_url, timeout=10)
+        data = response.json()
+        bracket_data = data['body'][0]
+        raw_matches = bracket_data.get('matches', [])
+        raw_entrants = bracket_data.get('entrants', [])
+    except Exception as e:
+        return {"error": f"API Connection failed: {e}"}
+
+    # 3. ID -> Name Map
+    entrant_map = {0: "TBD", 1: "BYE"}
+    for e in raw_entrants:
+        e_id = e.get('id')
+        name = e.get('name') or (e.get('team') and e['team'].get('name')) or "Unknown"
+        entrant_map[e_id] = name
+
+    # 4. Filter & Sort Matches (Finals usually [-2], Bronze usually [-1])
+    # Logic based on Matcherino match number sequencing
+    visible_matches = [m for m in raw_matches if m.get('entrantA', {}).get('entrantId', 0) > 1 and m.get('entrantB', {}).get('entrantId', 0) > 1]
+    visible_matches.sort(key=lambda x: x.get('matchNum', 0))
+
+    if len(visible_matches) < 2:
+        return {"error": "Not enough matches to determine Top 4."}
+
+    # Final Match is normally the second-to-last match created in the bracket sequence
+    final_match = visible_matches[-2] 
+    bronze_match = visible_matches[-1]
+
+    def resolve_names(m):
+        e_a, e_b = m.get('entrantA', {}), m.get('entrantB', {})
+        id_a, id_b = e_a.get('entrantId', 0), e_b.get('entrantId', 0)
+        score_a, score_b = e_a.get('score', 0), e_b.get('score', 0)
+        
+        # Winner check with fallback to score if the match isn't officially "closed" in API
+        w_id = m.get('winnerId')
+        if not w_id or w_id == 0:
+            w_id = id_a if score_a > score_b else id_b
+        
+        l_id = id_b if w_id == id_a else id_a
+        return entrant_map.get(w_id, "Unknown"), entrant_map.get(l_id, "Unknown")
+
+    p1_team, p2_team = resolve_names(final_match)
+    p3_team, p4_team = resolve_names(bronze_match)
+
+    return {
+        "tourney_name": tourney_name,
+        "total": total_prize,
+        "results": {
+            "1st": p1_team, "p1": total_prize * 0.50,
+            "2nd": p2_team, "p2": total_prize * 0.25,
+            "3rd": p3_team, "p3": total_prize * 0.15,
+            "4th": p4_team, "p4": total_prize * 0.10
+        }
+    }
