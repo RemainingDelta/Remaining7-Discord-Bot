@@ -4,7 +4,7 @@ from discord.ext import commands, tasks
 import asyncio
 import re 
 import datetime 
-from .matcherino import fetch_ticket_context 
+from .matcherino import fetch_ticket_context, fetch_payout_report
 
 from database.mongo import (
     add_payout_batch,         
@@ -51,6 +51,7 @@ from .tourney_utils import (
     reopen_ticket_via_command
 )
 from .tourney_views import TourneyOpenTicketView, PreTourneyOpenTicketView
+from .matcherino import fetch_payout_report
 
 # Global lock tasks dictionary to track auto-reopen timers
 lock_tasks: dict[int, asyncio.Task] = {}
@@ -912,43 +913,44 @@ def setup_tourney_commands(bot: commands.Bot):
         await interaction.response.send_message(f"✅ Removed {user.mention} from this ticket.", ephemeral=True)
         await channel.send(f"{user.mention} has been removed from this ticket by {interaction.user.mention}.")
 
-    @app_commands.command(name="hall-of-fame", description="Post results to Hall of Fame.")
-    async def hall_of_fame(interaction: discord.Interaction, tourney_name: str, link: str, total_prize: str, first: str, second: str, third: str, fourth: str):
+    @app_commands.command(name="hall-of-fame", description="Automatically fetch results and post to Hall of Fame.")
+    @app_commands.describe(tournament_id="The Matcherino ID (e.g. 183089)")
+    async def hall_of_fame(interaction: discord.Interaction, tournament_id: str):
         if not isinstance(interaction.user, discord.Member) or not is_staff(interaction.user):
-            await interaction.response.send_message("You don't have permission to use this command.", ephemeral=True)
+            await interaction.response.send_message("❌ Permission denied.", ephemeral=True)
             return
 
-        guild = interaction.guild
-        if guild is None:
-            await interaction.response.send_message("This command must be used in a server.", ephemeral=True)
+        # Get the target channel first to ensure config is correct
+        target_channel = interaction.guild.get_channel(HALL_OF_FAME_CHANNEL_ID)
+        if not target_channel or not isinstance(target_channel, discord.TextChannel):
+            await interaction.response.send_message(f"❌ Could not find Hall of Fame channel (ID: {HALL_OF_FAME_CHANNEL_ID}).", ephemeral=True)
             return
 
-        target_channel = guild.get_channel(HALL_OF_FAME_CHANNEL_ID)
-        if target_channel is None or not isinstance(target_channel, discord.TextChannel):
-            await interaction.response.send_message(f"❌ Could not find the configured Hall of Fame channel (ID: {HALL_OF_FAME_CHANNEL_ID}). Please check `tourney_config.py`.", ephemeral=True)
+        await interaction.response.defer()
+
+        # Clean ID and fetch data using the new scraper
+        clean_id = "".join(filter(str.isdigit, tournament_id))
+        data = fetch_payout_report(clean_id)
+
+        if "error" in data:
+            await interaction.followup.send(f"❌ **Error:** {data['error']}", ephemeral=True)
             return
 
-        clean_prize = total_prize.replace('$', '').replace(',', '').strip()
-        try:
-            total = float(clean_prize)
-        except ValueError:
-            await interaction.response.send_message(f"❌ Invalid prize amount: `{total_prize}`. Please enter a number like `105.61`.", ephemeral=True)
-            return
-
-        p1 = total * 0.50
-        p2 = total * 0.25
-        p3 = total * 0.15
-        p4 = total * 0.10
+        # Map variables for the embed
+        tourney_name = data['tourney_name']
+        link = f"https://matcherino.com/tournaments/{clean_id}"
+        total = data['total']
+        res = data['results']
 
         embed = discord.Embed(
             title=f"🏆 {tourney_name}",
             url=link,
             description=(
                 f"💰 **Total Prize:** ${total:.2f}\n\n"
-                f"🥇 **{first}** — ${p1:.2f} (50%)\n"
-                f"🥈 **{second}** — ${p2:.2f} (25%)\n"
-                f"🥉 **{third}** — ${p3:.2f} (15%)\n"
-                f"4️⃣ **{fourth}** — ${p4:.2f} (10%)"
+                f"🥇 **{res['1st']}** — ${res['p1']:.2f} (50%)\n"
+                f"🥈 **{res['2nd']}** — ${res['p2']:.2f} (25%)\n"
+                f"🥉 **{res['3rd']}** — ${res['p3']:.2f} (15%)\n"
+                f"4️⃣ **{res['4th']}** — ${res['p4']:.2f} (10%)"
             ),
             color=discord.Color.gold()
         )
@@ -956,11 +958,9 @@ def setup_tourney_commands(bot: commands.Bot):
 
         try:
             await target_channel.send(embed=embed)
-            await interaction.response.send_message(f"✅ Hall of Fame post sent to {target_channel.mention}!", ephemeral=False)
+            await interaction.followup.send(f"✅ Hall of Fame post sent to {target_channel.mention}!")
         except discord.Forbidden:
-            await interaction.response.send_message(f"❌ I don't have permission to send messages in {target_channel.mention}.", ephemeral=True)
-        except Exception as e:
-            await interaction.response.send_message(f"❌ Failed to send message: {e}", ephemeral=True)
+            await interaction.followup.send(f"❌ I don't have permission to post in {target_channel.mention}.", ephemeral=True)
 
     # =========================================================================
     #  PAYOUT COMMANDS

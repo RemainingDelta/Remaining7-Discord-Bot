@@ -8,3 +8,4 @@ deep-translator
 langdetect
 requests
 requests-cache
+beautifulsoup4
