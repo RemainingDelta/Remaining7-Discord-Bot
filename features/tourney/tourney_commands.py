@@ -1447,16 +1447,15 @@ def setup_tourney_commands(bot: commands.Bot):
             topic = re.sub(r"team:[^|]+", f"team:{team_name}", topic) if "team:" in topic else f"{topic}|team:{team_name}"
             updates.append(f"Team Name: **{team_name}**")
 
-        new_name = f"「❗」ticket-{match_num:03d}" if match_num else channel.name
-
         # 3. Execution with Rate Limit "Kill Switch"
         try:
             # We create a task for the edit so we can cancel it if it hits the 10-minute wall
-            edit_task = asyncio.create_task(channel.edit(
-                topic=topic, 
-                name=new_name,
-                reason=f"Details updated by {interaction.user.name}"
-            ))
+            edit_task = asyncio.create_task(
+                channel.edit(
+                    topic=topic,
+                    reason=f"Details updated by {interaction.user.name}",
+                )
+            )
             
             try:
                 # Wait only 2 seconds. If Discord is rate-limiting us, this will time out.
