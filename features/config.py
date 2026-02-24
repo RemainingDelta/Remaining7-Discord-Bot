@@ -4,7 +4,7 @@ from dotenv import load_dotenv
 
 
 load_dotenv()
-
+BOT_VERSION = "v1.6.3"
 MODE = os.getenv('BOT_MODE', 'TEST').upper()
 
 if MODE == "REAL":
@@ -460,5 +460,4 @@ BRAWLER_UPGRADE_COSTS = {
     11: {"pp": 1440, "coins": 2800}
 }
 
-BOT_VERSION = "v1.6.2"
 TOURNEY_TEST_MODE = False
