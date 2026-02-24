@@ -1217,7 +1217,7 @@ def setup_tourney_commands(bot: commands.Bot):
         # --- 3. Moderation & Results ---
         mod_text = (
             "`/blacklist` `add/remove/list` - Manage users banned from participating.\n"
-            "`/hall-of-fame` - Post tournament winners and prize splits."
+            "`/hall-of-fame <tourney_id>` - Uses the Matcherino Tourney ID to fetch the top 4 teams, calculates prize splits, and posts the results embed."
         )
         embed.add_field(name="⚖️ Moderation & Results", value=mod_text, inline=False)
 
