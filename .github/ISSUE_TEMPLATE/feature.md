@@ -2,7 +2,7 @@
 name: Feature
 about: Create feature ticket
 title: 'Feature: '
-labels: ''
+labels: Feature
 assignees: ''
 
 ---
