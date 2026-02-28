@@ -1,4 +1,6 @@
 import re
+from deep_translator import GoogleTranslator
+from langdetect import detect, LangDetectException
 import discord
 from discord.ext import commands
 import io
@@ -27,6 +29,22 @@ _user_open_tickets: dict[int, set[int]] = {}
 # user_id -> datetime of last ticket creation
 _user_last_ticket_open_time: dict[int, datetime] = {}
 
+
+async def _get_translation(text: str) -> str | None:
+    """Detects language and returns English translation if not already English."""
+    try:
+        # Run blocking detection and translation in a thread to keep the bot responsive
+        detected = await asyncio.to_thread(detect, text)
+        if detected == 'en':
+            return None
+        
+        translated = await asyncio.to_thread(
+            GoogleTranslator(source='auto', target='en').translate, 
+            text
+        )
+        return translated
+    except Exception:
+        return None
 
 def _get_open_ticket_count(user_id: int) -> int:
     tickets = _user_open_tickets.get(user_id)
@@ -204,6 +222,8 @@ async def create_tourney_ticket_channel(
     )
     await channel.edit(topic=topic, reason="Store ticket opener ID")
 
+    translation = await _get_translation(issue)
+    
     ticket_embed = discord.Embed(
         title="🎟️ New Tournament Ticket",
         description="A Tourney Admin will assist you shortly.",
@@ -215,6 +235,13 @@ async def create_tourney_ticket_channel(
     ticket_embed.add_field(name="🔢 Match / Bracket", value=f"```\n{bracket}\n```", inline=False)
     ticket_embed.add_field(name="📝 Issue", value=f"```\n{issue}\n```", inline=False)
 
+    if translation:
+        ticket_embed.add_field(
+            name="🌐 English Translation", 
+            value=f"```\n{translation}\n```", 
+            inline=False
+        )
+    
     await channel.send(embed=ticket_embed)
 
     proof_embed = discord.Embed(
@@ -329,6 +356,8 @@ async def create_pre_tourney_ticket_channel(
     topic = f"tourney-opener:{interaction.user.id}|team:{display_team}|issue:{issue}"
     await channel.edit(topic=topic, reason="Store ticket opener ID")
 
+    translation = await _get_translation(issue)
+
     ticket_embed = discord.Embed(
         title="📩 New Pre-Tourney Inquiry",
         description="A Staff member will assist you shortly.",
@@ -337,6 +366,13 @@ async def create_pre_tourney_ticket_channel(
     ticket_embed.add_field(name="👤 User", value=interaction.user.mention, inline=False)
     ticket_embed.add_field(name="📛 Team", value=f"```\n{display_team}\n```", inline=False)
     ticket_embed.add_field(name="📝 Inquiry", value=f"```\n{issue}\n```", inline=False)
+    
+    if translation:
+        ticket_embed.add_field(
+            name="🌐 English Translation (Auto)", 
+            value=f"```\n{translation}\n```", 
+            inline=False
+        )
 
     await channel.send(embed=ticket_embed)
     await interaction.followup.send(f"Support ticket created: {channel.mention}", ephemeral=True)
