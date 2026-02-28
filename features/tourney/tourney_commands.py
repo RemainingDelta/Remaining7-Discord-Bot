@@ -518,34 +518,45 @@ def setup_tourney_commands(bot: commands.Bot):
             await ctx.reply("⚠️ This command is for reopening **Closed Tourney Tickets**.\nTo unlock the main support channel, use `!unlock`.")
 
     @bot.command(name="starttourney")
-    async def start_tourney_command(ctx: commands.Context):
+    async def start_tourney_command(ctx: commands.Context, region: str = None):
         import features.config as config
         """
-        Start a tourney:
-        - Reset ticket counter.
-        - Lock OTHER ticket channel.
-        - Setup Main Tourney Support (Open Perms, Send Panel, then Background Rename).
-        - Setup Pre-Tourney Support (Close Perms, Delete Tickets, then Background Rename).
+        Start a tourney with an optional region (e.g., !starttourney SA).
         """
-        # Staff-only
         if not isinstance(ctx.author, discord.Member) or not is_staff(ctx.author):
             await ctx.reply("You don't have permission to start the tourney.")
             return
 
         guild = ctx.guild
-        if not guild:
-            return
+        if not guild: return
 
-        # 1. Reset ticket numbering & Lock other channel (Existing)
+        # Standard Startup Logic
         reset_ticket_counter()
-        
         existing_session = await get_active_tourney_session()
-        if existing_session:
-            await ctx.send("⚠ **Note:** A tournament session is already active in the database.")
-        else:
+        if not existing_session:
             await create_tourney_session()
-
+        
         await lock_command(ctx)
+
+        # --- SA REGION LOGIC ---
+        if region and region.upper() == "SA":
+            from features.config import SPANISH_CHANNEL_ID
+            spa_channel = guild.get_channel(SPANISH_CHANNEL_ID)
+            
+            if isinstance(spa_channel, discord.TextChannel):
+                # 1. Lock sending messages
+                await spa_channel.set_permissions(guild.default_role, send_messages=False)
+                
+                # 2. Send Large Redirect Message
+                main_support = guild.get_channel(TOURNEY_SUPPORT_CHANNEL_ID)
+                support_mention = main_support.mention if main_support else "#tourney-support"
+                
+                embed = discord.Embed(
+                    description=f"# ⚠️ ¡Atención!\n# Por favor, utiliza {support_mention} para abrir un ticket de apoyo para el torneo.",
+                    color=discord.Color.red()
+                )
+                await spa_channel.send(embed=embed)
+                await ctx.send(f"✅ SA Region active: {spa_channel.mention} has been locked and redirected.")
 
         # 2. Update MAIN Tourney Support Channel
         # GOAL: 「🔴」tourney-support | Perms: Everyone View(/) Send(X)
@@ -706,6 +717,14 @@ def setup_tourney_commands(bot: commands.Bot):
         # ------------------------------
 
         await unlock_command(ctx)
+        
+        from features.config import SPANISH_CHANNEL_ID
+        guild = ctx.guild
+        spa_channel = guild.get_channel(SPANISH_CHANNEL_ID)
+        if isinstance(spa_channel, discord.TextChannel):
+            # Restore send_messages permission
+            await spa_channel.set_permissions(guild.default_role, send_messages=True)
+            await ctx.send(f"🔓 {spa_channel.mention} has been unlocked.")
 
         # 1. Update MAIN Tourney Support Channel
         # GOAL: 「❌❌❌」「🔴」tourney-support | Perms: Everyone View(X)
