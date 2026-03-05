@@ -335,3 +335,93 @@ def fetch_payout_report(tournament_id: str) -> dict:
             "4th": p4_team, "p4": total_prize * 0.10
         }
     }
+    
+def fetch_bracket_progress(url: str) -> dict:
+    """
+    Scans the entire bracket to provide accurate progress metrics and identify bottlenecks.
+    """
+    id_match = re.search(r'tournaments/(\d+)', url)
+    if not id_match:
+        return {"error": "Invalid Matcherino URL."}
+    
+    bounty_id = id_match.group(1)
+    api_url = f"https://api.matcherino.com/__api/brackets?bountyId={bounty_id}&id=0&isAdmin=false"
+    
+    try:
+        response = session.get(api_url, timeout=10)
+        data = response.json()
+        if not data.get('body') or len(data['body']) == 0:
+            return {"error": "Matcherino API returned an empty body. Is the ID correct?"}
+        bracket_data = data['body'][0]
+        raw_matches = bracket_data.get('matches', [])
+        raw_entrants = bracket_data.get('entrants', [])
+    except Exception as e:
+        return {"error": f"API Connection failed: {e}"}
+
+    if not raw_matches:
+        return {"error": "Bracket is empty."}
+
+    # 1. Map Entrant IDs to Names
+    entrant_map = {0: "TBD", 1: "BYE"}
+    for e in raw_entrants:
+        e_id = e.get('id')
+        name = e.get('name') or (e.get('team') and e['team'].get('name')) or "Unknown"
+        entrant_map[e_id] = name
+
+    # 2. Filter Real Matches & Resolve Rounds
+    real_matches = []
+    for m in raw_matches:
+        e_a = m.get('entrantA', {}).get('entrantId', 0)
+        e_b = m.get('entrantB', {}).get('entrantId', 0)
+        if e_a == 1 or e_b == 1: continue # Skip BYE placeholders
+            
+        m['resolved_round'] = m.get('round') or m.get('roundNum') or 1
+        real_matches.append(m)
+    
+    total_matches = len(real_matches)
+    finished_statuses = ('closed', 'completed', 'complete', 'done')
+    closed_matches = [m for m in real_matches if str(m.get('status')).lower() in finished_statuses]
+    incomplete_matches = [m for m in real_matches if m not in closed_matches]
+    
+    # 3. Active Match Logic: Both teams known + Not finished
+    # This fixes the "0 Paired" bug by including all playable matches
+    active_matches = []
+    for m in incomplete_matches:
+        if m.get('entrantA', {}).get('entrantId', 0) > 1 and m.get('entrantB', {}).get('entrantId', 0) > 1:
+            active_matches.append(m)
+    
+    # 4. Round & Path Logic
+    max_round = max([m['resolved_round'] for m in real_matches]) if real_matches else 1
+    
+    # Dominant Round: The highest round currently seeing active play
+    if active_matches:
+        dominant_round = max([m['resolved_round'] for m in active_matches])
+    else:
+        dominant_round = max([m['resolved_round'] for m in incomplete_matches]) if incomplete_matches else max_round
+
+    # 5. Bottlenecks: Active matches lagging behind the front-line round
+    bottlenecks = []
+    for m in active_matches:
+        if m['resolved_round'] < dominant_round:
+            bottlenecks.append({
+                "id": m.get('matchNum'),
+                "round": m['resolved_round'],
+                "team_a": entrant_map.get(m.get('entrantA', {}).get('entrantId', 0), "Unknown"),
+                "team_b": entrant_map.get(m.get('entrantB', {}).get('entrantId', 0), "Unknown"),
+                "score_a": m.get('entrantA', {}).get('score', 0),
+                "score_b": m.get('entrantB', {}).get('score', 0)
+            })
+
+    return {
+        "status": "success",
+        "total": total_matches,
+        "closed": len(closed_matches),
+        "completion_pct": round((len(closed_matches) / total_matches) * 100, 1) if total_matches > 0 else 0,
+        "dominant_round": dominant_round,
+        "max_round": max_round,
+        "bottlenecks": sorted(bottlenecks, key=lambda x: x['round']), # Sort by round
+        "active_count": len(active_matches)
+    }
+    
+    
+    

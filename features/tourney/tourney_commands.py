@@ -678,7 +678,12 @@ def setup_tourney_commands(bot: commands.Bot):
         if session:
             # 1. Calculate Duration
             start_time = session['start_time']
-            duration = datetime.datetime.utcnow() - start_time
+
+            # Ensure start_time is aware of UTC to prevent subtraction errors
+            if start_time.tzinfo is None:
+                start_time = start_time.replace(tzinfo=datetime.timezone.utc)
+
+            duration = datetime.datetime.now(datetime.timezone.utc) - start_time
             hours, remainder = divmod(int(duration.total_seconds()), 3600)
             minutes, _ = divmod(remainder, 60)
 
@@ -1509,6 +1514,66 @@ def setup_tourney_commands(bot: commands.Bot):
 
         except Exception as e:
             await interaction.followup.send(f"❌ Failed to update channel: {e}")
+            
+    @app_commands.command(name="tourney-progress", description="STAFF ONLY: Real-time tournament health check.")
+    async def tourney_progress(interaction: discord.Interaction):
+        if not is_staff(interaction.user):
+            await interaction.response.send_message("❌ Permission denied.", ephemeral=True)
+            return
+
+        await interaction.response.defer()
+        session = await get_active_tourney_session()
+        if not session or not session.get("matcherino_id"):
+            await interaction.followup.send("❌ No active session found.")
+            return
+
+        m_id = session["matcherino_id"]
+        bracket_url = f"https://matcherino.com/tournaments/{m_id}/bracket"
+        
+        from .matcherino import fetch_bracket_progress
+        data = fetch_bracket_progress(bracket_url)
+        
+        if data.get("status") != "success":
+            await interaction.followup.send(f"❌ **Error:** {data.get('error')}")
+            return
+
+        # Fixed Timezone calculation
+        start_time = session['start_time']
+        if start_time.tzinfo is None:
+            start_time = start_time.replace(tzinfo=datetime.timezone.utc)
+        duration = discord.utils.utcnow() - start_time
+        hours, mins = divmod(int(duration.total_seconds()), 3600)
+        mins, _ = divmod(mins, 60)
+
+        embed = discord.Embed(title="📊 Tournament Progress Report", color=discord.Color.gold())
+        embed.description = f"**⏱️ Total Duration:** `{hours}h {mins}m` | **📈 Completion:** `{data['completion_pct']}%` ({data['closed']}/{data['total']})"
+
+        # Path to Finals
+        rounds_left = max(0, data['max_round'] - data['dominant_round'])
+        path_text = f"{rounds_left} rounds remaining" if rounds_left > 0 else "🏆 **Finals in progress!**"
+
+        embed.add_field(
+            name="🏆 Bracket Status",
+            value=(
+                f"• **Dominant Round:** Round {data['dominant_round']}\n"
+                f"• **Path to Finals:** {path_text}\n"
+                f"• **Active Matches:** {data['active_count']} Currently Playable"
+            ),
+            inline=False
+        )
+
+        # Bottlenecks (Laggards behind dominant round)
+        if data['bottlenecks']:
+            bn_text = ""
+            for bn in data['bottlenecks'][:5]:
+                bn_text += f"**#{bn['id']}** (Round {bn['round']}) | {bn['team_a']} vs {bn['team_b']} ({bn['score_a']}-{bn['score_b']})\n"
+            embed.add_field(name="⚠️ Bottleneck Matches", value=bn_text, inline=False)
+        else:
+            embed.add_field(name="⚠️ Bottleneck Matches", value="✅ All playable matches are current with the dominant round.", inline=False)
+
+        embed.set_footer(text=f"Matcherino ID: {m_id} | Staff: {interaction.user.name}")
+        await interaction.followup.send(embed=embed)
+
         
     # --- Start the Dashboard Task ---
     asyncio.create_task(bot.add_cog(QueueDashboard(bot)))
@@ -1530,6 +1595,7 @@ def setup_tourney_commands(bot: commands.Bot):
     bot.tree.add_command(match_info)
     bot.tree.add_command(match_history)
     bot.tree.add_command(set_ticket_match)
+    bot.tree.add_command(tourney_progress)
     bot.tree.add_command(BlacklistGroup(bot))
 
 
