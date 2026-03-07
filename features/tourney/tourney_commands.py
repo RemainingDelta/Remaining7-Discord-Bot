@@ -1548,16 +1548,24 @@ def setup_tourney_commands(bot: commands.Bot):
         embed = discord.Embed(title="📊 Tournament Progress Report", color=discord.Color.gold())
         embed.description = f"**⏱️ Total Duration:** `{hours}h {mins}m` | **📈 Completion:** `{data['completion_pct']}%` ({data['closed']}/{data['total']})"
 
-        # Path to Finals
-        rounds_left = max(0, data['max_round'] - data['dominant_round'])
-        path_text = f"{rounds_left} rounds remaining" if rounds_left > 0 else "🏆 **Finals in progress!**"
+        # Path to Finals / completion status
+        remaining_matches = max(0, data['total'] - data['closed'])
+        tournament_complete = data['completion_pct'] >= 100 or remaining_matches == 0
+
+        if tournament_complete:
+            path_text = "🏆 **Tournament Over!**"
+        else:
+            rounds_left = max(0, data['max_round'] - data['dominant_round'])
+            path_text = f"{rounds_left} rounds remaining" if rounds_left > 0 else "🏆 **Finals in progress!**"
+
+        active_matches_text = "No matches remaining" if tournament_complete else f"{data['active_count']} Currently Playable"
 
         embed.add_field(
             name="🏆 Bracket Status",
             value=(
                 f"• **Dominant Round:** Round {data['dominant_round']}\n"
                 f"• **Path to Finals:** {path_text}\n"
-                f"• **Active Matches:** {data['active_count']} Currently Playable"
+                f"• **Active Matches:** {active_matches_text}"
             ),
             inline=False
         )
