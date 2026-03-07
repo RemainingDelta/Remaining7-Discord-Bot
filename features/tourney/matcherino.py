@@ -410,6 +410,24 @@ def fetch_bracket_progress(url: str) -> dict:
     else:
         dominant_round = max([m['resolved_round'] for m in incomplete_matches]) if incomplete_matches else max_round
 
+    active_match_details = []
+    for m in active_matches:
+        raw_match_num = m.get('matchNum')
+        raw_round_num = int(m.get('resolved_round', 0))
+        visual_num = None
+        if raw_match_num is not None:
+            visual_num = visual_num_by_match_key.get((int(raw_match_num), raw_round_num))
+
+        active_match_details.append({
+            "id": visual_num if visual_num is not None else raw_match_num,
+            "round": raw_round_num,
+            "team_a": entrant_map.get(m.get('entrantA', {}).get('entrantId', 0), "Unknown"),
+            "team_b": entrant_map.get(m.get('entrantB', {}).get('entrantId', 0), "Unknown"),
+            "score_a": m.get('entrantA', {}).get('score', 0),
+            "score_b": m.get('entrantB', {}).get('score', 0),
+            "announcement_key": f"{raw_round_num}:{raw_match_num if raw_match_num is not None else visual_num}"
+        })
+
     # 5. Bottlenecks: Active matches lagging behind the front-line round
     bottlenecks = []
     for m in active_matches:
@@ -438,7 +456,8 @@ def fetch_bracket_progress(url: str) -> dict:
         "dominant_round": dominant_round,
         "max_round": max_round,
         "bottlenecks": sorted(bottlenecks, key=lambda x: x['round']), # Sort by round
-        "active_count": len(active_matches)
+        "active_count": len(active_matches),
+        "active_matches": sorted(active_match_details, key=lambda x: (x['round'], x['id'] if isinstance(x['id'], int) else 9999))
     }
     
     
