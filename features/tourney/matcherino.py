@@ -378,6 +378,17 @@ def fetch_bracket_progress(url: str) -> dict:
         m['resolved_round'] = m.get('round') or m.get('roundNum') or 1
         real_matches.append(m)
     
+    # Build visual numbering map (the numbers staff see on the bracket UI).
+    # We keep this consistent with fetch_ticket_context: sort visible matches by API matchNum
+    # and assign sequential visual numbers.
+    visual_sorted_matches = sorted(real_matches, key=lambda x: x.get('matchNum', 9999))
+    visual_num_by_match_key: dict[tuple[int, int], int] = {}
+    for visual_num, m in enumerate(visual_sorted_matches, start=1):
+        match_num = m.get('matchNum')
+        round_num = m.get('resolved_round', 0)
+        if match_num is not None:
+            visual_num_by_match_key[(int(match_num), int(round_num))] = visual_num
+
     total_matches = len(real_matches)
     finished_statuses = ('closed', 'completed', 'complete', 'done')
     closed_matches = [m for m in real_matches if str(m.get('status')).lower() in finished_statuses]
@@ -403,8 +414,15 @@ def fetch_bracket_progress(url: str) -> dict:
     bottlenecks = []
     for m in active_matches:
         if m['resolved_round'] < dominant_round:
+            raw_match_num = m.get('matchNum')
+            raw_round_num = int(m.get('resolved_round', 0))
+            visual_num = None
+            if raw_match_num is not None:
+                visual_num = visual_num_by_match_key.get((int(raw_match_num), raw_round_num))
+
             bottlenecks.append({
-                "id": m.get('matchNum'),
+                # "id" is intentionally the visual bracket number for staff-facing embeds.
+                "id": visual_num if visual_num is not None else raw_match_num,
                 "round": m['resolved_round'],
                 "team_a": entrant_map.get(m.get('entrantA', {}).get('entrantId', 0), "Unknown"),
                 "team_b": entrant_map.get(m.get('entrantB', {}).get('entrantId', 0), "Unknown"),
