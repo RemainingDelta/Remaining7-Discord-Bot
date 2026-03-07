@@ -36,6 +36,7 @@ from features.config import (
     GENERAL_CHANNEL_ID,
     BRAWL_CHAT_CHANNEL_ID,
     TOURNEY_CHAT_CHANNEL_ID,
+    TOURNEY_UPDATES_CHANNEL_ID,
     TOURNEY_SUPPORT_CHANNEL_ID,
     TOURNEY_ADMIN_CHANNEL_ID,
     PRE_TOURNEY_SUPPORT_CHANNEL_ID,
@@ -85,6 +86,11 @@ class QueueDashboard(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.dashboard_message_id: int | None = None
+        self._stage_announcement_state: dict[str, dict[str, str | int | None]] = {
+            "semi_finals": {"signature": None, "message_id": None},
+            "finals": {"signature": None, "message_id": None},
+        }
+        self._announcement_matcherino_id: str | None = None
         # The dashboard_task is still manually started via !starttourney
         # The match_refresher starts automatically to monitor any active tickets
         self.match_refresher_task.start()
@@ -141,6 +147,126 @@ class QueueDashboard(commands.Cog):
             finally:
                 self.dashboard_message_id = None
 
+    def _reset_announcement_state_if_needed(self, matcherino_id: str):
+        if self._announcement_matcherino_id != matcherino_id:
+            self._announcement_matcherino_id = matcherino_id
+            for stage_key in self._stage_announcement_state:
+                self._stage_announcement_state[stage_key]["signature"] = None
+                self._stage_announcement_state[stage_key]["message_id"] = None
+
+    @staticmethod
+    def _is_known_team(team_name: str | None) -> bool:
+        if not team_name:
+            return False
+        return team_name.strip().upper() not in {"TBD", "BYE", "UNKNOWN", "UNKNOWN TEAM"}
+
+    def _is_fully_matched(self, match: dict) -> bool:
+        return self._is_known_team(match.get("team_a")) and self._is_known_team(match.get("team_b"))
+
+    @staticmethod
+    def _build_stage_signature(matches: list[dict]) -> str:
+        sorted_matches = sorted(
+            matches,
+            key=lambda m: m.get("id") if isinstance(m.get("id"), int) else 9999,
+        )
+        return "|".join(
+            f"{m.get('id')}::{m.get('team_a', 'TBD')}::{m.get('team_b', 'TBD')}"
+            for m in sorted_matches
+        )
+
+    async def _delete_previous_stage_message(self, channel: discord.TextChannel, stage_key: str):
+        stage_state = self._stage_announcement_state[stage_key]
+        msg_id = stage_state.get("message_id")
+        if not isinstance(msg_id, int):
+            return
+
+        try:
+            old_msg = await channel.fetch_message(msg_id)
+            await old_msg.delete()
+        except (discord.NotFound, discord.Forbidden):
+            pass
+        except Exception as e:
+            print(f"Stage announcement cleanup error ({stage_key}): {e}")
+        finally:
+            stage_state["message_id"] = None
+            stage_state["signature"] = None
+
+    async def _sync_stage_announcement(
+        self,
+        channel: discord.TextChannel,
+        stage_key: str,
+        stage_title: str,
+        matches: list[dict],
+        required_count: int,
+    ):
+        stage_state = self._stage_announcement_state[stage_key]
+
+        # Guard: only announce once the entire stage matchup is known.
+        if len(matches) != required_count:
+            await self._delete_previous_stage_message(channel, stage_key)
+            return
+
+        signature = self._build_stage_signature(matches)
+        current_signature = stage_state.get("signature")
+        current_message_id = stage_state.get("message_id")
+
+        if signature == current_signature and isinstance(current_message_id, int):
+            return
+
+        await self._delete_previous_stage_message(channel, stage_key)
+
+        sorted_matches = sorted(matches, key=lambda m: m.get("id") if isinstance(m.get("id"), int) else 9999)
+
+        match_lines = []
+        for m in sorted_matches:
+            team_a = m.get("team_a", "TBD")
+            team_b = m.get("team_b", "TBD")
+            match_lines.append(f"{team_a} vs {team_b}")
+
+        content = f"# {stage_title}\n" + "\n".join(match_lines)
+        new_message = await channel.send(content)
+        stage_state["message_id"] = new_message.id
+        stage_state["signature"] = signature
+
+    async def announce_high_stakes_matches(self, matcherino_id: str, progress_data: dict):
+        self._reset_announcement_state_if_needed(matcherino_id)
+
+        updates_channel = self.bot.get_channel(TOURNEY_UPDATES_CHANNEL_ID)
+        if not updates_channel or not isinstance(updates_channel, discord.TextChannel):
+            return
+
+        max_round = progress_data.get("max_round")
+        active_matches = progress_data.get("active_matches", [])
+        if not isinstance(max_round, int) or max_round < 1:
+            return
+        if not isinstance(active_matches, list):
+            active_matches = []
+
+        semi_round = max_round - 1
+        semi_finals = [
+            m for m in active_matches
+            if semi_round >= 1 and m.get("round") == semi_round and self._is_fully_matched(m)
+        ]
+        finals = [
+            m for m in active_matches
+            if m.get("round") == max_round and self._is_fully_matched(m)
+        ]
+
+        await self._sync_stage_announcement(
+            updates_channel,
+            "semi_finals",
+            "Semi Finals",
+            semi_finals,
+            required_count=2,
+        )
+        await self._sync_stage_announcement(
+            updates_channel,
+            "finals",
+            "Finals",
+            finals,
+            required_count=1,
+        )
+
     async def update_progress_dashboard(self):
         """Build or update a single persistent progress panel in the admin channel."""
         session = await get_active_tourney_session()
@@ -156,6 +282,11 @@ class QueueDashboard(commands.Cog):
         data = fetch_bracket_progress(bracket_url)
         if data.get("status") != "success":
             return
+
+        try:
+            await self.announce_high_stakes_matches(m_id, data)
+        except Exception as e:
+            print(f"High-stakes announcement error: {e}")
 
         start_time = session['start_time']
         if start_time.tzinfo is None:
