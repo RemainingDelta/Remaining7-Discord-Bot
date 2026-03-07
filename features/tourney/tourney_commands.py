@@ -33,6 +33,9 @@ from features.config import (
     OTHER_TICKET_CHANNEL_ID,
     MEMBER_ROLE_ID,
     ADMIN_ROLE_ID,
+    GENERAL_CHANNEL_ID,
+    BRAWL_CHAT_CHANNEL_ID,
+    TOURNEY_CHAT_CHANNEL_ID,
     TOURNEY_SUPPORT_CHANNEL_ID,
     TOURNEY_ADMIN_CHANNEL_ID,
     PRE_TOURNEY_SUPPORT_CHANNEL_ID,
@@ -524,6 +527,7 @@ class BlacklistGroup(app_commands.Group):
         await interaction.response.send_message(embed=embed)
                                     
 def setup_tourney_commands(bot: commands.Bot):
+    sticky_redirect_state = {"enabled": False}
 
     @bot.command(name="close", aliases=["c"])
     async def close_command(ctx: commands.Context):
@@ -660,6 +664,9 @@ def setup_tourney_commands(bot: commands.Bot):
 
         guild = ctx.guild
         if not guild: return
+
+        # Enable sticky redirect notices while tournament mode is active.
+        sticky_redirect_state["enabled"] = True
 
         # Standard Startup Logic
         reset_ticket_counter()
@@ -804,6 +811,10 @@ def setup_tourney_commands(bot: commands.Bot):
         guild = ctx.guild
         if guild is None:
             return
+
+        # Disable sticky redirect notices immediately when tournament ends.
+        sticky_redirect_state["enabled"] = False
+        await cleanup_sticky_redirects(guild)
 
         session = await get_active_tourney_session()
         if session:
@@ -1746,6 +1757,65 @@ def setup_tourney_commands(bot: commands.Bot):
         except Exception:
             pass 
 
+    sticky_redirect_message_ids: dict[int, int] = {}
+    sticky_redirect_locks: dict[int, asyncio.Lock] = {}
+
+    async def cleanup_sticky_redirects(guild: discord.Guild):
+        """Remove tracked sticky redirect embeds from configured public channels."""
+        target_ids = {
+            cid for cid in (GENERAL_CHANNEL_ID, BRAWL_CHAT_CHANNEL_ID, TOURNEY_CHAT_CHANNEL_ID)
+            if isinstance(cid, int)
+        }
+        target_names = {"general", "brawl-chat", "tourney-chat"}
+
+        candidate_channels = [
+            ch for ch in guild.text_channels
+            if ch.id in target_ids or ch.name in target_names
+        ]
+
+        for channel in candidate_channels:
+            old_msg_id = sticky_redirect_message_ids.pop(channel.id, None)
+            if old_msg_id:
+                try:
+                    old_msg = await channel.fetch_message(old_msg_id)
+                    await old_msg.delete()
+                except (discord.NotFound, discord.Forbidden):
+                    pass
+
+    async def refresh_sticky_redirect(channel: discord.TextChannel):
+        """Keep exactly one support redirect embed pinned to the latest chat position."""
+        lock = sticky_redirect_locks.setdefault(channel.id, asyncio.Lock())
+
+        async with lock:
+            support_channel = bot.get_channel(TOURNEY_SUPPORT_CHANNEL_ID)
+            support_mention = support_channel.mention if isinstance(support_channel, discord.TextChannel) else "#tourney-support"
+            embed = discord.Embed(
+                description=f"# ⚠️ Attention!\n# Please use {support_mention} to open a support ticket for the tournament.",
+                color=discord.Color.red()
+            )
+
+            # Try deleting the previously tracked sticky message first.
+            old_msg_id = sticky_redirect_message_ids.get(channel.id)
+            if old_msg_id:
+                try:
+                    old_msg = await channel.fetch_message(old_msg_id)
+                    await old_msg.delete()
+                except (discord.NotFound, discord.Forbidden):
+                    pass
+
+            # Safety cleanup: remove any extra older sticky embeds by this bot.
+            async for msg in channel.history(limit=30):
+                if msg.author != bot.user or not msg.embeds:
+                    continue
+                if msg.embeds[0].description == embed.description:
+                    try:
+                        await msg.delete()
+                    except (discord.NotFound, discord.Forbidden):
+                        pass
+
+            new_msg = await channel.send(embed=embed)
+            sticky_redirect_message_ids[channel.id] = new_msg.id
+
     @bot.listen()
     async def on_message(message):
         if message.author.bot: return
@@ -1759,3 +1829,14 @@ def setup_tourney_commands(bot: commands.Bot):
             
             # This creates a background task so the bot doesn't wait for MongoDB.
             asyncio.create_task(background_stats_update())
+
+        sticky_channel_ids = {
+            cid for cid in (GENERAL_CHANNEL_ID, BRAWL_CHAT_CHANNEL_ID, TOURNEY_CHAT_CHANNEL_ID)
+            if isinstance(cid, int)
+        }
+        sticky_channel_names = {"general", "brawl-chat", "tourney-chat"}
+
+        if sticky_redirect_state["enabled"] and (
+            message.channel.id in sticky_channel_ids or message.channel.name in sticky_channel_names
+        ):
+            asyncio.create_task(refresh_sticky_redirect(message.channel))
