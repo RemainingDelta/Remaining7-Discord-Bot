@@ -4,7 +4,7 @@ from discord.ext import commands, tasks
 import asyncio
 import re 
 import datetime 
-from .matcherino import fetch_ticket_context, fetch_payout_report
+from .matcherino import fetch_ticket_context, fetch_payout_report, fetch_bracket_progress
 
 from database.mongo import (
     add_payout_batch,         
@@ -34,6 +34,7 @@ from features.config import (
     MEMBER_ROLE_ID,
     ADMIN_ROLE_ID,
     TOURNEY_SUPPORT_CHANNEL_ID,
+    TOURNEY_ADMIN_CHANNEL_ID,
     PRE_TOURNEY_SUPPORT_CHANNEL_ID,
     TOURNEY_CATEGORY_ID,
     PRE_TOURNEY_CATEGORY_ID,
@@ -51,7 +52,6 @@ from .tourney_utils import (
     reopen_ticket_via_command
 )
 from .tourney_views import TourneyOpenTicketView, PreTourneyOpenTicketView
-from .matcherino import fetch_payout_report
 
 # Global lock tasks dictionary to track auto-reopen timers
 lock_tasks: dict[int, asyncio.Task] = {}
@@ -81,25 +81,36 @@ class PayoutResetConfirmView(discord.ui.View):
 class QueueDashboard(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
+        self.dashboard_message_id: int | None = None
         # The dashboard_task is still manually started via !starttourney
         # The match_refresher starts automatically to monitor any active tickets
         self.match_refresher_task.start()
 
     def cog_unload(self):
         self.dashboard_task.cancel()
+        self.progress_dashboard_task.cancel()
         self.match_refresher_task.cancel()
 
     async def start_dashboard(self):
-        """Starts the queue loop if not already running."""
+        """Starts dashboard loops if not already running."""
         if not self.dashboard_task.is_running():
             self.dashboard_task.start()
             print("📊 Queue Dashboard Started")
+        if not self.progress_dashboard_task.is_running():
+            self.progress_dashboard_task.start()
+            print("📈 Tourney Progress Dashboard Started")
+
+        # Ensure the progress panel appears immediately at tournament start.
+        await self.update_progress_dashboard()
 
     async def stop_dashboard(self):
-        """Stops the queue loop and deletes the dashboard message."""
+        """Stops dashboard loops and deletes dashboard messages."""
         if self.dashboard_task.is_running():
             self.dashboard_task.cancel()
             print("📊 Queue Dashboard Stopped")
+        if self.progress_dashboard_task.is_running():
+            self.progress_dashboard_task.cancel()
+            print("📈 Tourney Progress Dashboard Stopped")
         
         channel = self.bot.get_channel(TOURNEY_SUPPORT_CHANNEL_ID)
         if channel and isinstance(channel, discord.TextChannel):
@@ -110,6 +121,120 @@ class QueueDashboard(commands.Cog):
                         break
             except Exception as e:
                 print(f"Failed to cleanup dashboard message: {e}")
+
+        admin_channel = self.bot.get_channel(TOURNEY_ADMIN_CHANNEL_ID)
+        if admin_channel and isinstance(admin_channel, discord.TextChannel):
+            try:
+                if self.dashboard_message_id:
+                    msg = await admin_channel.fetch_message(self.dashboard_message_id)
+                    await msg.delete()
+                else:
+                    async for m in admin_channel.history(limit=20):
+                        if m.author == self.bot.user and m.embeds and m.embeds[0].title == "📈 Live Tournament Progress":
+                            await m.delete()
+                            break
+            except Exception as e:
+                print(f"Failed to cleanup progress dashboard message: {e}")
+            finally:
+                self.dashboard_message_id = None
+
+    async def update_progress_dashboard(self):
+        """Build or update a single persistent progress panel in the admin channel."""
+        session = await get_active_tourney_session()
+        if not session or not session.get("matcherino_id"):
+            return
+
+        admin_channel = self.bot.get_channel(TOURNEY_ADMIN_CHANNEL_ID)
+        if not admin_channel or not isinstance(admin_channel, discord.TextChannel):
+            return
+
+        m_id = session["matcherino_id"]
+        bracket_url = f"https://matcherino.com/tournaments/{m_id}/bracket"
+        data = fetch_bracket_progress(bracket_url)
+        if data.get("status") != "success":
+            return
+
+        start_time = session['start_time']
+        if start_time.tzinfo is None:
+            start_time = start_time.replace(tzinfo=datetime.timezone.utc)
+        duration = discord.utils.utcnow() - start_time
+        hours, mins = divmod(int(duration.total_seconds()), 3600)
+        mins, _ = divmod(mins, 60)
+
+        embed = discord.Embed(title="📈 Live Tournament Progress", color=discord.Color.gold())
+        embed.description = (
+            f"**⏱️ Total Duration:** `{hours}h {mins}m` | "
+            f"**📈 Completion:** `{data['completion_pct']}%` ({data['closed']}/{data['total']})\n"
+            f"**Last Updated:** <t:{int(discord.utils.utcnow().timestamp())}:R>"
+        )
+
+        remaining_matches = max(0, data['total'] - data['closed'])
+        tournament_complete = data['completion_pct'] >= 100 or remaining_matches == 0
+
+        if tournament_complete:
+            path_text = "🏆 **Tournament Over!**"
+        else:
+            rounds_left = max(0, data['max_round'] - data['dominant_round'])
+            path_text = f"{rounds_left} rounds remaining" if rounds_left > 0 else "🏆 **Finals in progress!**"
+
+        active_matches_text = "No matches remaining" if tournament_complete else f"{data['active_count']} Currently Playable"
+
+        embed.add_field(
+            name="🏆 Bracket Status",
+            value=(
+                f"• **Dominant Round:** Round {data['dominant_round']}\n"
+                f"• **Path to Finals:** {path_text}\n"
+                f"• **Active Matches:** {active_matches_text}"
+            ),
+            inline=False
+        )
+
+        if data['bottlenecks']:
+            bn_text = ""
+            for bn in data['bottlenecks'][:5]:
+                bn_text += f"**#{bn['id']}** (Round {bn['round']}) | {bn['team_a']} vs {bn['team_b']} ({bn['score_a']}-{bn['score_b']})\n"
+            embed.add_field(name="⚠️ Bottleneck Matches", value=bn_text, inline=False)
+        else:
+            embed.add_field(name="⚠️ Bottleneck Matches", value="✅ All playable matches are current with the dominant round.", inline=False)
+
+        embed.set_footer(text=f"Matcherino ID: {m_id} | Auto Refresh: 5m")
+
+        try:
+            existing_msg = None
+            if self.dashboard_message_id:
+                try:
+                    existing_msg = await admin_channel.fetch_message(self.dashboard_message_id)
+                except discord.NotFound:
+                    existing_msg = None
+
+            # Recovery path (bot restart / cache loss): locate prior dashboard message by title.
+            if existing_msg is None:
+                async for m in admin_channel.history(limit=30):
+                    if m.author == self.bot.user and m.embeds and m.embeds[0].title == "📈 Live Tournament Progress":
+                        existing_msg = m
+                        self.dashboard_message_id = m.id
+                        break
+
+            latest = [msg async for msg in admin_channel.history(limit=1)]
+            latest_msg = latest[0] if latest else None
+
+            # If dashboard is already the latest message, edit in place.
+            if existing_msg and latest_msg and latest_msg.id == existing_msg.id:
+                await existing_msg.edit(embed=embed)
+                return
+
+            # Otherwise repost so it jumps to the bottom as the newest message.
+            new_msg = await admin_channel.send(embed=embed)
+            self.dashboard_message_id = new_msg.id
+
+            if existing_msg:
+                try:
+                    await existing_msg.delete()
+                except (discord.NotFound, discord.Forbidden):
+                    pass
+
+        except Exception as e:
+            print(f"Progress Dashboard Error: {e}")
 
     @tasks.loop(seconds=15)
     async def dashboard_task(self):
@@ -303,6 +428,12 @@ class QueueDashboard(commands.Cog):
 
             except Exception as e:
                 print(f"Refresher error in {channel.name}: {e}")
+
+    @tasks.loop(minutes=5)
+    async def progress_dashboard_task(self):
+        """Refreshes the tournament progress dashboard every 5 minutes."""
+        await self.bot.wait_until_ready()
+        await self.update_progress_dashboard()
             
 class BlacklistGroup(app_commands.Group):
     def __init__(self, bot: commands.Bot):
