@@ -36,6 +36,9 @@ from features.config import (
     GENERAL_CHANNEL_ID,
     BRAWL_CHAT_CHANNEL_ID,
     TOURNEY_CHAT_CHANNEL_ID,
+    TOURNEY_UPDATES_CHANNEL_ID,
+    TOURNEY_VS_EMOJI,
+    TOURNEY_MATCHERINO_WIN_EMOJI,
     TOURNEY_SUPPORT_CHANNEL_ID,
     TOURNEY_ADMIN_CHANNEL_ID,
     PRE_TOURNEY_SUPPORT_CHANNEL_ID,
@@ -59,6 +62,7 @@ from .tourney_views import TourneyOpenTicketView, PreTourneyOpenTicketView
 # Global lock tasks dictionary to track auto-reopen timers
 lock_tasks: dict[int, asyncio.Task] = {}
 LOCK_DURATION_HOURS = 6
+TOURNEY_STAGE_HYPE_GIF_URL = "https://cdn.discordapp.com/attachments/807243155698352138/1314223834018222142/4M7IWwP.gif?ex=693ebd53&is=693d6bd3&hm=2a7e2767c8c441f51fad04d147e99b5db2faad7e28a2c799a21356da05ad2294"
 
 def is_staff(member: discord.Member) -> bool:
     """Return True if the member has any of the allowed staff roles."""
@@ -85,6 +89,16 @@ class QueueDashboard(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.dashboard_message_id: int | None = None
+        self._announcement_lock = asyncio.Lock()
+        self._stage_announcement_state: dict[str, dict[str, str | int | None]] = {
+            "semi_finals": {"signature": None, "message_id": None, "hype_message_id": None},
+            "finals": {"signature": None, "message_id": None, "hype_message_id": None},
+        }
+        self._winner_announcement_state: dict[str, str | int | None] = {
+            "winner": None,
+            "message_id": None,
+        }
+        self._announcement_matcherino_id: str | None = None
         # The dashboard_task is still manually started via !starttourney
         # The match_refresher starts automatically to monitor any active tickets
         self.match_refresher_task.start()
@@ -141,6 +155,247 @@ class QueueDashboard(commands.Cog):
             finally:
                 self.dashboard_message_id = None
 
+    def _reset_announcement_state_if_needed(self, matcherino_id: str):
+        if self._announcement_matcherino_id != matcherino_id:
+            self._announcement_matcherino_id = matcherino_id
+            for stage_key in self._stage_announcement_state:
+                self._stage_announcement_state[stage_key]["signature"] = None
+                self._stage_announcement_state[stage_key]["message_id"] = None
+                self._stage_announcement_state[stage_key]["hype_message_id"] = None
+            self._winner_announcement_state["winner"] = None
+            self._winner_announcement_state["message_id"] = None
+
+    @staticmethod
+    def _is_known_team(team_name: str | None) -> bool:
+        if not team_name:
+            return False
+        return team_name.strip().upper() not in {"TBD", "BYE", "UNKNOWN", "UNKNOWN TEAM"}
+
+    def _is_fully_matched(self, match: dict) -> bool:
+        return self._is_known_team(match.get("team_a")) and self._is_known_team(match.get("team_b"))
+
+    @staticmethod
+    def _build_stage_signature(matches: list[dict]) -> str:
+        sorted_matches = sorted(
+            matches,
+            key=lambda m: m.get("id") if isinstance(m.get("id"), int) else 9999,
+        )
+        return "|".join(
+            f"{m.get('id')}::{m.get('team_a', 'TBD')}::{m.get('team_b', 'TBD')}"
+            for m in sorted_matches
+        )
+
+    async def _delete_previous_stage_messages(self, channel: discord.TextChannel, stage_key: str):
+        stage_state = self._stage_announcement_state[stage_key]
+        message_ids = [
+            stage_state.get("message_id"),
+            stage_state.get("hype_message_id"),
+        ]
+
+        for msg_id in message_ids:
+            if not isinstance(msg_id, int):
+                continue
+            try:
+                old_msg = await channel.fetch_message(msg_id)
+                await old_msg.delete()
+                print(f"[ANNOUNCE][{stage_key}] deleted previous message {msg_id}")
+            except (discord.NotFound, discord.Forbidden):
+                pass
+            except Exception as e:
+                print(f"Stage announcement cleanup error ({stage_key}): {e}")
+
+        stage_state["message_id"] = None
+        stage_state["hype_message_id"] = None
+        stage_state["signature"] = None
+
+    async def _sync_stage_announcement(
+        self,
+        channel: discord.TextChannel,
+        stage_key: str,
+        stage_title: str,
+        matches: list[dict],
+        required_count: int,
+    ):
+        stage_state = self._stage_announcement_state[stage_key]
+
+        # Guard: only announce once the entire stage matchup is known.
+        if len(matches) != required_count:
+            print(
+                f"[ANNOUNCE][{stage_key}] skip stage post: matched_count={len(matches)} required={required_count}"
+            )
+            await self._delete_previous_stage_messages(channel, stage_key)
+            return
+
+        signature = self._build_stage_signature(matches)
+        current_signature = stage_state.get("signature")
+        current_message_id = stage_state.get("message_id")
+
+        if signature == current_signature and isinstance(current_message_id, int):
+            print(f"[ANNOUNCE][{stage_key}] skip stage post: unchanged signature")
+            return
+
+        await self._delete_previous_stage_messages(channel, stage_key)
+
+        sorted_matches = sorted(matches, key=lambda m: m.get("id") if isinstance(m.get("id"), int) else 9999)
+
+        match_lines = []
+        for m in sorted_matches:
+            team_a = m.get("team_a", "TBD")
+            team_b = m.get("team_b", "TBD")
+            match_lines.append(f"{team_a}  {TOURNEY_VS_EMOJI}  {team_b}")
+
+        content = f"# {stage_title}\n" + "\n".join(match_lines)
+
+        # Cross-check recent messages so duplicated scheduler invocations don't post twice.
+        async for recent in channel.history(limit=8):
+            if recent.author == self.bot.user and recent.content == content:
+                stage_state["message_id"] = recent.id
+                stage_state["signature"] = signature
+                stage_state["hype_message_id"] = None
+                print(f"[ANNOUNCE][{stage_key}] skip stage post: identical content already exists ({recent.id})")
+                return
+
+        new_message = await channel.send(content)
+        hype_message = await channel.send(TOURNEY_STAGE_HYPE_GIF_URL)
+        stage_state["message_id"] = new_message.id
+        stage_state["hype_message_id"] = hype_message.id
+        stage_state["signature"] = signature
+        print(
+            f"[ANNOUNCE][{stage_key}] sent stage message {new_message.id} and hype gif {hype_message.id}"
+        )
+
+    async def _sync_winner_announcement(
+        self,
+        channel: discord.TextChannel,
+        tournament_complete: bool,
+        winner_team: str | None,
+    ):
+        winner_state = self._winner_announcement_state
+        current_winner = winner_state.get("winner")
+        current_message_id = winner_state.get("message_id")
+
+        if not tournament_complete or not winner_team:
+            reason = "tournament not complete" if not tournament_complete else "winner missing"
+            print(f"[ANNOUNCE][winner] skip winner post: {reason}")
+            if isinstance(current_message_id, int):
+                try:
+                    old_msg = await channel.fetch_message(current_message_id)
+                    await old_msg.delete()
+                    print(f"[ANNOUNCE][winner] deleted previous winner message {current_message_id}")
+                except (discord.NotFound, discord.Forbidden):
+                    pass
+                except Exception as e:
+                    print(f"Winner announcement cleanup error: {e}")
+            winner_state["winner"] = None
+            winner_state["message_id"] = None
+            return
+
+        if winner_team == current_winner and isinstance(current_message_id, int):
+            print("[ANNOUNCE][winner] skip winner post: unchanged winner")
+            return
+
+        content = f"# GGs!\n{winner_team} won !! {TOURNEY_MATCHERINO_WIN_EMOJI}"
+
+        if isinstance(current_message_id, int):
+            try:
+                old_msg = await channel.fetch_message(current_message_id)
+                await old_msg.delete()
+            except (discord.NotFound, discord.Forbidden):
+                pass
+            except Exception as e:
+                print(f"Winner announcement replace cleanup error: {e}")
+
+        async for recent in channel.history(limit=10):
+            if recent.author == self.bot.user and recent.content == content:
+                winner_state["winner"] = winner_team
+                winner_state["message_id"] = recent.id
+                print(f"[ANNOUNCE][winner] skip winner post: identical content already exists ({recent.id})")
+                return
+
+        new_msg = await channel.send(content)
+        winner_state["winner"] = winner_team
+        winner_state["message_id"] = new_msg.id
+        print(f"[ANNOUNCE][winner] sent winner message {new_msg.id} for {winner_team}")
+
+    async def announce_high_stakes_matches(self, matcherino_id: str, progress_data: dict):
+        async with self._announcement_lock:
+            self._reset_announcement_state_if_needed(matcherino_id)
+
+            updates_channel = self.bot.get_channel(TOURNEY_UPDATES_CHANNEL_ID)
+            if not updates_channel:
+                try:
+                    fetched = await self.bot.fetch_channel(TOURNEY_UPDATES_CHANNEL_ID)
+                    updates_channel = fetched if isinstance(fetched, discord.TextChannel) else None
+                except Exception:
+                    updates_channel = None
+            if not updates_channel or not isinstance(updates_channel, discord.TextChannel):
+                print(f"High-stakes announcements skipped: updates channel not found ({TOURNEY_UPDATES_CHANNEL_ID}).")
+                return
+
+            max_round = progress_data.get("max_round")
+            active_matches = progress_data.get("active_matches", [])
+            if not isinstance(max_round, int) or max_round < 1:
+                print(f"[ANNOUNCE] skip all: invalid max_round={max_round}")
+                return
+            if not isinstance(active_matches, list):
+                print("[ANNOUNCE] active_matches malformed; coercing to empty list")
+                active_matches = []
+
+            semi_round = max_round - 1
+            semi_candidates = [
+                m for m in active_matches
+                if semi_round >= 1 and m.get("round") == semi_round and self._is_fully_matched(m)
+            ]
+            final_candidates = [
+                m for m in active_matches
+                if m.get("round") == max_round and self._is_fully_matched(m)
+            ]
+
+            # Some brackets may expose extra matches in these rounds.
+            # We only need the canonical stage pairings: 2 semis, 1 finals.
+            semi_candidates = sorted(
+                semi_candidates,
+                key=lambda m: m.get("id") if isinstance(m.get("id"), int) else 9999,
+            )
+            final_candidates = sorted(
+                final_candidates,
+                key=lambda m: m.get("id") if isinstance(m.get("id"), int) else 9999,
+            )
+
+            semi_finals = semi_candidates[:2] if len(semi_candidates) >= 2 else []
+            finals = final_candidates[:1] if len(final_candidates) >= 1 else []
+
+            print(
+                f"[ANNOUNCE] scan matcherino={matcherino_id} max_round={max_round} active={len(active_matches)} "
+                f"semi_candidates={len(semi_candidates)} finals_candidates={len(final_candidates)}"
+            )
+
+            await self._sync_stage_announcement(
+                updates_channel,
+                "semi_finals",
+                "Semi Finals",
+                semi_finals,
+                required_count=2,
+            )
+            await self._sync_stage_announcement(
+                updates_channel,
+                "finals",
+                "Finals",
+                finals,
+                required_count=1,
+            )
+
+            remaining_matches = max(0, int(progress_data.get("total", 0)) - int(progress_data.get("closed", 0)))
+            tournament_complete = progress_data.get("completion_pct", 0) >= 100 or remaining_matches == 0
+            winner_team = progress_data.get("winner_team")
+            if isinstance(winner_team, str):
+                winner_team = winner_team.strip()
+            print(
+                f"[ANNOUNCE] winner check complete={tournament_complete} "
+                f"remaining_matches={remaining_matches} winner={winner_team or 'None'}"
+            )
+            await self._sync_winner_announcement(updates_channel, tournament_complete, winner_team)
+
     async def update_progress_dashboard(self):
         """Build or update a single persistent progress panel in the admin channel."""
         session = await get_active_tourney_session()
@@ -156,6 +411,11 @@ class QueueDashboard(commands.Cog):
         data = fetch_bracket_progress(bracket_url)
         if data.get("status") != "success":
             return
+
+        try:
+            await self.announce_high_stakes_matches(m_id, data)
+        except Exception as e:
+            print(f"High-stakes announcement error: {e}")
 
         start_time = session['start_time']
         if start_time.tzinfo is None:
@@ -803,14 +1063,31 @@ def setup_tourney_commands(bot: commands.Bot):
         if not isinstance(ctx.author, discord.Member) or not is_staff(ctx.author):
             await ctx.reply("You don't have permission to end the tourney.")
             return
-        
-        dashboard_cog = bot.get_cog("QueueDashboard")
-        if dashboard_cog:
-            await dashboard_cog.stop_dashboard()
 
         guild = ctx.guild
         if guild is None:
             return
+
+        # Force one last high-stakes/winner announcement sync so !endtourney doesn't
+        # depend on the 5-minute loop timing.
+        dashboard_cog = bot.get_cog("QueueDashboard")
+        active_session_for_announcement = await get_active_tourney_session()
+        if (
+            dashboard_cog
+            and active_session_for_announcement
+            and active_session_for_announcement.get("matcherino_id")
+        ):
+            try:
+                matcherino_id = active_session_for_announcement["matcherino_id"]
+                bracket_url = f"https://matcherino.com/tournaments/{matcherino_id}/bracket"
+                data = fetch_bracket_progress(bracket_url)
+                if data.get("status") == "success":
+                    await dashboard_cog.announce_high_stakes_matches(matcherino_id, data)
+            except Exception as e:
+                print(f"!endtourney announcement sync error: {e}")
+
+        if dashboard_cog:
+            await dashboard_cog.stop_dashboard()
 
         # Disable sticky redirect notices immediately when tournament ends.
         sticky_redirect_state["enabled"] = False
@@ -1726,8 +2003,11 @@ def setup_tourney_commands(bot: commands.Bot):
 
         
     # --- Start the Dashboard Task ---
-    asyncio.create_task(bot.add_cog(QueueDashboard(bot)))
-    print("✅ Queue Dashboard task started.")
+    if bot.get_cog("QueueDashboard") is None:
+        asyncio.create_task(bot.add_cog(QueueDashboard(bot)))
+        print("✅ Queue Dashboard task started.")
+    else:
+        print("ℹ️ QueueDashboard already loaded; skipping duplicate add.")
 
     bot.tree.add_command(tourney_panel)
     bot.tree.add_command(pre_tourney_panel)
