@@ -683,9 +683,17 @@ class QueueDashboard(commands.Cog):
                     if title_match and int(title_match.group(1)) == match_num:
                         old_info_msg = msg
                         break
-                
+
+                # Reposition only on the 1-minute tick: if not latest, delete + resend.
                 if old_info_msg:
-                    await old_info_msg.edit(embed=embed)
+                    if channel.last_message_id == old_info_msg.id:
+                        await old_info_msg.edit(embed=embed)
+                    else:
+                        try:
+                            await old_info_msg.delete()
+                        except (discord.NotFound, discord.Forbidden):
+                            pass
+                        await channel.send(embed=embed)
                 else:
                     await channel.send(embed=embed)
                 
