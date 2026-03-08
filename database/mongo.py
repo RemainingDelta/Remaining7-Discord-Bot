@@ -701,6 +701,20 @@ async def end_tourney_session(session_id):
     except Exception as e:
         print(f"⚠️ DB Error (End Session): {e}")
 
+async def reset_tourney_session_start_time(session_id):
+    """Force-resets an existing active session start_time to now."""
+    if db is None:
+        return False
+    try:
+        result = await db.tourney_sessions.update_one(
+            {"_id": session_id, "status": "active"},
+            {"$set": {"start_time": datetime.utcnow()}}
+        )
+        return result.modified_count > 0
+    except Exception as e:
+        print(f"⚠️ DB Error (Reset Session Start Time): {e}")
+        return False
+
 async def increment_tourney_message_count(session_id):
     """Increments the global message counter. SILENT FAIL enabled."""
     if db is None: return
