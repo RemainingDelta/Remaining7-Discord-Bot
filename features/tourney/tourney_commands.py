@@ -790,7 +790,7 @@ class BlacklistGroup(app_commands.Group):
         await interaction.response.send_message(embed=embed)
                                     
 def setup_tourney_commands(bot: commands.Bot):
-    sticky_redirect_state = {"enabled": False}
+    sticky_redirect_state = {"enabled": False, "region": None}
 
     @bot.command(name="close", aliases=["c"])
     async def close_command(ctx: commands.Context):
@@ -928,8 +928,11 @@ def setup_tourney_commands(bot: commands.Bot):
         guild = ctx.guild
         if not guild: return
 
+        normalized_region = region.upper() if isinstance(region, str) else None
+
         # Enable sticky redirect notices while tournament mode is active.
         sticky_redirect_state["enabled"] = True
+        sticky_redirect_state["region"] = normalized_region
 
         # Standard Startup Logic
         reset_ticket_counter()
@@ -942,7 +945,7 @@ def setup_tourney_commands(bot: commands.Bot):
         await lock_command(ctx)
 
         # --- SA REGION LOGIC ---
-        if region and region.upper() == "SA":
+        if normalized_region == "SA":
             from features.config import SPANISH_CHANNEL_ID
             spa_channel = guild.get_channel(SPANISH_CHANNEL_ID)
             
@@ -1096,6 +1099,7 @@ def setup_tourney_commands(bot: commands.Bot):
 
         # Disable sticky redirect notices immediately when tournament ends.
         sticky_redirect_state["enabled"] = False
+        sticky_redirect_state["region"] = None
         await cleanup_sticky_redirects(guild)
 
         session = await get_active_tourney_session()
@@ -2067,15 +2071,21 @@ def setup_tourney_commands(bot: commands.Bot):
                 except (discord.NotFound, discord.Forbidden):
                     pass
 
-    async def refresh_sticky_redirect(channel: discord.TextChannel):
+    async def refresh_sticky_redirect(channel: discord.TextChannel, is_sa_tourney: bool):
         """Keep exactly one support redirect embed pinned to the latest chat position."""
         lock = sticky_redirect_locks.setdefault(channel.id, asyncio.Lock())
 
         async with lock:
             support_channel = bot.get_channel(TOURNEY_SUPPORT_CHANNEL_ID)
             support_mention = support_channel.mention if isinstance(support_channel, discord.TextChannel) else "#tourney-support"
+
+            if is_sa_tourney:
+                description = f"# ⚠️ ¡Atención!\n# Por favor, usa {support_mention} para abrir un ticket de soporte para el torneo."
+            else:
+                description = f"# ⚠️ Attention!\n# Please use {support_mention} to open a support ticket for the tournament."
+
             embed = discord.Embed(
-                description=f"# ⚠️ Attention!\n# Please use {support_mention} to open a support ticket for the tournament.",
+                description=description,
                 color=discord.Color.red()
             )
 
@@ -2124,4 +2134,5 @@ def setup_tourney_commands(bot: commands.Bot):
         if sticky_redirect_state["enabled"] and (
             message.channel.id in sticky_channel_ids or message.channel.name in sticky_channel_names
         ):
-            asyncio.create_task(refresh_sticky_redirect(message.channel))
+            is_sa_tourney = sticky_redirect_state.get("region") == "SA"
+            asyncio.create_task(refresh_sticky_redirect(message.channel, is_sa_tourney))
