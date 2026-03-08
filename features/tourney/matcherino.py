@@ -403,6 +403,33 @@ def fetch_bracket_progress(url: str) -> dict:
     
     # 4. Round & Path Logic
     max_round = max([m['resolved_round'] for m in real_matches]) if real_matches else 1
+
+    winner_team = None
+    final_round_matches = [
+        m for m in real_matches
+        if int(m.get('resolved_round', 0)) == int(max_round)
+        and m.get('entrantA', {}).get('entrantId', 0) > 1
+        and m.get('entrantB', {}).get('entrantId', 0) > 1
+    ]
+    if final_round_matches:
+        final_round_matches_sorted = sorted(final_round_matches, key=lambda x: x.get('matchNum', 0), reverse=True)
+        for fm in final_round_matches_sorted:
+            entrant_a = fm.get('entrantA', {})
+            entrant_b = fm.get('entrantB', {})
+            id_a = entrant_a.get('entrantId', 0)
+            id_b = entrant_b.get('entrantId', 0)
+            score_a = entrant_a.get('score', 0)
+            score_b = entrant_b.get('score', 0)
+
+            winner_id = fm.get('winnerId')
+            if not winner_id or winner_id == 0:
+                if score_a == score_b:
+                    continue
+                winner_id = id_a if score_a > score_b else id_b
+
+            winner_team = entrant_map.get(winner_id, "Unknown")
+            if winner_team and winner_team.upper() not in {"UNKNOWN", "TBD", "BYE"}:
+                break
     
     # Dominant Round: The highest round currently seeing active play
     if active_matches:
@@ -455,6 +482,7 @@ def fetch_bracket_progress(url: str) -> dict:
         "completion_pct": round((len(closed_matches) / total_matches) * 100, 1) if total_matches > 0 else 0,
         "dominant_round": dominant_round,
         "max_round": max_round,
+        "winner_team": winner_team,
         "bottlenecks": sorted(bottlenecks, key=lambda x: x['round']), # Sort by round
         "active_count": len(active_matches),
         "active_matches": sorted(active_match_details, key=lambda x: (x['round'], x['id'] if isinstance(x['id'], int) else 9999))
