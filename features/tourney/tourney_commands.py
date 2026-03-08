@@ -19,6 +19,7 @@ from database.mongo import (
     create_tourney_session,
     get_active_tourney_session,
     end_tourney_session,
+    reset_tourney_session_start_time,
     increment_tourney_message_count,
     update_matcherino_id,
     update_tourney_queue,
@@ -673,6 +674,8 @@ def setup_tourney_commands(bot: commands.Bot):
         existing_session = await get_active_tourney_session()
         if not existing_session:
             await create_tourney_session()
+        else:
+            await reset_tourney_session_start_time(existing_session["_id"])
         
         await lock_command(ctx)
 
