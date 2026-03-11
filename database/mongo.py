@@ -794,3 +794,31 @@ async def get_matcherino_id_from_active():
     if session:
         return session.get("matcherino_id")
     return None
+
+
+async def get_next_support_ticket_number(counter_key: str) -> int:
+    """Returns the next support ticket sequence for a specific ticket category."""
+    if db is None:
+        return 1
+
+    try:
+        doc = await db.support_ticket_counters.find_one_and_update(
+            {"_id": counter_key},
+            {
+                "$inc": {"value": 1},
+                "$setOnInsert": {
+                    "created_at": datetime.utcnow(),
+                },
+                "$set": {
+                    "updated_at": datetime.utcnow(),
+                },
+            },
+            upsert=True,
+            return_document=True,
+        )
+        if not doc:
+            return 1
+        return int(doc.get("value", 1))
+    except Exception as e:
+        print(f"⚠️ DB Error (Support Counter): {e}")
+        return 1
