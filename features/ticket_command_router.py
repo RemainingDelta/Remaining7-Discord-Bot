@@ -1,0 +1,56 @@
+import discord
+from discord.ext import commands
+
+from features.config import (
+    SUPPORT_ISSUES_CATEGORY_ID,
+    SUPPORT_PARTNERSHIP_CATEGORY_ID,
+    SUPPORT_SERVER_CATEGORY_ID,
+    SUPPORT_STAFF_APPS_CATEGORY_ID,
+)
+
+
+def get_support_category_ids() -> set[int]:
+    """Return configured support ticket category IDs."""
+    return {
+        cid
+        for cid in (
+            SUPPORT_ISSUES_CATEGORY_ID,
+            SUPPORT_SERVER_CATEGORY_ID,
+            SUPPORT_STAFF_APPS_CATEGORY_ID,
+            SUPPORT_PARTNERSHIP_CATEGORY_ID,
+        )
+        if isinstance(cid, int) and cid > 0
+    }
+
+
+def is_support_ticket_channel(channel: discord.abc.GuildChannel | None) -> bool:
+    if not isinstance(channel, discord.TextChannel):
+        return False
+    return channel.category_id in get_support_category_ids()
+
+
+async def route_shared_ticket_command(ctx: commands.Context, action: str) -> bool:
+    """
+    Route shared prefix ticket commands to support ticket handlers when needed.
+    Returns True if handled by support module.
+    """
+    if not is_support_ticket_channel(ctx.channel):
+        return False
+
+    from features.support_tickets import (
+        close_support_ticket_via_command,
+        delete_support_ticket_via_command,
+        reopen_support_ticket_via_command,
+    )
+
+    if action == "close":
+        await close_support_ticket_via_command(ctx)
+        return True
+    if action == "delete":
+        await delete_support_ticket_via_command(ctx)
+        return True
+    if action == "reopen":
+        await reopen_support_ticket_via_command(ctx)
+        return True
+
+    return False
