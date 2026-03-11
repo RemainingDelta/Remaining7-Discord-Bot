@@ -59,6 +59,7 @@ from .tourney_utils import (
     reopen_ticket_via_command
 )
 from .tourney_views import TourneyOpenTicketView, PreTourneyOpenTicketView
+from features.ticket_command_router import get_support_category_ids, route_shared_ticket_command
 
 # Global lock tasks dictionary to track auto-reopen timers
 lock_tasks: dict[int, asyncio.Task] = {}
@@ -803,6 +804,9 @@ def setup_tourney_commands(bot: commands.Bot):
     @bot.command(name="close", aliases=["c"])
     async def close_command(ctx: commands.Context):
         """Close a tourney ticket (staff only)."""
+        if await route_shared_ticket_command(ctx, "close"):
+            return
+
         active_session = await get_active_tourney_session()
         if active_session:
             await increment_staff_closure(active_session['_id'], ctx.author.id, ctx.author.name)
@@ -909,6 +913,8 @@ def setup_tourney_commands(bot: commands.Bot):
     @bot.command(name="delete", aliases=["del"])
     async def delete_command(ctx: commands.Context):
         """Delete a ticket (backup for button)."""
+        if await route_shared_ticket_command(ctx, "delete"):
+            return
         await delete_ticket_via_command(ctx)
 
     @bot.command(name="reopen")
@@ -917,6 +923,9 @@ def setup_tourney_commands(bot: commands.Bot):
         Reopen a closed tourney ticket channel.
         Moves it from the Closed Category back to the Active Category.
         """
+        if await route_shared_ticket_command(ctx, "reopen"):
+            return
+
         # Check if we are inside a CLOSED ticket category
         if ctx.channel.category_id in (TOURNEY_CLOSED_CATEGORY_ID, PRE_TOURNEY_CLOSED_CATEGORY_ID):
             await reopen_ticket_via_command(ctx)
@@ -1336,8 +1345,13 @@ def setup_tourney_commands(bot: commands.Bot):
             await interaction.response.send_message("This command can only be used in a ticket text channel.", ephemeral=True)
             return
 
-        if channel.category_id not in (TOURNEY_CATEGORY_ID, PRE_TOURNEY_CATEGORY_ID):
-            await interaction.response.send_message("This command can only be used inside a tourney ticket channel.", ephemeral=True)
+        valid_categories = {
+            TOURNEY_CATEGORY_ID,
+            PRE_TOURNEY_CATEGORY_ID,
+            *get_support_category_ids(),
+        }
+        if channel.category_id not in valid_categories:
+            await interaction.response.send_message("This command can only be used inside a tourney or support ticket channel.", ephemeral=True)
             return
 
         await channel.set_permissions(
@@ -1365,8 +1379,13 @@ def setup_tourney_commands(bot: commands.Bot):
             await interaction.response.send_message("This command can only be used in a ticket text channel.", ephemeral=True)
             return
 
-        if channel.category_id not in (TOURNEY_CATEGORY_ID, PRE_TOURNEY_CATEGORY_ID):
-            await interaction.response.send_message("This command can only be used inside a tourney ticket channel.", ephemeral=True)
+        valid_categories = {
+            TOURNEY_CATEGORY_ID,
+            PRE_TOURNEY_CATEGORY_ID,
+            *get_support_category_ids(),
+        }
+        if channel.category_id not in valid_categories:
+            await interaction.response.send_message("This command can only be used inside a tourney or support ticket channel.", ephemeral=True)
             return
 
         await channel.set_permissions(user, overwrite=None)
