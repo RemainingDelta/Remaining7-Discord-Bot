@@ -10,6 +10,7 @@ from features.config import (
     ADMIN_ROLE_ID,
     MODERATOR_ROLE_ID,
     OTHER_TICKET_CHANNEL_ID,
+    PRE_TOURNEY_SUPPORT_CHANNEL_ID,
     SUPPORT_ISSUES_CATEGORY_ID,
     SUPPORT_PARTNERSHIP_CATEGORY_ID,
     SUPPORT_SERVER_CATEGORY_ID,
@@ -555,16 +556,19 @@ class SupportTickets(commands.Cog):
             )
             return
 
-        channel_mention = f"<#{SUPPORT_STAFF_APPS_INFO_CHANNEL_ID}>" if isinstance(SUPPORT_STAFF_APPS_INFO_CHANNEL_ID, int) else "the info channel"
+        staff_info = f"<#{SUPPORT_STAFF_APPS_INFO_CHANNEL_ID}>" if isinstance(SUPPORT_STAFF_APPS_INFO_CHANNEL_ID, int) else "the info channel"
+        tourney_ch = f"<#{PRE_TOURNEY_SUPPORT_CHANNEL_ID}>" if isinstance(PRE_TOURNEY_SUPPORT_CHANNEL_ID, int) else "the tourney support channel"
         embed = discord.Embed(
             title="Support Tickets",
             description=(
                 "Select a category below to open a private ticket channel.\n\n"
-                "Available categories:\n"
-                "**Report an Issue**: Bugs, rule-break reports, or technical problems\n"
-                "**Server Support**: General assistance for the server\n"
-                f"**Staff Application**: Apply for **Tourney Admin** or **Event Staff** (**No Moderator** spots currently open). More info: {channel_mention}\n"
-                "**Server Partnership**: Propose a partnership with your server details and goals."
+                "**Available categories:**\n"
+                "🔧 **Report an Issue** — Bugs, rule-break reports, or technical problems\n"
+                "🛡️ **Server Support** — General assistance for the server\n"
+                f"📋 **Staff Application** — Apply for **Tourney Admin** or **Event Staff** (**No Moderator** spots currently open). More info: {staff_info}\n"
+                "🤝 **Server Partnership** — Propose a partnership with your server details and goals\n\n"
+                "⚠️ **Tourney tickets opened here will not be prioritised and may go unanswered.**\n"
+                f"For tourney-related concerns, go to {tourney_ch}"
             ),
             color=discord.Color.green(),
         )
