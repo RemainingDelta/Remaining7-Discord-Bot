@@ -23,6 +23,7 @@ from features.config import (
     EVENT_ANNOUNCEMENTS_CHANNEL_ID,
     SHOP_DATA,
     MODERATOR_ROLE_ID,
+    REDEMPTION_TICKET_CATEGORY_ID,
     TRIAL_MODERATOR_ROLE_ID,
 )
 
@@ -32,6 +33,260 @@ shop_choices = [
 ]
 
 allowed_users = set()
+
+DEFAULT_MONTHLY_BUDGET = 50.0
+
+# Dollar impact for rewards that consume the monthly redemption budget.
+REDEMPTION_BUDGET_COSTS = {
+    "brawl pass": 10.0,
+    "brawl pass+": 15.0,
+    "coc gold pass": 7.0,
+    "cr diamond pass": 12.0,
+    "nitro": 10.0,
+    "paypal": 15.0,
+    "matcherino pin": 5.0,
+    "pin": 5.0,
+    "shoutout": 0.0,
+}
+
+
+def _budget_month_key() -> str:
+    return datetime.utcnow().strftime("%Y-%m")
+
+
+async def ensure_monthly_budget_state() -> None:
+    """Reset monthly budget trackers when the calendar month changes."""
+    current_key = _budget_month_key()
+    stored_key = await get_setting("budget_month_key")
+    if stored_key == current_key:
+        return
+
+    await set_setting("budget_month_key", current_key)
+    await set_setting("monthly_budget", f"{DEFAULT_MONTHLY_BUDGET:.2f}")
+    await set_setting("manual_total_spent", "0.00")
+
+    # Keep legacy counters aligned with month rollover.
+    for key in (
+        "brawlpass_redeemed_count",
+        "brawlpass+_redeemed_count",
+        "nitro_redeemed_count",
+        "paypal_redeemed_count",
+        "shoutout_redeemed_count",
+        "pin_redeemed_count",
+    ):
+        await set_setting(key, "0")
+
+
+async def get_budget_totals() -> tuple[float, float, float]:
+    await ensure_monthly_budget_state()
+
+    budget_str = await get_setting("monthly_budget", f"{DEFAULT_MONTHLY_BUDGET:.2f}")
+    try:
+        total_budget = float(budget_str)
+    except Exception:
+        total_budget = DEFAULT_MONTHLY_BUDGET
+
+    spent_str = await get_setting("manual_total_spent", "0.00")
+    try:
+        total_spent = float(spent_str)
+    except Exception:
+        total_spent = 0.0
+
+    remaining = total_budget - total_spent
+    return total_budget, total_spent, remaining
+
+
+async def add_budget_spent(amount: float) -> float:
+    await ensure_monthly_budget_state()
+    spent_str = await get_setting("manual_total_spent", "0.00")
+    try:
+        current_spent = float(spent_str)
+    except Exception:
+        current_spent = 0.0
+
+    updated = current_spent + max(amount, 0.0)
+    await set_setting("manual_total_spent", f"{updated:.2f}")
+    return updated
+
+
+def _budget_cost_for_item(item_name: str) -> float:
+    return REDEMPTION_BUDGET_COSTS.get(item_name.lower(), 0.0)
+
+
+def _token_price_for_item(item_name: str) -> int:
+    item_cfg = SHOP_DATA.get(item_name)
+    if not item_cfg:
+        return 0
+    try:
+        return int(item_cfg.get("price", 0))
+    except Exception:
+        return 0
+
+
+def _extract_topic_value(topic: str | None, key: str) -> str | None:
+    if not topic:
+        return None
+    for part in topic.split("|"):
+        k, _, v = part.partition(":")
+        if k == key:
+            return v
+    return None
+
+
+def _is_redemption_staff(member: discord.abc.User | discord.Member) -> bool:
+    if not isinstance(member, discord.Member):
+        return False
+    return any(role.id in {ADMIN_ROLE_ID, MODERATOR_ROLE_ID} for role in member.roles)
+
+
+def _is_redemption_ticket_channel(channel: discord.abc.GuildChannel | None) -> bool:
+    if not isinstance(channel, discord.TextChannel):
+        return False
+    if not isinstance(REDEMPTION_TICKET_CATEGORY_ID, int) or REDEMPTION_TICKET_CATEGORY_ID <= 0:
+        return False
+    return channel.category_id == REDEMPTION_TICKET_CATEGORY_ID
+
+
+async def close_redemption_ticket_channel(channel: discord.TextChannel, actor: discord.Member) -> bool:
+    if not _is_redemption_staff(actor) or not _is_redemption_ticket_channel(channel):
+        return False
+
+    opener_raw = _extract_topic_value(channel.topic, "redemption-opener")
+    if opener_raw and opener_raw.isdigit():
+        opener = channel.guild.get_member(int(opener_raw))
+        if opener is not None and not _is_redemption_staff(opener):
+            await channel.set_permissions(
+                opener,
+                view_channel=True,
+                send_messages=False,
+                read_message_history=True,
+                use_application_commands=True,
+            )
+
+    await channel.send(
+        f"Ticket closed by {actor.name}.",
+        view=RedemptionClosedOptionsView(),
+    )
+    return True
+
+
+async def reopen_redemption_ticket_channel(channel: discord.TextChannel, actor: discord.Member) -> bool:
+    if not _is_redemption_staff(actor) or not _is_redemption_ticket_channel(channel):
+        return False
+
+    opener_raw = _extract_topic_value(channel.topic, "redemption-opener")
+    if opener_raw and opener_raw.isdigit():
+        opener = channel.guild.get_member(int(opener_raw))
+        if opener is not None:
+            await channel.set_permissions(
+                opener,
+                view_channel=True,
+                send_messages=True,
+                read_message_history=True,
+                use_application_commands=True,
+            )
+
+    await channel.send(f"✅ Ticket reopened by {actor.name}.")
+    return True
+
+
+async def close_redemption_ticket_via_command(ctx: commands.Context) -> None:
+    if ctx.guild is None or not isinstance(ctx.channel, discord.TextChannel):
+        await ctx.reply("This command can only be used in a redemption ticket channel.")
+        return
+    if not isinstance(ctx.author, discord.Member) or not _is_redemption_staff(ctx.author):
+        await ctx.reply("You don't have permission to close this ticket.")
+        return
+
+    ok = await close_redemption_ticket_channel(ctx.channel, ctx.author)
+    if not ok:
+        await ctx.reply("This command can only be used inside redemption ticket channels.")
+
+
+async def reopen_redemption_ticket_via_command(ctx: commands.Context) -> None:
+    if ctx.guild is None or not isinstance(ctx.channel, discord.TextChannel):
+        await ctx.reply("This command can only be used in a redemption ticket channel.")
+        return
+    if not isinstance(ctx.author, discord.Member) or not _is_redemption_staff(ctx.author):
+        await ctx.reply("You don't have permission to reopen this ticket.")
+        return
+
+    ok = await reopen_redemption_ticket_channel(ctx.channel, ctx.author)
+    if not ok:
+        await ctx.reply("This command can only be used inside redemption ticket channels.")
+
+
+async def handle_redemption_delete_attempt(ctx: commands.Context) -> None:
+    await ctx.reply("`!delete` is disabled for redemption tickets. Use `!close` and choose one of the delete options.")
+
+
+class RedemptionClosedOptionsView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(label="Reopen", style=discord.ButtonStyle.success, custom_id="redeem_reopen_ticket")
+    async def reopen_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not isinstance(interaction.user, discord.Member):
+            await interaction.response.send_message("Only server members can use this.", ephemeral=True)
+            return
+        if not isinstance(interaction.channel, discord.TextChannel):
+            await interaction.response.send_message("This only works in redemption tickets.", ephemeral=True)
+            return
+
+        await interaction.response.defer(ephemeral=True)
+        ok = await reopen_redemption_ticket_channel(interaction.channel, interaction.user)
+        if ok:
+            await interaction.followup.send("Ticket reopened.", ephemeral=True)
+        else:
+            await interaction.followup.send("This button can only be used in redemption tickets by staff.", ephemeral=True)
+
+    @discord.ui.button(label="Give back tokens and delete", style=discord.ButtonStyle.primary, custom_id="redeem_refund_delete")
+    async def refund_delete_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not isinstance(interaction.user, discord.Member):
+            await interaction.response.send_message("Only server members can use this.", ephemeral=True)
+            return
+        if not isinstance(interaction.channel, discord.TextChannel):
+            await interaction.response.send_message("This only works in redemption tickets.", ephemeral=True)
+            return
+        if not _is_redemption_staff(interaction.user) or not _is_redemption_ticket_channel(interaction.channel):
+            await interaction.response.send_message("This button can only be used in redemption tickets by staff.", ephemeral=True)
+            return
+
+        await interaction.response.defer(ephemeral=True)
+
+        opener_raw = _extract_topic_value(interaction.channel.topic, "redemption-opener")
+        item = _extract_topic_value(interaction.channel.topic, "item")
+        if opener_raw and opener_raw.isdigit() and item:
+            refund_amount = _token_price_for_item(item)
+            if refund_amount > 0:
+                current_balance = await get_user_balance(opener_raw)
+                await update_user_balance(opener_raw, current_balance + refund_amount)
+
+        await interaction.channel.delete(reason=f"Redemption ticket refunded and deleted by {interaction.user}")
+
+    @discord.ui.button(label="Reduce from budget and delete", style=discord.ButtonStyle.danger, custom_id="redeem_budget_delete")
+    async def budget_delete_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not isinstance(interaction.user, discord.Member):
+            await interaction.response.send_message("Only server members can use this.", ephemeral=True)
+            return
+        if not isinstance(interaction.channel, discord.TextChannel):
+            await interaction.response.send_message("This only works in redemption tickets.", ephemeral=True)
+            return
+        if not _is_redemption_staff(interaction.user) or not _is_redemption_ticket_channel(interaction.channel):
+            await interaction.response.send_message("This button can only be used in redemption tickets by staff.", ephemeral=True)
+            return
+
+        await interaction.response.defer(ephemeral=True)
+
+        item = _extract_topic_value(interaction.channel.topic, "item") or ""
+        budget_raw = _extract_topic_value(interaction.channel.topic, "budget_usd")
+        try:
+            cost = float(budget_raw) if budget_raw is not None else _budget_cost_for_item(item)
+        except ValueError:
+            cost = _budget_cost_for_item(item)
+
+        await add_budget_spent(cost)
+        await interaction.channel.delete(reason=f"Redemption fulfilled and deleted by {interaction.user}")
 
 # Helper 
 async def shop_item_autocomplete(interaction: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
@@ -251,6 +506,9 @@ class Economy(commands.Cog):
         self.bot = bot
         self.supply_drop_task.start()
 
+    async def cog_load(self):
+        self.bot.add_view(RedemptionClosedOptionsView())
+
     def cog_unload(self):
         self.supply_drop_task.cancel()
         
@@ -467,28 +725,71 @@ class Economy(commands.Cog):
             await interaction.response.send_message(embed=embed, ephemeral=True)
             return
 
-        await remove_item_token(user_id, item)
-
-        tracking_keys = {
-            "brawl pass": "brawlpass_redeemed_count",
-            "brawl pass+": "brawlpass+_redeemed_count",
-            "nitro": "nitro_redeemed_count",
-            "paypal": "paypal_redeemed_count",
-            "shoutout": "shoutout_redeemed_count"
-        }
-        if item in tracking_keys:
-            key = tracking_keys[item]
-            current = int(await get_setting(key, "0"))
-            await set_setting(key, str(current + 1))
+        # Budget guard: block redemption when monthly budget cannot cover this item.
+        budget_cost = _budget_cost_for_item(item)
+        if budget_cost > 0:
+            _, _, remaining_budget = await get_budget_totals()
+            if budget_cost > remaining_budget:
+                embed = discord.Embed(
+                    title="❌ **Budget Limit Reached**",
+                    description=(
+                        f"This redemption requires **${budget_cost:.2f}**, but only "
+                        f"**${remaining_budget:.2f}** remains in the monthly budget."
+                    ),
+                    color=discord.Color.red(),
+                )
+                await interaction.response.send_message(embed=embed, ephemeral=True)
+                return
 
         try:
-            ch = await interaction.guild.create_text_channel(f"ticket-{interaction.user.name}")
+            if not isinstance(REDEMPTION_TICKET_CATEGORY_ID, int) or REDEMPTION_TICKET_CATEGORY_ID <= 0:
+                await interaction.response.send_message(
+                    "❌ Redemption category is not configured.",
+                    ephemeral=True,
+                )
+                return
+
+            category = interaction.guild.get_channel(REDEMPTION_TICKET_CATEGORY_ID)
+            if not isinstance(category, discord.CategoryChannel):
+                await interaction.response.send_message(
+                    "❌ Configured redemption category channel was not found.",
+                    ephemeral=True,
+                )
+                return
+
+            await remove_item_token(user_id, item)
+
+            tracking_keys = {
+                "brawl pass": "brawlpass_redeemed_count",
+                "brawl pass+": "brawlpass+_redeemed_count",
+                "nitro": "nitro_redeemed_count",
+                "paypal": "paypal_redeemed_count",
+                "shoutout": "shoutout_redeemed_count"
+            }
+            if item in tracking_keys:
+                key = tracking_keys[item]
+                current = int(await get_setting(key, "0"))
+                await set_setting(key, str(current + 1))
+
+            ch = await interaction.guild.create_text_channel(
+                f"ticket-{interaction.user.name}",
+                category=category,
+            )
             await ch.set_permissions(interaction.guild.default_role, read_messages=False)
             await ch.set_permissions(interaction.user, read_messages=True, send_messages=True)
             
-            staff_role = interaction.guild.get_role(ADMIN_ROLE_ID)
-            if staff_role:
-                await ch.set_permissions(staff_role, read_messages=True, send_messages=True, manage_messages=True)
+            for staff_role_id in (ADMIN_ROLE_ID, MODERATOR_ROLE_ID):
+                staff_role = interaction.guild.get_role(staff_role_id)
+                if staff_role:
+                    await ch.set_permissions(staff_role, read_messages=True, send_messages=True, manage_messages=True)
+
+            await ch.edit(
+                topic=(
+                    f"redemption-opener:{interaction.user.id}"
+                    f"|item:{item}|budget_usd:{budget_cost:.2f}"
+                ),
+                reason="Store redemption ticket metadata",
+            )
 
             instructions = "- Provide necessary details."
             if "brawl pass" in item: instructions = "- Provide your in-game ID and a link to add you."
@@ -511,6 +812,7 @@ class Economy(commands.Cog):
             await ch.send(embed=ticket_embed)
 
         except Exception as e:
+            await add_item_token(user_id, item, quantity=1)
             await interaction.response.send_message(f"❌ **Error** Failed to create ticket: {e}", ephemeral=True)
 
     @app_commands.command(name="daily", description="Claim your daily R7 tokens!")
@@ -637,27 +939,53 @@ class Economy(commands.Cog):
 
     @app_commands.command(name="check-budget", description="Check the remaining budget for redemptions.")
     async def check_budget(self, interaction: discord.Interaction):
-        budget_str = await get_setting("monthly_budget", "50.00")
-        try: TOTAL_BUDGET = float(budget_str)
-        except: TOTAL_BUDGET = 50.00
-        
+        total_budget, total_spent, remaining = await get_budget_totals()
+
         bp_c = int(await get_setting("brawlpass_redeemed_count", "0"))
         ni_c = int(await get_setting("nitro_redeemed_count", "0"))
         pi_c = int(await get_setting("pin_redeemed_count", "0"))
-        manual_spent = await get_setting("manual_total_spent")
-        if manual_spent:
-            total_spent = float(manual_spent)
-        else:
-            total_spent = (bp_c * 10) + (ni_c * 10) + (pi_c * 5)
-        
-        remaining = TOTAL_BUDGET - total_spent
+
         embed = discord.Embed(title="💰 **Budget Status**", color=discord.Color.blue())
         embed.description = (
-            f"**Total Monthly Budget:** ${TOTAL_BUDGET:.2f}\n"
+            f"**Total Monthly Budget:** ${total_budget:.2f}\n"
             f"**Total Spent on Redemptions:** ${total_spent:.2f}\n"
-            f"**Remaining Budget:** ${remaining:.2f}\n\n"
-            f"**Redemptions This Month:**\n"
-            f"- Brawl Pass: {bp_c}\n- Nitro: {ni_c}\n- Matcherino Pin: {pi_c}"
+            f"**Remaining Budget:** ${remaining:.2f}"
+        )
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
+    @app_commands.command(name="set-budget", description="Set the current remaining redemption budget in dollars.")
+    async def set_budget(self, interaction: discord.Interaction, amount: float):
+        if not await self.has_permission(interaction):
+            await interaction.response.send_message("❌ Permission Denied", ephemeral=True)
+            return
+        if amount < 0:
+            await interaction.response.send_message("❌ Budget must be 0 or higher.", ephemeral=True)
+            return
+
+        await ensure_monthly_budget_state()
+        budget_str = await get_setting("monthly_budget", f"{DEFAULT_MONTHLY_BUDGET:.2f}")
+        try:
+            total_budget = float(budget_str)
+        except Exception:
+            total_budget = DEFAULT_MONTHLY_BUDGET
+
+        if amount > total_budget:
+            await interaction.response.send_message(
+                f"❌ Current budget cannot exceed total monthly budget (${total_budget:.2f}).",
+                ephemeral=True,
+            )
+            return
+
+        new_spent = total_budget - amount
+        await set_setting("manual_total_spent", f"{new_spent:.2f}")
+
+        _, spent, remaining = await get_budget_totals()
+        embed = discord.Embed(title="✅ Budget Updated", color=discord.Color.green())
+        embed.description = (
+            f"**Total Monthly Budget:** ${total_budget:.2f}\n"
+            f"**Current Budget Set To:** ${amount:.2f}\n"
+            f"**Already Spent:** ${spent:.2f}\n"
+            f"**Remaining:** ${remaining:.2f}"
         )
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
