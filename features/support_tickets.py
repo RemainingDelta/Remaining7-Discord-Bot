@@ -263,7 +263,9 @@ async def delete_support_ticket_channel(
     filename = f"{channel.name}_transcript.txt"
 
     opener_id = _extract_opener_id(channel.topic)
+    opener_display = "unknown"
     if opener_id is not None:
+        opener_display = f"<@{opener_id}>"
         user = bot.get_user(opener_id)
         if user is None:
             try:
@@ -289,9 +291,8 @@ async def delete_support_ticket_channel(
         log_file = discord.File(io.BytesIO(transcript_bytes), filename=filename)
         await log_channel.send(
             content=(
-                f"🗑️ Support ticket deleted\n"
-                f"Channel: **{channel.name}**\n"
-                f"Deleted by: {actor.mention}"
+                f"📝 Transcript for ticket **#{channel.name}** "
+                f"deleted by **{actor.name}** (opener: {opener_display})."
             ),
             file=log_file,
         )
