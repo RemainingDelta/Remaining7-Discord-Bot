@@ -2,6 +2,7 @@ import discord
 from discord.ext import commands
 
 from features.config import (
+    REDEMPTION_TICKET_CATEGORY_ID,
     SUPPORT_ISSUES_CATEGORY_ID,
     SUPPORT_PARTNERSHIP_CATEGORY_ID,
     SUPPORT_SERVER_CATEGORY_ID,
@@ -29,11 +30,36 @@ def is_support_ticket_channel(channel: discord.abc.GuildChannel | None) -> bool:
     return channel.category_id in get_support_category_ids()
 
 
+def is_redemption_ticket_channel(channel: discord.abc.GuildChannel | None) -> bool:
+    if not isinstance(channel, discord.TextChannel):
+        return False
+    if not isinstance(REDEMPTION_TICKET_CATEGORY_ID, int) or REDEMPTION_TICKET_CATEGORY_ID <= 0:
+        return False
+    return channel.category_id == REDEMPTION_TICKET_CATEGORY_ID
+
+
 async def route_shared_ticket_command(ctx: commands.Context, action: str) -> bool:
     """
-    Route shared prefix ticket commands to support ticket handlers when needed.
-    Returns True if handled by support module.
+    Route shared prefix ticket commands to support/redemption ticket handlers.
+    Returns True if handled by a non-tourney module.
     """
+    if is_redemption_ticket_channel(ctx.channel):
+        from features.economy import (
+            close_redemption_ticket_via_command,
+            handle_redemption_delete_attempt,
+            reopen_redemption_ticket_via_command,
+        )
+
+        if action == "close":
+            await close_redemption_ticket_via_command(ctx)
+            return True
+        if action == "delete":
+            await handle_redemption_delete_attempt(ctx)
+            return True
+        if action == "reopen":
+            await reopen_redemption_ticket_via_command(ctx)
+            return True
+
     if not is_support_ticket_channel(ctx.channel):
         return False
 
