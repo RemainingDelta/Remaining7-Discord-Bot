@@ -222,11 +222,11 @@ class QueueDashboard(commands.Cog):
         stage_state = self._stage_announcement_state[stage_key]
 
         # Guard: only announce once the entire stage matchup is known.
+        # If data is incomplete, leave any existing message visible rather than deleting it.
         if len(matches) != required_count:
             print(
                 f"[ANNOUNCE][{stage_key}] skip stage post: matched_count={len(matches)} required={required_count}"
             )
-            await self._delete_previous_stage_messages(channel, stage_key)
             return
 
         signature = self._build_stage_signature(matches)
@@ -236,8 +236,6 @@ class QueueDashboard(commands.Cog):
         if signature == current_signature and isinstance(current_message_id, int):
             print(f"[ANNOUNCE][{stage_key}] skip stage post: unchanged signature")
             return
-
-        await self._delete_previous_stage_messages(channel, stage_key)
 
         sorted_matches = sorted(matches, key=lambda m: m.get("id") if isinstance(m.get("id"), int) else 9999)
 
@@ -258,6 +256,24 @@ class QueueDashboard(commands.Cog):
                 print(f"[ANNOUNCE][{stage_key}] skip stage post: identical content already exists ({recent.id})")
                 return
 
+        # If a message for this stage already exists, edit it in-place so there is no
+        # visibility gap between delete and re-post.
+        if isinstance(current_message_id, int):
+            try:
+                existing_msg = await channel.fetch_message(current_message_id)
+                await existing_msg.edit(content=content)
+                stage_state["signature"] = signature
+                print(f"[ANNOUNCE][{stage_key}] edited stage message {current_message_id} in-place")
+                return
+            except discord.NotFound:
+                stage_state["message_id"] = None
+                stage_state["hype_message_id"] = None
+            except Exception as e:
+                print(f"Stage announcement edit error ({stage_key}): {e}")
+                stage_state["message_id"] = None
+                stage_state["hype_message_id"] = None
+
+        # No existing message — send fresh.
         new_message = await channel.send(content)
         hype_message = await channel.send(TOURNEY_STAGE_HYPE_GIF_URL)
         stage_state["message_id"] = new_message.id
@@ -280,17 +296,7 @@ class QueueDashboard(commands.Cog):
         if not tournament_complete or not winner_team:
             reason = "tournament not complete" if not tournament_complete else "winner missing"
             print(f"[ANNOUNCE][winner] skip winner post: {reason}")
-            if isinstance(current_message_id, int):
-                try:
-                    old_msg = await channel.fetch_message(current_message_id)
-                    await old_msg.delete()
-                    print(f"[ANNOUNCE][winner] deleted previous winner message {current_message_id}")
-                except (discord.NotFound, discord.Forbidden):
-                    pass
-                except Exception as e:
-                    print(f"Winner announcement cleanup error: {e}")
-            winner_state["winner"] = None
-            winner_state["message_id"] = None
+            # Never delete a winner message once it has been posted.
             return
 
         if winner_team == current_winner and isinstance(current_message_id, int):
@@ -298,15 +304,6 @@ class QueueDashboard(commands.Cog):
             return
 
         content = f"# GGs!\n{winner_team} won !! {TOURNEY_MATCHERINO_WIN_EMOJI}"
-
-        if isinstance(current_message_id, int):
-            try:
-                old_msg = await channel.fetch_message(current_message_id)
-                await old_msg.delete()
-            except (discord.NotFound, discord.Forbidden):
-                pass
-            except Exception as e:
-                print(f"Winner announcement replace cleanup error: {e}")
 
         async for recent in channel.history(limit=10):
             if recent.author == self.bot.user and recent.content == content:
@@ -1097,22 +1094,60 @@ def setup_tourney_commands(bot: commands.Bot):
         # depend on the 5-minute loop timing.
         dashboard_cog = bot.get_cog("QueueDashboard")
         active_session_for_announcement = await get_active_tourney_session()
+        endtourney_matcherino_id: str | None = None
         if (
             dashboard_cog
             and active_session_for_announcement
             and active_session_for_announcement.get("matcherino_id")
         ):
             try:
-                matcherino_id = active_session_for_announcement["matcherino_id"]
-                bracket_url = f"https://matcherino.com/tournaments/{matcherino_id}/bracket"
+                endtourney_matcherino_id = active_session_for_announcement["matcherino_id"]
+                bracket_url = f"https://matcherino.com/tournaments/{endtourney_matcherino_id}/bracket"
                 data = fetch_bracket_progress(bracket_url)
                 if data.get("status") == "success":
-                    await dashboard_cog.announce_high_stakes_matches(matcherino_id, data)
+                    await dashboard_cog.announce_high_stakes_matches(endtourney_matcherino_id, data)
             except Exception as e:
                 print(f"!endtourney announcement sync error: {e}")
 
+        # Do a final progress dashboard refresh before stopping so it shows Tournament Over.
+        if dashboard_cog:
+            try:
+                await dashboard_cog.update_progress_dashboard()
+            except Exception as e:
+                print(f"!endtourney final progress update error: {e}")
+
+        winner_was_posted = (
+            dashboard_cog is not None
+            and dashboard_cog._winner_announcement_state.get("winner") is not None
+        )
+
         if dashboard_cog:
             await dashboard_cog.stop_dashboard()
+
+        # If the winner hasn't been announced yet (API hasn't updated), schedule a retry.
+        if not winner_was_posted and endtourney_matcherino_id:
+            await ctx.send("⏳ Winner not yet available from Matcherino. Will retry in 5 minutes and post automatically.")
+
+            async def _retry_winner_post():
+                await asyncio.sleep(300)
+                try:
+                    retry_url = f"https://matcherino.com/tournaments/{endtourney_matcherino_id}/bracket"
+                    retry_data = fetch_bracket_progress(retry_url)
+                    winner = retry_data.get("winner_team") if retry_data.get("status") == "success" else None
+                    if isinstance(winner, str):
+                        winner = winner.strip()
+                    if winner and winner.upper() not in {"UNKNOWN", "TBD", "BYE", ""}:
+                        updates_channel = bot.get_channel(TOURNEY_UPDATES_CHANNEL_ID)
+                        if updates_channel and isinstance(updates_channel, discord.TextChannel):
+                            content = f"# GGs!\n{winner} won !! {TOURNEY_MATCHERINO_WIN_EMOJI}"
+                            await updates_channel.send(content)
+                            print(f"[ENDTOURNEY RETRY] posted winner: {winner}")
+                    else:
+                        print("[ENDTOURNEY RETRY] winner still unavailable after 5-minute retry")
+                except Exception as e:
+                    print(f"[ENDTOURNEY RETRY] error: {e}")
+
+            asyncio.create_task(_retry_winner_post())
 
         # Disable sticky redirect notices immediately when tournament ends.
         sticky_redirect_state["enabled"] = False
@@ -2163,3 +2198,31 @@ def setup_tourney_commands(bot: commands.Bot):
         ):
             is_sa_tourney = sticky_redirect_state.get("region") == "SA"
             asyncio.create_task(refresh_sticky_redirect(message.channel, is_sa_tourney))
+
+
+async def restore_tourney_panels(bot: commands.Bot):
+    """On startup, repost any active support panels so buttons remain functional after a restart."""
+    panels = [
+        (TOURNEY_SUPPORT_CHANNEL_ID, "🎟️ Tournament Support Ticket", TourneyOpenTicketView),
+        (PRE_TOURNEY_SUPPORT_CHANNEL_ID, "📩 Pre-Tournament Support", PreTourneyOpenTicketView),
+    ]
+
+    for channel_id, embed_title, ViewClass in panels:
+        channel = bot.get_channel(channel_id)
+        if not isinstance(channel, discord.TextChannel):
+            continue
+
+        try:
+            async for message in channel.history(limit=10):
+                if (
+                    message.author == bot.user
+                    and message.embeds
+                    and message.embeds[0].title == embed_title
+                ):
+                    embed = message.embeds[0]
+                    await message.delete()
+                    await channel.send(embed=embed, view=ViewClass())
+                    print(f"✅ Restored support panel in #{channel.name}")
+                    break
+        except Exception as e:
+            print(f"⚠️ Could not restore panel in channel {channel_id}: {e}")
