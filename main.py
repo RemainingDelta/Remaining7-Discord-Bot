@@ -4,7 +4,7 @@ import os
 from dotenv import load_dotenv
 
 # Import Tourney Logic (Legacy/Features folder)
-from features.tourney.tourney_commands import setup_tourney_commands
+from features.tourney.tourney_commands import setup_tourney_commands, restore_tourney_panels
 
 # Import Database connection check
 from database.mongo import db
@@ -71,7 +71,7 @@ async def on_ready():
     try:
         setup_tourney_commands(bot)
         print("✅ Loaded Feature: Tournaments")
-        
+        await restore_tourney_panels(bot)
     except Exception as e:
         print(f"⚠️ Tourney Error: {e}")
 
