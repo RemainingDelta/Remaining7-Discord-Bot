@@ -521,17 +521,20 @@ class Economy(commands.Cog):
         current_timestamp = time.time()
         today_date = datetime.utcnow().strftime("%Y-%m-%d")
 
-        # --- NEW: TRACK DAILY MESSAGE COUNT ---
-        # Format: "YYYY-MM-DD:COUNT" (e.g., "2026-02-14:3")
-        daily_msg_data = await get_setting(f"daily_msg_count_{user_id}", f"{today_date}:0")
-        stored_date, count = daily_msg_data.split(":")
-        
-        if stored_date == today_date:
+        # --- TRACK DAILY MESSAGE COUNT (tied to /daily cooldown window) ---
+        # Format: "LAST_DAILY_TIMESTAMP:COUNT" — resets when user claims /daily
+        last_daily_str = await get_setting(f"daily_{user_id}")
+        window_key = last_daily_str if last_daily_str else "0"
+
+        daily_msg_data = await get_setting(f"daily_msg_count_{user_id}", f"{window_key}:0")
+        stored_window_key, count = daily_msg_data.split(":", 1)
+
+        if stored_window_key == window_key:
             new_count = int(count) + 1
         else:
-            new_count = 1 # It's a new day, reset to 1
-            
-        await set_setting(f"daily_msg_count_{user_id}", f"{today_date}:{new_count}")
+            new_count = 1  # User claimed /daily since last message, reset to 1
+
+        await set_setting(f"daily_msg_count_{user_id}", f"{window_key}:{new_count}")
 
         # --- PART 1: TOKENS (ON 1 MINUTE COOLDOWN) ---
         last_message_str = await get_setting(f"last_message_{user_id}")
@@ -818,15 +821,16 @@ class Economy(commands.Cog):
     @app_commands.command(name="daily", description="Claim your daily R7 tokens!")
     async def daily(self, interaction: discord.Interaction):
         user_id = str(interaction.user.id)
-        today_date = datetime.utcnow().strftime("%Y-%m-%d")
         now = datetime.utcnow()
-        
+
         # 1. FETCH DATA
-        daily_msg_data = await get_setting(f"daily_msg_count_{user_id}", f"{today_date}:0")
-        stored_date, count = daily_msg_data.split(":")
-        msg_count = int(count) if stored_date == today_date else 0
-        
         last_daily_str = await get_setting(f"daily_{user_id}")
+        window_key = last_daily_str if last_daily_str else "0"
+
+        daily_msg_data = await get_setting(f"daily_msg_count_{user_id}", f"{window_key}:0")
+        stored_window_key, count = daily_msg_data.split(":", 1)
+        msg_count = int(count) if stored_window_key == window_key else 0
+
         cooldown_remaining = None
         if last_daily_str:
             last_daily = datetime.utcfromtimestamp(float(last_daily_str))
@@ -1062,7 +1066,7 @@ class Economy(commands.Cog):
         earn_text = (
             f"💬 **Chatting:** Earn **2-5 Tokens** every message in **any channel** across the server! (20s cooldown)\n"
             "📅 **Daily Rewards:** Use `/daily` to claim tokens every 24h. "
-            "*Requires 5 messages sent within the current UTC day.*\n"
+            "*Requires 5 messages sent since your last `/daily` claim.*\n"
             f"🪂 **Supply Drops:** Random crates appear in {general_ch}! Click the button to claim.\n"
             f"🏆 **Events:** Earn massive token rewards in {event_ch}.\n"
             "🚀 **Booster Bonus:** Server Boosters receive a **2% increase** in coins on average."
