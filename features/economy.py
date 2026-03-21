@@ -25,6 +25,7 @@ from features.config import (
     MODERATOR_ROLE_ID,
     REDEMPTION_TICKET_CATEGORY_ID,
     TRIAL_MODERATOR_ROLE_ID,
+    DAILY_MSG_EXCLUDED_CHANNEL_IDS,
 )
 
 shop_choices = [
@@ -523,18 +524,19 @@ class Economy(commands.Cog):
 
         # --- TRACK DAILY MESSAGE COUNT (tied to /daily cooldown window) ---
         # Format: "LAST_DAILY_TIMESTAMP:COUNT" — resets when user claims /daily
-        last_daily_str = await get_setting(f"daily_{user_id}")
-        window_key = last_daily_str if last_daily_str else "0"
+        if message.channel.id not in DAILY_MSG_EXCLUDED_CHANNEL_IDS:
+            last_daily_str = await get_setting(f"daily_{user_id}")
+            window_key = last_daily_str if last_daily_str else "0"
 
-        daily_msg_data = await get_setting(f"daily_msg_count_{user_id}", f"{window_key}:0")
-        stored_window_key, count = daily_msg_data.split(":", 1)
+            daily_msg_data = await get_setting(f"daily_msg_count_{user_id}", f"{window_key}:0")
+            stored_window_key, count = daily_msg_data.split(":", 1)
 
-        if stored_window_key == window_key:
-            new_count = int(count) + 1
-        else:
-            new_count = 1  # User claimed /daily since last message, reset to 1
+            if stored_window_key == window_key:
+                new_count = int(count) + 1
+            else:
+                new_count = 1  # User claimed /daily since last message, reset to 1
 
-        await set_setting(f"daily_msg_count_{user_id}", f"{window_key}:{new_count}")
+            await set_setting(f"daily_msg_count_{user_id}", f"{window_key}:{new_count}")
 
         # --- PART 1: TOKENS (ON 1 MINUTE COOLDOWN) ---
         last_message_str = await get_setting(f"last_message_{user_id}")
