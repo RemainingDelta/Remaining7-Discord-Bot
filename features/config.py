@@ -4,7 +4,7 @@ from dotenv import load_dotenv
 
 
 load_dotenv()
-BOT_VERSION = "v1.7.1"
+BOT_VERSION = "v1.7.5"
 MODE = os.getenv('BOT_MODE', 'TEST').upper()
 
 if MODE == "REAL":
