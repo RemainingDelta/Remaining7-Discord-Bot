@@ -2198,3 +2198,31 @@ def setup_tourney_commands(bot: commands.Bot):
         ):
             is_sa_tourney = sticky_redirect_state.get("region") == "SA"
             asyncio.create_task(refresh_sticky_redirect(message.channel, is_sa_tourney))
+
+
+async def restore_tourney_panels(bot: commands.Bot):
+    """On startup, repost any active support panels so buttons remain functional after a restart."""
+    panels = [
+        (TOURNEY_SUPPORT_CHANNEL_ID, "🎟️ Tournament Support Ticket", TourneyOpenTicketView),
+        (PRE_TOURNEY_SUPPORT_CHANNEL_ID, "📩 Pre-Tournament Support", PreTourneyOpenTicketView),
+    ]
+
+    for channel_id, embed_title, ViewClass in panels:
+        channel = bot.get_channel(channel_id)
+        if not isinstance(channel, discord.TextChannel):
+            continue
+
+        try:
+            async for message in channel.history(limit=10):
+                if (
+                    message.author == bot.user
+                    and message.embeds
+                    and message.embeds[0].title == embed_title
+                ):
+                    embed = message.embeds[0]
+                    await message.delete()
+                    await channel.send(embed=embed, view=ViewClass())
+                    print(f"✅ Restored support panel in #{channel.name}")
+                    break
+        except Exception as e:
+            print(f"⚠️ Could not restore panel in channel {channel_id}: {e}")
