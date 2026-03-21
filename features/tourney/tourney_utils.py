@@ -125,19 +125,6 @@ def reset_ticket_counter():
     _ticket_counter = 1
 
 
-async def _send_capacity_warning(guild: discord.Guild, category_name: str, count: int):
-    """Sends a warning to the admin channel if capacity > 40."""
-    admin_ch = guild.get_channel(TOURNEY_ADMIN_CHANNEL_ID)
-    if admin_ch and isinstance(admin_ch, discord.TextChannel):
-        role_mention = f"<@&{TOURNEY_ADMIN_ROLE_ID}>"
-        embed = discord.Embed(
-            title="⚠️ High Traffic Alert",
-            description=f"**{category_name}** is filling up!\nCurrent Count: **{count}/50**",
-            color=discord.Color.orange()
-        )
-        embed.set_footer(text="If this reaches 50, new tickets cannot be opened.")
-        await admin_ch.send(content=role_mention, embed=embed)
-
 async def create_tourney_ticket_channel(
     interaction: discord.Interaction,
     team_name: str,
@@ -163,14 +150,8 @@ async def create_tourney_ticket_channel(
             "Please wait for Admins to close some tickets before trying again.",
             ephemeral=True
         )
-        # Ping admins so they know it is critical
-        await _send_capacity_warning(guild, category.name, current_count)
         return
 
-    if current_count >= 40:
-        # We allow creation, but we warn admins
-        asyncio.create_task(_send_capacity_warning(guild, category.name, current_count + 1))
-    
     user_id = interaction.user.id
     ok, message = _check_ticket_limits_for_user(user_id)
     if not ok:
@@ -306,14 +287,8 @@ async def create_pre_tourney_ticket_channel(
             "Please wait for Admins to close some tickets.",
             ephemeral=True
         )
-        await _send_capacity_warning(guild, category.name, current_count)
         return
 
-    # Check 2: Soft Limit (40)
-    if current_count >= 40:
-        asyncio.create_task(_send_capacity_warning(guild, category.name, current_count + 1))
-    # -----------------------------
-    
     user_id = interaction.user.id
     ok, message = _check_ticket_limits_for_user(user_id)
     if not ok:
