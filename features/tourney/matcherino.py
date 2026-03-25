@@ -412,7 +412,7 @@ def fetch_bracket_progress(url: str) -> dict:
         and m.get('entrantB', {}).get('entrantId', 0) > 1
     ]
     if final_round_matches:
-        final_round_matches_sorted = sorted(final_round_matches, key=lambda x: x.get('matchNum', 0), reverse=True)
+        final_round_matches_sorted = sorted(final_round_matches, key=lambda x: x.get('matchNum', 0))
         for fm in final_round_matches_sorted:
             entrant_a = fm.get('entrantA', {})
             entrant_b = fm.get('entrantB', {})
