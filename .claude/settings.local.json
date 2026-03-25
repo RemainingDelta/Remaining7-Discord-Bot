@@ -1,7 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "Bash(source /Users/shivena/Desktop/Remaining7-Discord-Bot/.venv/bin/activate && echo \"Activated\")"
-    ]
-  }
-}
