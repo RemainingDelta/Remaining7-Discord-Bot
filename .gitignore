@@ -13,3 +13,6 @@ venv/
 .venv/
 
 api_debug.json
+
+.claude/
+CLAUDE.md
