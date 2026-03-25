@@ -201,7 +201,6 @@ class QueueDashboard(commands.Cog):
             try:
                 old_msg = await channel.fetch_message(msg_id)
                 await old_msg.delete()
-                print(f"[ANNOUNCE][{stage_key}] deleted previous message {msg_id}")
             except (discord.NotFound, discord.Forbidden):
                 pass
             except Exception as e:
@@ -224,9 +223,6 @@ class QueueDashboard(commands.Cog):
         # Guard: only announce once the entire stage matchup is known.
         # If data is incomplete, leave any existing message visible rather than deleting it.
         if len(matches) != required_count:
-            print(
-                f"[ANNOUNCE][{stage_key}] skip stage post: matched_count={len(matches)} required={required_count}"
-            )
             return
 
         signature = self._build_stage_signature(matches)
@@ -234,7 +230,6 @@ class QueueDashboard(commands.Cog):
         current_message_id = stage_state.get("message_id")
 
         if signature == current_signature and isinstance(current_message_id, int):
-            print(f"[ANNOUNCE][{stage_key}] skip stage post: unchanged signature")
             return
 
         sorted_matches = sorted(matches, key=lambda m: m.get("id") if isinstance(m.get("id"), int) else 9999)
@@ -253,7 +248,6 @@ class QueueDashboard(commands.Cog):
                 stage_state["message_id"] = recent.id
                 stage_state["signature"] = signature
                 stage_state["hype_message_id"] = None
-                print(f"[ANNOUNCE][{stage_key}] skip stage post: identical content already exists ({recent.id})")
                 return
 
         # If a message for this stage already exists, edit it in-place so there is no
@@ -263,7 +257,6 @@ class QueueDashboard(commands.Cog):
                 existing_msg = await channel.fetch_message(current_message_id)
                 await existing_msg.edit(content=content)
                 stage_state["signature"] = signature
-                print(f"[ANNOUNCE][{stage_key}] edited stage message {current_message_id} in-place")
                 return
             except discord.NotFound:
                 stage_state["message_id"] = None
@@ -279,9 +272,6 @@ class QueueDashboard(commands.Cog):
         stage_state["message_id"] = new_message.id
         stage_state["hype_message_id"] = hype_message.id
         stage_state["signature"] = signature
-        print(
-            f"[ANNOUNCE][{stage_key}] sent stage message {new_message.id} and hype gif {hype_message.id}"
-        )
 
     async def _sync_winner_announcement(
         self,
@@ -294,13 +284,10 @@ class QueueDashboard(commands.Cog):
         current_message_id = winner_state.get("message_id")
 
         if not tournament_complete or not winner_team:
-            reason = "tournament not complete" if not tournament_complete else "winner missing"
-            print(f"[ANNOUNCE][winner] skip winner post: {reason}")
             # Never delete a winner message once it has been posted.
             return
 
         if winner_team == current_winner and isinstance(current_message_id, int):
-            print("[ANNOUNCE][winner] skip winner post: unchanged winner")
             return
 
         content = f"# GGs!\n{winner_team} won !! {TOURNEY_MATCHERINO_WIN_EMOJI}"
@@ -309,13 +296,11 @@ class QueueDashboard(commands.Cog):
             if recent.author == self.bot.user and recent.content == content:
                 winner_state["winner"] = winner_team
                 winner_state["message_id"] = recent.id
-                print(f"[ANNOUNCE][winner] skip winner post: identical content already exists ({recent.id})")
                 return
 
         new_msg = await channel.send(content)
         winner_state["winner"] = winner_team
         winner_state["message_id"] = new_msg.id
-        print(f"[ANNOUNCE][winner] sent winner message {new_msg.id} for {winner_team}")
 
     async def announce_high_stakes_matches(self, matcherino_id: str, progress_data: dict):
         async with self._announcement_lock:
@@ -334,20 +319,23 @@ class QueueDashboard(commands.Cog):
 
             max_round = progress_data.get("max_round")
             active_matches = progress_data.get("active_matches", [])
+            # all_matches includes closed rounds so semi-finals remain detectable
+            # after they finish and finals become active.
+            all_matches = progress_data.get("all_matches", active_matches)
             if not isinstance(max_round, int) or max_round < 1:
-                print(f"[ANNOUNCE] skip all: invalid max_round={max_round}")
                 return
             if not isinstance(active_matches, list):
-                print("[ANNOUNCE] active_matches malformed; coercing to empty list")
                 active_matches = []
+            if not isinstance(all_matches, list):
+                all_matches = active_matches
 
             semi_round = max_round - 1
             semi_candidates = [
-                m for m in active_matches
+                m for m in all_matches
                 if semi_round >= 1 and m.get("round") == semi_round and self._is_fully_matched(m)
             ]
             final_candidates = [
-                m for m in active_matches
+                m for m in all_matches
                 if m.get("round") == max_round and self._is_fully_matched(m)
             ]
 
@@ -365,11 +353,6 @@ class QueueDashboard(commands.Cog):
             semi_finals = semi_candidates[:2] if len(semi_candidates) >= 2 else []
             finals = final_candidates[:1] if len(final_candidates) >= 1 else []
 
-            print(
-                f"[ANNOUNCE] scan matcherino={matcherino_id} max_round={max_round} active={len(active_matches)} "
-                f"semi_candidates={len(semi_candidates)} finals_candidates={len(final_candidates)}"
-            )
-
             await self._sync_stage_announcement(
                 updates_channel,
                 "semi_finals",
@@ -377,6 +360,16 @@ class QueueDashboard(commands.Cog):
                 semi_finals,
                 required_count=2,
             )
+
+            # Ordering guard: only post finals after semi-finals has been posted.
+            # If there are no semi-final matches at all (small bracket), skip the guard.
+            semi_finals_posted = isinstance(
+                self._stage_announcement_state["semi_finals"].get("message_id"), int
+            )
+            has_semi_finals_stage = semi_round >= 1 and len(semi_candidates) >= 2
+            if finals and has_semi_finals_stage and not semi_finals_posted:
+                finals = []
+
             await self._sync_stage_announcement(
                 updates_channel,
                 "finals",
@@ -390,10 +383,14 @@ class QueueDashboard(commands.Cog):
             winner_team = progress_data.get("winner_team")
             if isinstance(winner_team, str):
                 winner_team = winner_team.strip()
-            print(
-                f"[ANNOUNCE] winner check complete={tournament_complete} "
-                f"remaining_matches={remaining_matches} winner={winner_team or 'None'}"
+
+            # Ordering guard: only post winner after finals has been posted.
+            finals_posted = isinstance(
+                self._stage_announcement_state["finals"].get("message_id"), int
             )
+            if tournament_complete and winner_team and not finals_posted:
+                tournament_complete = False
+
             await self._sync_winner_announcement(updates_channel, tournament_complete, winner_team)
 
     async def update_progress_dashboard(self):
