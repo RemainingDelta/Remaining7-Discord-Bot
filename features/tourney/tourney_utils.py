@@ -6,22 +6,22 @@ from discord.ext import commands
 import io
 from datetime import datetime, timedelta
 from discord.utils import utcnow
-import asyncio 
+import asyncio
 from database.mongo import get_blacklisted_user
 from features.config import (
-    TOURNEY_CATEGORY_ID, 
-    PRE_TOURNEY_CATEGORY_ID, 
-    TOURNEY_CLOSED_CATEGORY_ID, 
+    TOURNEY_CATEGORY_ID,
+    PRE_TOURNEY_CATEGORY_ID,
+    TOURNEY_CLOSED_CATEGORY_ID,
     PRE_TOURNEY_CLOSED_CATEGORY_ID,
-    ALLOWED_STAFF_ROLES, 
+    ALLOWED_STAFF_ROLES,
     LOG_CHANNEL_ID,
-    TOURNEY_ADMIN_CHANNEL_ID, 
-    TOURNEY_ADMIN_ROLE_ID
+    TOURNEY_ADMIN_CHANNEL_ID,
+    TOURNEY_ADMIN_ROLE_ID,
 )
 from features.config import TOURNEY_TEST_MODE
 
 _ticket_counter: int = 1
-_pre_tourney_ticket_counter: int = 1 
+_pre_tourney_ticket_counter: int = 1
 
 # user_id -> set of open ticket channel IDs
 _user_open_tickets: dict[int, set[int]] = {}
@@ -35,16 +35,16 @@ async def _get_translation(text: str) -> str | None:
     try:
         # Run blocking detection and translation in a thread to keep the bot responsive
         detected = await asyncio.to_thread(detect, text)
-        if detected == 'en':
+        if detected == "en":
             return None
-        
+
         translated = await asyncio.to_thread(
-            GoogleTranslator(source='auto', target='en').translate, 
-            text
+            GoogleTranslator(source="auto", target="en").translate, text
         )
         return translated
     except Exception:
         return None
+
 
 def _get_open_ticket_count(user_id: int) -> int:
     tickets = _user_open_tickets.get(user_id)
@@ -69,7 +69,7 @@ def _unregister_ticket_for_user(user_id: int, channel_id: int) -> None:
 
 def _check_ticket_limits_for_user(user_id: int) -> tuple[bool, str | None]:
     """
-    Returns (ok, message_if_not_ok). Now pulls live values from config 
+    Returns (ok, message_if_not_ok). Now pulls live values from config
     to support real-time Test Mode toggling.
     """
     import features.config as config  # Import live config state
@@ -95,7 +95,10 @@ def _check_ticket_limits_for_user(user_id: int) -> tuple[bool, str | None]:
             remaining = int(TICKET_COOLDOWN - elapsed)
             minutes, seconds = divmod(remaining, 60)
             human = f"{minutes}m {seconds}s" if minutes > 0 else f"{seconds}s"
-            return (False, f"Please wait {human} before opening another tourney ticket.")
+            return (
+                False,
+                f"Please wait {human} before opening another tourney ticket.",
+            )
 
     return True, None
 
@@ -108,6 +111,7 @@ def get_next_ticket_number() -> int:
     if _ticket_counter > 999:
         _ticket_counter = 1  # wrap after 999, optional
     return current
+
 
 def get_next_pre_tourney_ticket_number() -> int:
     """Return the next PRE-tourney ticket number."""
@@ -142,13 +146,13 @@ async def create_tourney_ticket_channel(
             ephemeral=True,
         )
         return
-    
+
     current_count = len(category.channels)
     if current_count >= 50:
         await interaction.followup.send(
             "❌ **System Full:** The tournament ticket queue is currently at maximum capacity (50/50).\n"
             "Please wait for Admins to close some tickets before trying again.",
-            ephemeral=True
+            ephemeral=True,
         )
         return
 
@@ -192,9 +196,9 @@ async def create_tourney_ticket_channel(
     )
     # Force move to top
     await channel.edit(position=0)
-    
+
     _register_ticket_for_user(interaction.user.id, channel.id)
-    
+
     topic = (
         f"tourney-opener:{interaction.user.id}"
         f"|team:{team_name}"
@@ -204,25 +208,29 @@ async def create_tourney_ticket_channel(
     await channel.edit(topic=topic, reason="Store ticket opener ID")
 
     translation = await _get_translation(issue)
-    
+
     ticket_embed = discord.Embed(
         title="🎟️ New Tournament Ticket",
         description="A Tourney Admin will assist you shortly.",
-        color=discord.Color.blurple()
+        color=discord.Color.blurple(),
     )
 
-    ticket_embed.add_field(name="👤 Player", value=interaction.user.mention, inline=False)
+    ticket_embed.add_field(
+        name="👤 Player", value=interaction.user.mention, inline=False
+    )
     ticket_embed.add_field(name="📛 Team", value=f"```\n{team_name}\n```", inline=False)
-    ticket_embed.add_field(name="🔢 Match / Bracket", value=f"```\n{bracket}\n```", inline=False)
+    ticket_embed.add_field(
+        name="🔢 Match / Bracket", value=f"```\n{bracket}\n```", inline=False
+    )
     ticket_embed.add_field(name="📝 Issue", value=f"```\n{issue}\n```", inline=False)
 
     if translation:
         ticket_embed.add_field(
-            name="🌐 English Translation", 
-            value=f"```\n{translation}\n```", 
-            inline=False
+            name="🌐 English Translation",
+            value=f"```\n{translation}\n```",
+            inline=False,
         )
-    
+
     await channel.send(embed=ticket_embed)
 
     proof_embed = discord.Embed(
@@ -235,21 +243,21 @@ async def create_tourney_ticket_channel(
             "**Only one type of proof is needed, unless Tourney Admins ask for more.**\n"
             "If no proof is submitted, we may be unable to take action."
         ),
-        color=discord.Color.red()
+        color=discord.Color.red(),
     )
 
     await channel.send(
         content=f"{interaction.user.mention} 👇 **Please read this:**",
-        embed=proof_embed
+        embed=proof_embed,
     )
 
     await interaction.followup.send(
         f"Tourney ticket created: {channel.mention}",
         ephemeral=True,
     )
-    
+
     await check_and_alert_blacklist(guild, interaction.user, channel)
-    
+
     return channel
 
 
@@ -258,6 +266,7 @@ def _is_staff(member: discord.abc.User | discord.Member) -> bool:
     if not isinstance(member, discord.Member):
         return False
     return any(role.id in ALLOWED_STAFF_ROLES for role in member.roles)
+
 
 async def create_pre_tourney_ticket_channel(
     interaction: discord.Interaction,
@@ -279,13 +288,13 @@ async def create_pre_tourney_ticket_channel(
 
     # --- ADDED: Safety Checks ---
     current_count = len(category.channels)
-    
+
     # Check 1: Hard Limit (50)
     if current_count >= 50:
         await interaction.followup.send(
             "❌ **System Full:** The pre-tournament ticket queue is currently at maximum capacity (50/50).\n"
             "Please wait for Admins to close some tickets.",
-            ephemeral=True
+            ephemeral=True,
         )
         return
 
@@ -298,7 +307,7 @@ async def create_pre_tourney_ticket_channel(
     # ... rest of the function remains the same ...
     ticket_number = get_next_pre_tourney_ticket_number()
     channel_name = f"「❗」ticket-{ticket_number:03d}"
-    
+
     # (Keep the rest of your existing code here)
     overwrites = {
         guild.default_role: discord.PermissionOverwrite(view_channel=False),
@@ -314,7 +323,13 @@ async def create_pre_tourney_ticket_channel(
     for role_id in ALLOWED_STAFF_ROLES:
         role = guild.get_role(role_id)
         if role:
-            overwrites[role] = discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True, manage_messages=True, use_application_commands=True)
+            overwrites[role] = discord.PermissionOverwrite(
+                view_channel=True,
+                send_messages=True,
+                read_message_history=True,
+                manage_messages=True,
+                use_application_commands=True,
+            )
 
     display_team = team_name if team_name else "N/A"
 
@@ -327,7 +342,7 @@ async def create_pre_tourney_ticket_channel(
     await channel.edit(position=0)
 
     _register_ticket_for_user(interaction.user.id, channel.id)
-    
+
     topic = f"tourney-opener:{interaction.user.id}|team:{display_team}|issue:{issue}"
     await channel.edit(topic=topic, reason="Store ticket opener ID")
 
@@ -336,23 +351,28 @@ async def create_pre_tourney_ticket_channel(
     ticket_embed = discord.Embed(
         title="📩 New Pre-Tourney Inquiry",
         description="A Staff member will assist you shortly.",
-        color=discord.Color.orange()
+        color=discord.Color.orange(),
     )
     ticket_embed.add_field(name="👤 User", value=interaction.user.mention, inline=False)
-    ticket_embed.add_field(name="📛 Team", value=f"```\n{display_team}\n```", inline=False)
+    ticket_embed.add_field(
+        name="📛 Team", value=f"```\n{display_team}\n```", inline=False
+    )
     ticket_embed.add_field(name="📝 Inquiry", value=f"```\n{issue}\n```", inline=False)
-    
+
     if translation:
         ticket_embed.add_field(
-            name="🌐 English Translation (Auto)", 
-            value=f"```\n{translation}\n```", 
-            inline=False
+            name="🌐 English Translation (Auto)",
+            value=f"```\n{translation}\n```",
+            inline=False,
         )
 
     await channel.send(embed=ticket_embed)
-    await interaction.followup.send(f"Support ticket created: {channel.mention}", ephemeral=True)
-    
+    await interaction.followup.send(
+        f"Support ticket created: {channel.mention}", ephemeral=True
+    )
+
     await check_and_alert_blacklist(guild, interaction.user, channel)
+
 
 async def close_ticket_via_command(ctx: commands.Context):
     """
@@ -382,35 +402,44 @@ async def close_ticket_via_command(ctx: commands.Context):
     elif channel.category_id == PRE_TOURNEY_CATEGORY_ID:
         target_category = guild.get_channel(PRE_TOURNEY_CLOSED_CATEGORY_ID)
     else:
-        await ctx.reply("This command can only be used in an active tourney ticket channel.")
+        await ctx.reply(
+            "This command can only be used in an active tourney ticket channel."
+        )
         return
 
     if target_category and isinstance(target_category, discord.CategoryChannel):
         current_count = len(target_category.channels)
-        LIMIT = 40 
-        
+        LIMIT = 40
+
         if current_count >= LIMIT:
             # Sort existing archive tickets by creation time (Oldest first)
-            existing_channels = [c for c in target_category.channels if isinstance(c, discord.TextChannel)]
+            existing_channels = [
+                c
+                for c in target_category.channels
+                if isinstance(c, discord.TextChannel)
+            ]
             existing_channels.sort(key=lambda c: c.created_at)
 
             # Delete enough to get back to 39 (making room for the incoming one)
             excess_amount = current_count - LIMIT + 1
             to_delete = existing_channels[:excess_amount]
 
-            await ctx.send(f"🧹 Closed category full ({current_count}/50). Auto-cleaning {len(to_delete)} oldest closed ticket(s)...")
+            await ctx.send(
+                f"🧹 Closed category full ({current_count}/50). Auto-cleaning {len(to_delete)} oldest closed ticket(s)..."
+            )
 
             for old_chan in to_delete:
                 try:
-                    await delete_ticket_with_transcript(guild, old_chan, ctx.author, ctx.bot)
-                    await asyncio.sleep(1.5) 
+                    await delete_ticket_with_transcript(
+                        guild, old_chan, ctx.author, ctx.bot
+                    )
+                    await asyncio.sleep(1.5)
                 except Exception as e:
                     print(f"Failed to auto-clean ticket {old_chan.name}: {e}")
-    
+
     # 1. Move Category (Await this first so it happens immediately)
     if target_category and isinstance(target_category, discord.CategoryChannel):
         await channel.edit(category=target_category)
-    
 
     # 2. Handle Opener Tracking
     opener_id: int | None = None
@@ -433,9 +462,9 @@ async def close_ticket_via_command(ctx: commands.Context):
         try:
             base_name = base_name.split("」", 1)[1]
         except IndexError:
-            pass 
+            pass
     new_name = f"「👍」{base_name}"
-    
+
     if channel.name != new_name:
         asyncio.create_task(channel.edit(name=new_name, reason="Tourney ticket closed"))
 
@@ -450,7 +479,7 @@ async def close_ticket_via_command(ctx: commands.Context):
                 overwrite.send_messages = None
             overwrite.view_channel = True
             await channel.set_permissions(opener, overwrite=overwrite)
-            
+
     for role_id in ALLOWED_STAFF_ROLES:
         staff_role = guild.get_role(role_id)
         if staff_role is not None:
@@ -459,13 +488,14 @@ async def close_ticket_via_command(ctx: commands.Context):
                 view_channel=True,
                 send_messages=True,
                 read_message_history=True,
-                manage_messages=True
+                manage_messages=True,
             )
 
     await ctx.send(
         f"Ticket closed by {ctx.author.name} and moved to {target_category.name if target_category else 'closed category'}.",
         view=DeleteTicketView(),
     )
+
 
 async def build_transcript_text(channel: discord.TextChannel) -> str:
     """Collect all messages in the channel into a plain-text transcript,
@@ -511,6 +541,7 @@ async def build_transcript_text(channel: discord.TextChannel) -> str:
 
     return "\n".join(lines)
 
+
 async def delete_ticket_with_transcript(
     guild: discord.Guild,
     channel: discord.TextChannel,
@@ -520,12 +551,12 @@ async def delete_ticket_with_transcript(
     """Core logic to log a transcript, DM opener, and delete a ticket channel."""
     # Allow deletion from Active OR Closed categories
     valid_categories = (
-        TOURNEY_CATEGORY_ID, 
-        PRE_TOURNEY_CATEGORY_ID, 
-        TOURNEY_CLOSED_CATEGORY_ID, 
-        PRE_TOURNEY_CLOSED_CATEGORY_ID
+        TOURNEY_CATEGORY_ID,
+        PRE_TOURNEY_CATEGORY_ID,
+        TOURNEY_CLOSED_CATEGORY_ID,
+        PRE_TOURNEY_CLOSED_CATEGORY_ID,
     )
-    
+
     if channel.category_id not in valid_categories:
         return
 
@@ -539,7 +570,7 @@ async def delete_ticket_with_transcript(
                 except ValueError:
                     opener_id = None
                 break
-    
+
     if opener_id is not None:
         _unregister_ticket_for_user(opener_id, channel.id)
 
@@ -577,12 +608,12 @@ async def delete_ticket_with_transcript(
     # Log channel
     log_channel = guild.get_channel(LOG_CHANNEL_ID) if LOG_CHANNEL_ID else None
     if isinstance(log_channel, discord.TextChannel):
-        deleter_name = deleter.name 
+        deleter_name = deleter.name
         opener_mention = f"<@{opener_id}>" if opener_id is not None else "Unknown"
 
         # 1. Extract Info from Topic
         topic = channel.topic if channel.topic else ""
-        
+
         # Default values
         team_name = "N/A"
         match_num = "N/A"
@@ -590,13 +621,15 @@ async def delete_ticket_with_transcript(
         if topic:
             # Pattern: Look for "team:" followed by anything until a "|" or End of Line
             team_match = re.search(r"team:(.*?)(?:\||$)", topic, re.IGNORECASE)
-            
+
             # Pattern: Look for "bracket:" OR "match:" followed by anything until "|" or End of Line
-            bracket_match = re.search(r"(?:bracket|match|match number):(.*?)(?:\||$)", topic, re.IGNORECASE)
-            
-            if team_match: 
+            bracket_match = re.search(
+                r"(?:bracket|match|match number):(.*?)(?:\||$)", topic, re.IGNORECASE
+            )
+
+            if team_match:
                 team_name = team_match.group(1).strip()
-            if bracket_match: 
+            if bracket_match:
                 match_num = bracket_match.group(1).strip()
 
         # 👇 2. Update Content
@@ -611,6 +644,7 @@ async def delete_ticket_with_transcript(
 
     await channel.delete(reason=f"Tourney ticket deleted by {deleter}")
 
+
 async def reopen_tourney_ticket(interaction: discord.Interaction):
     """
     Re-open a ticket:
@@ -623,7 +657,9 @@ async def reopen_tourney_ticket(interaction: discord.Interaction):
     channel = interaction.channel
 
     if guild is None or not isinstance(channel, discord.TextChannel):
-        await interaction.response.send_message("Error: Not a text channel.", ephemeral=True)
+        await interaction.response.send_message(
+            "Error: Not a text channel.", ephemeral=True
+        )
         return
 
     if not _is_staff(interaction.user):
@@ -639,21 +675,22 @@ async def reopen_tourney_ticket(interaction: discord.Interaction):
     else:
         # Also allow reopening if it's already in the active category (just in case)
         if channel.category_id in (TOURNEY_CATEGORY_ID, PRE_TOURNEY_CATEGORY_ID):
-            target_category = channel.category # Stay here
+            target_category = channel.category  # Stay here
         else:
-            await interaction.response.send_message("This ticket is not in a valid tourney category.", ephemeral=True)
+            await interaction.response.send_message(
+                "This ticket is not in a valid tourney category.", ephemeral=True
+            )
             return
 
     await interaction.response.defer(ephemeral=True)
 
     # 1. Move Category & Force Top Position
     if target_category and isinstance(target_category, discord.CategoryChannel):
-        
         # --- SAFETY CHECK: Is the active category full? ---
         if len(target_category.channels) >= 50:
             await interaction.followup.send(
                 "❌ **Cannot Reopen:** The Active Ticket category is full (50/50). You must close another ticket first.",
-                ephemeral=True
+                ephemeral=True,
             )
             return
         # --------------------------------------------------
@@ -685,7 +722,9 @@ async def reopen_tourney_ticket(interaction: discord.Interaction):
     new_name = f"「❗」{base_name}"
 
     if channel.name != new_name:
-        asyncio.create_task(channel.edit(name=new_name, reason="Tourney ticket reopened"))
+        asyncio.create_task(
+            channel.edit(name=new_name, reason="Tourney ticket reopened")
+        )
 
     # 4. Restore Perms
     opener_mention = "the ticket owner"
@@ -699,7 +738,7 @@ async def reopen_tourney_ticket(interaction: discord.Interaction):
                     view_channel=True,
                     send_messages=True,
                     read_message_history=True,
-                    reason="Ticket Reopened"
+                    reason="Ticket Reopened",
                 )
             except discord.HTTPException as e:
                 print(f"[reopen_tourney_ticket] Failed to update perms: {e}")
@@ -707,7 +746,7 @@ async def reopen_tourney_ticket(interaction: discord.Interaction):
     embed = discord.Embed(
         title="🔓 Ticket Reopened",
         description=f"{opener_mention}, this ticket has been reopened by staff. You may send messages again.",
-        color=discord.Color.green()
+        color=discord.Color.green(),
     )
     await channel.send(content=opener_mention if opener_id else None, embed=embed)
 
@@ -717,8 +756,11 @@ async def reopen_tourney_ticket(interaction: discord.Interaction):
     except (discord.Forbidden, discord.HTTPException):
         pass
 
-    await interaction.followup.send("Ticket reopened and moved to top of active category.", ephemeral=True)
-    
+    await interaction.followup.send(
+        "Ticket reopened and moved to top of active category.", ephemeral=True
+    )
+
+
 async def delete_tourney_ticket(interaction: discord.Interaction):
     """Delete the ticket channel via button interaction, using shared helper."""
     guild = interaction.guild
@@ -740,10 +782,10 @@ async def delete_tourney_ticket(interaction: discord.Interaction):
         return
 
     valid_categories = (
-        TOURNEY_CATEGORY_ID, 
-        PRE_TOURNEY_CATEGORY_ID, 
-        TOURNEY_CLOSED_CATEGORY_ID, 
-        PRE_TOURNEY_CLOSED_CATEGORY_ID
+        TOURNEY_CATEGORY_ID,
+        PRE_TOURNEY_CATEGORY_ID,
+        TOURNEY_CLOSED_CATEGORY_ID,
+        PRE_TOURNEY_CLOSED_CATEGORY_ID,
     )
 
     if channel.category_id not in valid_categories:
@@ -766,6 +808,7 @@ async def delete_tourney_ticket(interaction: discord.Interaction):
         client=interaction.client,
     )
 
+
 async def delete_ticket_via_command(ctx: commands.Context):
     """Command version of delete ticket logic."""
     if not _is_staff(ctx.author):
@@ -774,10 +817,10 @@ async def delete_ticket_via_command(ctx: commands.Context):
 
     # Check if we are in a valid ticket category (Active or Closed)
     valid_categories = (
-        TOURNEY_CATEGORY_ID, 
-        PRE_TOURNEY_CATEGORY_ID, 
-        TOURNEY_CLOSED_CATEGORY_ID, 
-        PRE_TOURNEY_CLOSED_CATEGORY_ID
+        TOURNEY_CATEGORY_ID,
+        PRE_TOURNEY_CATEGORY_ID,
+        TOURNEY_CLOSED_CATEGORY_ID,
+        PRE_TOURNEY_CLOSED_CATEGORY_ID,
     )
     if ctx.channel.category_id not in valid_categories:
         await ctx.reply("This command can only be used in a tourney ticket channel.")
@@ -808,7 +851,9 @@ async def reopen_ticket_via_command(ctx: commands.Context):
 
     # SAFETY CHECK: Capacity (50 channel limit)
     if target_category and len(target_category.channels) >= 50:
-        await ctx.reply(f"❌ Cannot reopen: The active category '{target_category.name}' is full (50/50).")
+        await ctx.reply(
+            f"❌ Cannot reopen: The active category '{target_category.name}' is full (50/50)."
+        )
         return
 
     # 1. Move
@@ -821,16 +866,18 @@ async def reopen_ticket_via_command(ctx: commands.Context):
         for part in channel.topic.split("|"):
             key, _, value = part.partition(":")
             if key.strip() == "tourney-opener":
-                try: opener_id = int(value.strip())
-                except ValueError: pass
+                try:
+                    opener_id = int(value.strip())
+                except ValueError:
+                    pass
                 break
 
-    if opener_id: 
+    if opener_id:
         _register_ticket_for_user(opener_id, channel.id)
 
     # 3. Rename
     base_name = channel.name
-    if "「" in base_name and "」" in base_name: 
+    if "「" in base_name and "」" in base_name:
         base_name = base_name.split("」", 1)[1]
     new_name = f"「❗」{base_name}"
 
@@ -843,29 +890,34 @@ async def reopen_ticket_via_command(ctx: commands.Context):
         opener = guild.get_member(opener_id)
         if opener:
             opener_mention = opener.mention
-            await channel.set_permissions(opener, view_channel=True, send_messages=True, read_message_history=True)
+            await channel.set_permissions(
+                opener, view_channel=True, send_messages=True, read_message_history=True
+            )
 
     embed = discord.Embed(
         title="🔓 Ticket Reopened",
         description=f"{opener_mention}, this ticket has been reopened by staff.",
-        color=discord.Color.green()
+        color=discord.Color.green(),
     )
     await channel.send(embed=embed)
-    
+
     # React to the command message to show success
     try:
         await ctx.message.add_reaction("✅")
     except:
         pass
 
-async def check_and_alert_blacklist(guild: discord.Guild, user: discord.User, ticket_channel: discord.TextChannel):
+
+async def check_and_alert_blacklist(
+    guild: discord.Guild, user: discord.User, ticket_channel: discord.TextChannel
+):
     """
     Checks if a user is blacklisted. If so, pings admins in the admin channel.
     """
     blacklist_data = await get_blacklisted_user(str(user.id))
-    
+
     if not blacklist_data:
-        return # Not blacklisted, do nothing.
+        return  # Not blacklisted, do nothing.
 
     # They are blacklisted! Prepare the alert.
     admin_channel = guild.get_channel(TOURNEY_ADMIN_CHANNEL_ID)
@@ -876,7 +928,7 @@ async def check_and_alert_blacklist(guild: discord.Guild, user: discord.User, ti
     matcherino = blacklist_data.get("matcherino", "N/A")
     alts = blacklist_data.get("alts", [])
     timestamp = blacklist_data.get("timestamp")
-    
+
     date_str = timestamp.strftime("%Y-%m-%d") if timestamp else "Unknown"
 
     # Build Alt String
@@ -888,9 +940,9 @@ async def check_and_alert_blacklist(guild: discord.Guild, user: discord.User, ti
     embed = discord.Embed(
         title="🚨 Blacklisted User Opened Ticket",
         description=f"**User:** {user.mention} (`{user.id}`)\n**Ticket:** {ticket_channel.mention}",
-        color=discord.Color.dark_red()
+        color=discord.Color.dark_red(),
     )
-    
+
     embed.add_field(name="Ban Reason", value=reason, inline=False)
     embed.add_field(name="Ban Date", value=date_str, inline=True)
     embed.add_field(name="Matcherino", value=matcherino, inline=True)
@@ -898,7 +950,7 @@ async def check_and_alert_blacklist(guild: discord.Guild, user: discord.User, ti
 
     # Ping the admin role
     content = f"<@&{TOURNEY_ADMIN_ROLE_ID}> ⚠️ **Blacklisted User Alert!**"
-    
+
     try:
         await admin_channel.send(content=content, embed=embed)
     except Exception as e:

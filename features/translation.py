@@ -8,21 +8,62 @@ from typing import List
 
 # Complete dictionary of 55 languages
 LANG_MAP = {
-    'af': 'Afrikaans', 'ar': 'Arabic', 'bg': 'Bulgarian', 'bn': 'Bengali',
-    'ca': 'Catalan', 'cs': 'Czech', 'cy': 'Welsh', 'da': 'Danish',
-    'de': 'German', 'el': 'Greek', 'en': 'English', 'es': 'Spanish',
-    'et': 'Estonian', 'fa': 'Persian', 'fi': 'Finnish', 'fr': 'French',
-    'gu': 'Gujarati', 'he': 'Hebrew', 'hi': 'Hindi', 'hr': 'Croatian',
-    'hu': 'Hungarian', 'id': 'Indonesian', 'it': 'Italian', 'ja': 'Japanese',
-    'kn': 'Kannada', 'ko': 'Korean', 'lt': 'Lithuanian', 'lv': 'Latvian',
-    'mk': 'Macedonian', 'ml': 'Malayalam', 'mr': 'Marathi', 'ne': 'Nepali',
-    'nl': 'Dutch', 'no': 'Norwegian', 'pa': 'Punjabi', 'pl': 'Polish',
-    'pt': 'Portuguese', 'ro': 'Romanian', 'ru': 'Russian', 'sk': 'Slovak',
-    'sl': 'Slovenian', 'sq': 'Albanian', 'sv': 'Swedish', 'sw': 'Swahili',
-    'ta': 'Tamil', 'te': 'Telugu', 'th': 'Thai', 'tl': 'Tagalog',
-    'tr': 'Turkish', 'uk': 'Ukrainian', 'ur': 'Urdu', 'vi': 'Vietnamese',
-    'zh-cn': 'Simplified Chinese', 'zh-tw': 'Traditional Chinese'
+    "af": "Afrikaans",
+    "ar": "Arabic",
+    "bg": "Bulgarian",
+    "bn": "Bengali",
+    "ca": "Catalan",
+    "cs": "Czech",
+    "cy": "Welsh",
+    "da": "Danish",
+    "de": "German",
+    "el": "Greek",
+    "en": "English",
+    "es": "Spanish",
+    "et": "Estonian",
+    "fa": "Persian",
+    "fi": "Finnish",
+    "fr": "French",
+    "gu": "Gujarati",
+    "he": "Hebrew",
+    "hi": "Hindi",
+    "hr": "Croatian",
+    "hu": "Hungarian",
+    "id": "Indonesian",
+    "it": "Italian",
+    "ja": "Japanese",
+    "kn": "Kannada",
+    "ko": "Korean",
+    "lt": "Lithuanian",
+    "lv": "Latvian",
+    "mk": "Macedonian",
+    "ml": "Malayalam",
+    "mr": "Marathi",
+    "ne": "Nepali",
+    "nl": "Dutch",
+    "no": "Norwegian",
+    "pa": "Punjabi",
+    "pl": "Polish",
+    "pt": "Portuguese",
+    "ro": "Romanian",
+    "ru": "Russian",
+    "sk": "Slovak",
+    "sl": "Slovenian",
+    "sq": "Albanian",
+    "sv": "Swedish",
+    "sw": "Swahili",
+    "ta": "Tamil",
+    "te": "Telugu",
+    "th": "Thai",
+    "tl": "Tagalog",
+    "tr": "Turkish",
+    "uk": "Ukrainian",
+    "ur": "Urdu",
+    "vi": "Vietnamese",
+    "zh-cn": "Simplified Chinese",
+    "zh-tw": "Traditional Chinese",
 }
+
 
 class Translation(commands.Cog):
     def __init__(self, bot):
@@ -30,9 +71,7 @@ class Translation(commands.Cog):
 
     # --- AUTOCOMPLETE HANDLER ---
     async def language_autocomplete(
-        self, 
-        interaction: discord.Interaction, 
-        current: str
+        self, interaction: discord.Interaction, current: str
     ) -> List[app_commands.Choice[str]]:
         """Filters the 55 languages based on user input."""
         choices = [
@@ -42,20 +81,20 @@ class Translation(commands.Cog):
         ]
         # Discord only allows returning up to 25 choices at a time
         return choices[:25]
-    
+
     def get_language_code(self, user_input: str) -> str:
         """Matches user input to a language code from LANG_MAP."""
         user_input = user_input.lower().strip()
-        
+
         # Check if they provided the code directly (e.g., 'es')
         if user_input in LANG_MAP:
             return user_input
-            
+
         # Check if they provided the full name (e.g., 'spanish')
         for code, name in LANG_MAP.items():
             if name.lower() == user_input:
                 return code
-        
+
         return None
 
     # --- PREFIX COMMAND (!translate) ---
@@ -66,7 +105,9 @@ class Translation(commands.Cog):
             return
 
         try:
-            original_msg = await ctx.channel.fetch_message(ctx.message.reference.message_id)
+            original_msg = await ctx.channel.fetch_message(
+                ctx.message.reference.message_id
+            )
         except:
             await ctx.reply("❌ Could not find the message.")
             return
@@ -77,7 +118,7 @@ class Translation(commands.Cog):
             return
 
         # Handle Source Language Selection
-        source_code = "auto" # Default to auto-detect
+        source_code = "auto"  # Default to auto-detect
         display_name = "Auto-Detected"
 
         if source_input:
@@ -87,7 +128,9 @@ class Translation(commands.Cog):
                 source_code = match_code
                 display_name = LANG_MAP[match_code]
             else:
-                await ctx.reply(f"❌ Unknown language: `{source_input}`. Try something like `hindi` or `es`.")
+                await ctx.reply(
+                    f"❌ Unknown language: `{source_input}`. Try something like `hindi` or `es`."
+                )
                 return
 
         try:
@@ -97,58 +140,74 @@ class Translation(commands.Cog):
                 display_name = LANG_MAP.get(detected_code, detected_code.upper())
 
             translated = await asyncio.to_thread(
-                GoogleTranslator(source=source_code, target='en').translate, 
-                text
+                GoogleTranslator(source=source_code, target="en").translate, text
             )
-            
-            embed = discord.Embed(title=f"🌐 Translated from {display_name}", color=discord.Color.blue())
-            
+
+            embed = discord.Embed(
+                title=f"🌐 Translated from {display_name}", color=discord.Color.blue()
+            )
+
             # Add a small note if it was forced manually
             if source_input:
                 embed.set_author(name="Manual Language Override")
 
             embed.add_field(name="Original Message", value=f"> {text}", inline=False)
-            embed.add_field(name="English Translation", value=f"**{translated}**", inline=False)
-            embed.set_footer(text=f"Requested by {ctx.author.display_name}", icon_url=ctx.author.display_avatar.url)
+            embed.add_field(
+                name="English Translation", value=f"**{translated}**", inline=False
+            )
+            embed.set_footer(
+                text=f"Requested by {ctx.author.display_name}",
+                icon_url=ctx.author.display_avatar.url,
+            )
             await ctx.reply(embed=embed)
         except Exception as e:
             await ctx.reply(f"❌ Error: {e}")
 
     # --- SLASH COMMAND (/translate) ---
-    @app_commands.command(name="translate", description="Translate English text into another language.")
+    @app_commands.command(
+        name="translate", description="Translate English text into another language."
+    )
     @app_commands.describe(
         language="Search and select the language to translate INTO",
-        phrase="The English text you want to translate"
+        phrase="The English text you want to translate",
     )
     @app_commands.autocomplete(language=language_autocomplete)
-    async def translate_slash(self, interaction: discord.Interaction, language: str, phrase: str):
+    async def translate_slash(
+        self, interaction: discord.Interaction, language: str, phrase: str
+    ):
         await interaction.response.defer()
-        
+
         try:
             # Check if the code provided exists in our map
             target_lang_name = LANG_MAP.get(language, language.upper())
-            
+
             translated = await asyncio.to_thread(
-                GoogleTranslator(source='en', target=language).translate, 
-                phrase
+                GoogleTranslator(source="en", target=language).translate, phrase
             )
 
             embed = discord.Embed(
                 title=f"🌐 Translated to {target_lang_name}",
-                color=discord.Color.green()
+                color=discord.Color.green(),
             )
-            embed.add_field(name=f"{target_lang_name} Translation", value=f"**{translated}**", inline=False)
+            embed.add_field(
+                name=f"{target_lang_name} Translation",
+                value=f"**{translated}**",
+                inline=False,
+            )
             embed.add_field(name="Original English", value=f"> {phrase}", inline=False)
-            
+
             embed.set_footer(
-                text=f"Requested by {interaction.user.display_name}", 
-                icon_url=interaction.user.display_avatar.url
+                text=f"Requested by {interaction.user.display_name}",
+                icon_url=interaction.user.display_avatar.url,
             )
-            
+
             await interaction.followup.send(embed=embed)
 
         except Exception as e:
-            await interaction.followup.send(f"❌ An error occurred: `{e}`", ephemeral=True)
+            await interaction.followup.send(
+                f"❌ An error occurred: `{e}`", ephemeral=True
+            )
+
 
 async def setup(bot):
     await bot.add_cog(Translation(bot))

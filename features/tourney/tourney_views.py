@@ -1,10 +1,11 @@
 import discord
 from database.mongo import (
-    get_active_tourney_session, 
-    update_tourney_queue, 
-    increment_staff_closure 
+    get_active_tourney_session,
+    update_tourney_queue,
+    increment_staff_closure,
 )
 from features.tourney.matcherino import fetch_ticket_context
+
 
 class TourneyReportModal(discord.ui.Modal, title="Tourney Support"):
     def __init__(self):
@@ -37,34 +38,36 @@ class TourneyReportModal(discord.ui.Modal, title="Tourney Support"):
 
     async def on_submit(self, interaction: discord.Interaction):
         from .tourney_utils import create_tourney_ticket_channel
-        from database.mongo import get_matcherino_id_from_active # Add this import
-        
+        from database.mongo import get_matcherino_id_from_active  # Add this import
+
         new_channel = await create_tourney_ticket_channel(
             interaction,
             team_name=self.team_name.value,
             bracket=self.bracket.value,
             issue=self.issue.value,
         )
-        
+
         try:
             active_session = await get_active_tourney_session()
             if active_session:
-                await update_tourney_queue(active_session['_id'], change=1)
+                await update_tourney_queue(active_session["_id"], change=1)
         except Exception:
             pass
-        
+
         if new_channel and interaction.guild_id:
             # Pull the ID from the database instead of memory
             m_id = await get_matcherino_id_from_active()
-            
+
             if m_id:
                 bracket_url = f"https://matcherino.com/supercell/tournaments/{m_id}/bracket/bracket"
-                
+
                 try:
                     match_num = int(self.bracket.value.strip())
                     topic_team = (self.team_name.value or "").strip()
-                    match_data = fetch_ticket_context(bracket_url, match_num, topic_team_name=topic_team or None)
-                    
+                    match_data = fetch_ticket_context(
+                        bracket_url, match_num, topic_team_name=topic_team or None
+                    )
+
                     # Build the Embed (same title as refresher so it gets updated in place, not duplicated)
                     is_mismatch = match_data.get("team_name_mismatch", False)
                     best_match_team = match_data.get("team_name_best_match")
@@ -72,37 +75,51 @@ class TourneyReportModal(discord.ui.Modal, title="Tourney Support"):
                     embed = discord.Embed(
                         title=f"📊 Live Match Update: Match #{match_num}",
                         description=f"**Last Update:** <t:{now_ts}:R>",
-                        color=discord.Color.red() if is_mismatch else discord.Color.gold()
+                        color=discord.Color.red()
+                        if is_mismatch
+                        else discord.Color.gold(),
                     )
 
                     if match_data.get("status") == "success":
-                        embed.add_field(name="Match Status", value=f"`{match_data['match_status'].upper()}`", inline=True)
+                        embed.add_field(
+                            name="Match Status",
+                            value=f"`{match_data['match_status'].upper()}`",
+                            inline=True,
+                        )
                         embed.add_field(name="\u200b", value="\u200b", inline=True)
                         embed.add_field(name="\u200b", value="\u200b", inline=True)
-                        
-                        team_a = match_data['team_a']
-                        team_b = match_data['team_b']
-                        
-                        players_a = "\n".join([f"• {p}" for p in team_a['players']]) or "• *No players found*"
-                        players_b = "\n".join([f"• {p}" for p in team_b['players']]) or "• *No players found*"
+
+                        team_a = match_data["team_a"]
+                        team_b = match_data["team_b"]
+
+                        players_a = (
+                            "\n".join([f"• {p}" for p in team_a["players"]])
+                            or "• *No players found*"
+                        )
+                        players_b = (
+                            "\n".join([f"• {p}" for p in team_b["players"]])
+                            or "• *No players found*"
+                        )
 
                         embed.add_field(
                             name=f"🔵 {team_a['name']} ({team_a['score']})",
                             value=f"**Roster:**\n{players_a}",
-                            inline=True
+                            inline=True,
                         )
                         embed.add_field(name="⚔️", value="\u200b", inline=True)
                         embed.add_field(
                             name=f"🔴 {team_b['name']} ({team_b['score']})",
                             value=f"**Roster:**\n{players_b}",
-                            inline=True
+                            inline=True,
                         )
 
                         if is_mismatch:
                             warning_text = "The team name for this ticket does not closely match either team in the bracket for this match."
                             if topic_team:
                                 warning_text += f"\nTeam entered: `{topic_team}`"
-                            warning_text += "\nStaff can correct with `/set-ticket-match`."
+                            warning_text += (
+                                "\nStaff can correct with `/set-ticket-match`."
+                            )
 
                             embed.add_field(
                                 name="⚠️ Team name / Match number Mismatch",
@@ -115,14 +132,14 @@ class TourneyReportModal(discord.ui.Modal, title="Tourney Support"):
                                 value=f"```\n{best_match_team}\n```",
                                 inline=False,
                             )
-                            
+
                     else:
                         embed.color = discord.Color.red()
                         embed.description = f"⚠️ **Could not fetch match data:** {match_data.get('error')}"
 
                     embed.set_footer(text=f"Matcherino ID: {m_id}")
                     await new_channel.send(embed=embed)
-                    
+
                 except ValueError:
                     # User didn't enter a valid integer for the match number
                     pass
@@ -144,7 +161,7 @@ class TourneyOpenTicketView(discord.ui.View):
     ):
         modal = TourneyReportModal()
         await interaction.response.send_modal(modal)
-        
+
 
 class PreTourneyReportModal(discord.ui.Modal, title="Pre-Tourney Support"):
     def __init__(self):
@@ -153,14 +170,14 @@ class PreTourneyReportModal(discord.ui.Modal, title="Pre-Tourney Support"):
         self.team_name = discord.ui.TextInput(
             label="Team Name (Optional)",
             placeholder="Ex. XYZ",
-            required=False, # <--- NOT REQUIRED
+            required=False,  # <--- NOT REQUIRED
             max_length=100,
         )
         self.issue = discord.ui.TextInput(
             label="Issue / Question",
             placeholder="How can we help?",
             style=discord.TextStyle.paragraph,
-            required=True, # <--- REQUIRED
+            required=True,  # <--- REQUIRED
             max_length=1000,
         )
 
@@ -169,16 +186,17 @@ class PreTourneyReportModal(discord.ui.Modal, title="Pre-Tourney Support"):
 
     async def on_submit(self, interaction: discord.Interaction):
         from .tourney_utils import create_pre_tourney_ticket_channel
+
         await create_pre_tourney_ticket_channel(
             interaction,
             team_name=self.team_name.value,
             issue=self.issue.value,
         )
-    
+
         try:
             active_session = await get_active_tourney_session()
             if active_session:
-                await update_tourney_queue(active_session['_id'], change=1)
+                await update_tourney_queue(active_session["_id"], change=1)
         except Exception:
             pass
 
@@ -216,8 +234,9 @@ class DeleteTicketView(discord.ui.View):
         button: discord.ui.Button,
     ):
         from .tourney_utils import delete_tourney_ticket
+
         await delete_tourney_ticket(interaction)
-        
+
     @discord.ui.button(
         label="Reopen Ticket",
         style=discord.ButtonStyle.success,
@@ -229,5 +248,5 @@ class DeleteTicketView(discord.ui.View):
         button: discord.ui.Button,
     ):
         from .tourney_utils import reopen_tourney_ticket
-        await reopen_tourney_ticket(interaction)
 
+        await reopen_tourney_ticket(interaction)

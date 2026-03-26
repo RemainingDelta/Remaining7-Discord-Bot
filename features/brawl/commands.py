@@ -1,19 +1,28 @@
 import discord
 from discord import app_commands
 from discord.ext import commands
-from features.config import EMOJI_GADGET_DEFAULT, EMOJI_STARPOWER_DEFAULT, EMOJI_HYPERCHARGE_DEFAULT, EMOJIS_BRAWLERS, EMOJIS_RARITIES, EMOJIS_DROPS
+from features.config import (
+    EMOJI_GADGET_DEFAULT,
+    EMOJI_STARPOWER_DEFAULT,
+    EMOJI_HYPERCHARGE_DEFAULT,
+    EMOJIS_BRAWLERS,
+    EMOJIS_RARITIES,
+    EMOJIS_DROPS,
+)
 from .brawlers import BRAWLER_ROSTER
 from .drops import open_mega_box, open_starr_drop
 from database.mongo import get_user_brawlers
 
 SUPERCELL_DISCLAIMER = "This material is unofficial and is not endorsed by Supercell. For more information see Supercell's Fan Content Policy: www.supercell.com/fan-content-policy."
 
+
 class BrawlerPagination(discord.ui.View):
     """View class to handle switching between Page 1 and Page 2 using buttons."""
+
     def __init__(self, user_name: str, brawlers_data: dict):
         super().__init__(timeout=60)
         self.user_name = user_name
-        
+
         # Normalize keys to lowercase to ensure matching works
         # brawlers_data looks like: {"shelly": {"level": 5}, "colt": {"level": 1}}
         self.brawlers_data = {k.lower(): v for k, v in brawlers_data.items()}
@@ -36,32 +45,33 @@ class BrawlerPagination(discord.ui.View):
 
         embed = discord.Embed(
             title=f"👤 {self.user_name}'s Collection {title_suffix}",
-            color=discord.Color.blue()
+            color=discord.Color.blue(),
         )
 
         for rarity_name in rarity_order:
-            if rarity_name not in categories: continue
-            
+            if rarity_name not in categories:
+                continue
+
             rarity_key = rarity_name.lower().replace(" ", "_")
             r_emoji = EMOJIS_RARITIES.get(rarity_key, "⚪")
-            
+
             field_value = ""
             part = 1
-            
+
             for b in categories[rarity_name]:
                 b_id_lower = b.id.lower().strip()
                 b_emoji = EMOJIS_BRAWLERS.get(b_id_lower, "❓")
-                
+
                 # Check ownership
                 is_owned = b_id_lower in self.owned_ids
-                
+
                 # Inside commands.py -> BrawlerPagination -> create_embed
                 if is_owned:
                     b_data = self.brawlers_data[b_id_lower]
                     lvl = b_data.get("level", 1)
                     owned_gadgets = b_data.get("gadgets", [])
                     owned_sps = b_data.get("star_powers", [])
-                    has_hc = b_data.get("hypercharge") # Check if they own the HC
+                    has_hc = b_data.get("hypercharge")  # Check if they own the HC
 
                     status = f"`Lvl {lvl}`"
                     if owned_gadgets:
@@ -70,12 +80,14 @@ class BrawlerPagination(discord.ui.View):
                         status += f" | {EMOJI_STARPOWER_DEFAULT} {len(owned_sps)}/2"
                     if has_hc:
                         status += f" | {EMOJI_HYPERCHARGE_DEFAULT} 1/1"
-                    
+
                     line = f"{b_emoji} **{b.name}** {status} ✅\n"
 
                     # Safety Check for Field Length
                     if len(field_value) + len(line) > 1000:
-                        f_name = f"{r_emoji} {rarity_name}" + (f" (Part {part})" if part > 1 else "")
+                        f_name = f"{r_emoji} {rarity_name}" + (
+                            f" (Part {part})" if part > 1 else ""
+                        )
                         embed.add_field(name=f_name, value=field_value, inline=True)
                         field_value = line
                         part += 1
@@ -83,53 +95,71 @@ class BrawlerPagination(discord.ui.View):
                         field_value += line
 
             if field_value:
-                f_name = f"{r_emoji} {rarity_name}" + (f" (Part {part})" if part > 1 else "")
+                f_name = f"{r_emoji} {rarity_name}" + (
+                    f" (Part {part})" if part > 1 else ""
+                )
                 embed.add_field(name=f_name, value=field_value, inline=True)
 
-        footer_text = f"Page {page}/2 • Total: {len(self.owned_ids)}\n{SUPERCELL_DISCLAIMER}"
+        footer_text = (
+            f"Page {page}/2 • Total: {len(self.owned_ids)}\n{SUPERCELL_DISCLAIMER}"
+        )
         embed.set_footer(text=footer_text)
         return embed
 
     @discord.ui.button(label="Page 1", style=discord.ButtonStyle.primary)
-    async def page_one(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def page_one(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ):
         await interaction.response.edit_message(embed=self.create_embed(1), view=self)
 
     @discord.ui.button(label="Page 2", style=discord.ButtonStyle.primary)
-    async def page_two(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def page_two(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ):
         await interaction.response.edit_message(embed=self.create_embed(2), view=self)
-        
+
+
 class BrawlerShopSelect(discord.ui.Select):
     def __init__(self, user_id, rarity, brawlers_page, price):
         self.user_id = user_id
         self.price = price
-        
+
         options = []
         for b in brawlers_page:
-            options.append(discord.SelectOption(
-                label=b.name, 
-                value=b.id, 
-                description=f"Unlock {b.name} for {price} Credits"
-            ))
-            
+            options.append(
+                discord.SelectOption(
+                    label=b.name,
+                    value=b.id,
+                    description=f"Unlock {b.name} for {price} Credits",
+                )
+            )
+
         super().__init__(placeholder=f"Select a {rarity} Brawler...", options=options)
 
     async def callback(self, interaction: discord.Interaction):
         if str(interaction.user.id) != self.user_id:
-            return await interaction.response.send_message("Not your shop!", ephemeral=True)
+            return await interaction.response.send_message(
+                "Not your shop!", ephemeral=True
+            )
 
         brawler_id = self.values[0]
         from database.mongo import deduct_credits, add_brawler_to_user
-        
+
         # Double check credits and deduct
         success = await deduct_credits(self.user_id, self.price)
         if not success:
-            return await interaction.response.send_message(f"❌ You need {self.price} Credits to buy this brawler!", ephemeral=True)
+            return await interaction.response.send_message(
+                f"❌ You need {self.price} Credits to buy this brawler!", ephemeral=True
+            )
 
         await add_brawler_to_user(self.user_id, brawler_id)
-        
+
         # Find brawler name for the success message
         b_name = next(b.name for b in BRAWLER_ROSTER if b.id == brawler_id)
-        await interaction.response.send_message(f"🎉 Success! You've unlocked **{b_name}** for **{self.price}** Credits!")
+        await interaction.response.send_message(
+            f"🎉 Success! You've unlocked **{b_name}** for **{self.price}** Credits!"
+        )
+
 
 class PaginatedShopView(discord.ui.View):
     def __init__(self, user_id, rarity, all_brawlers, price):
@@ -143,23 +173,29 @@ class PaginatedShopView(discord.ui.View):
 
     def update_view(self):
         self.clear_items()
-        
+
         # 1. Get the 25 items for this page
         start = self.page * 25
         end = start + 25
         page_items = self.all_brawlers[start:end]
-        
+
         # 2. Add the Dropdown
-        self.add_item(BrawlerShopSelect(self.user_id, self.rarity, page_items, self.price))
+        self.add_item(
+            BrawlerShopSelect(self.user_id, self.rarity, page_items, self.price)
+        )
 
         # 3. Add Buttons if needed
         if self.page > 0:
-            btn = discord.ui.Button(label="◀ Prev", style=discord.ButtonStyle.secondary, row=1)
+            btn = discord.ui.Button(
+                label="◀ Prev", style=discord.ButtonStyle.secondary, row=1
+            )
             btn.callback = self.prev_page
             self.add_item(btn)
-            
+
         if end < len(self.all_brawlers):
-            btn = discord.ui.Button(label="Next ▶", style=discord.ButtonStyle.secondary, row=1)
+            btn = discord.ui.Button(
+                label="Next ▶", style=discord.ButtonStyle.secondary, row=1
+            )
             btn.callback = self.next_page
             self.add_item(btn)
 
@@ -173,6 +209,7 @@ class PaginatedShopView(discord.ui.View):
         self.update_view()
         await interaction.response.edit_message(view=self)
 
+
 class BuyBrawlerView(discord.ui.View):
     def __init__(self, user_id, owned_ids):
         super().__init__(timeout=60)
@@ -181,43 +218,61 @@ class BuyBrawlerView(discord.ui.View):
 
     async def open_rarity_shop(self, interaction: discord.Interaction, rarity: str):
         from features.config import BRAWLER_PRICES
+
         price = BRAWLER_PRICES.get(rarity, 0)
-        
+
         # Filter: Only brawlers of this rarity NOT in user's owned list
-        available = [b for b in BRAWLER_ROSTER if b.rarity == rarity and b.id.lower() not in self.owned_ids]
-        
+        available = [
+            b
+            for b in BRAWLER_ROSTER
+            if b.rarity == rarity and b.id.lower() not in self.owned_ids
+        ]
+
         if not available:
-            return await interaction.response.send_message(f"✨ Impressive! You already own all {rarity} brawlers.", ephemeral=True)
+            return await interaction.response.send_message(
+                f"✨ Impressive! You already own all {rarity} brawlers.", ephemeral=True
+            )
 
         view = PaginatedShopView(self.user_id, rarity, available, price)
-        
+
         embed = discord.Embed(
-            title=f"🛒 {rarity} Brawler Shop", 
-            description=f"Each brawler here costs **{price} Credits**.\nSelect one below to purchase.", 
-            color=discord.Color.gold()
+            title=f"🛒 {rarity} Brawler Shop",
+            description=f"Each brawler here costs **{price} Credits**.\nSelect one below to purchase.",
+            color=discord.Color.gold(),
         )
         await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
     @discord.ui.button(label="Rare", style=discord.ButtonStyle.success)
-    async def buy_rare(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def buy_rare(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ):
         await self.open_rarity_shop(interaction, "Rare")
 
     @discord.ui.button(label="Super Rare", style=discord.ButtonStyle.primary)
-    async def buy_super_rare(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def buy_super_rare(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ):
         await self.open_rarity_shop(interaction, "Super Rare")
 
     @discord.ui.button(label="Epic", style=discord.ButtonStyle.primary)
-    async def buy_epic(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def buy_epic(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ):
         await self.open_rarity_shop(interaction, "Epic")
 
     @discord.ui.button(label="Mythic", style=discord.ButtonStyle.danger)
-    async def buy_mythic(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def buy_mythic(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ):
         await self.open_rarity_shop(interaction, "Mythic")
 
     @discord.ui.button(label="Legendary", style=discord.ButtonStyle.success)
-    async def buy_legendary(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def buy_legendary(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ):
         await self.open_rarity_shop(interaction, "Legendary")
-        
+
+
 class BrawlerUpgradeView(discord.ui.View):
     def __init__(self, user_id, brawler_id, brawler_name, brawler_emoji):
         super().__init__(timeout=120)
@@ -235,12 +290,12 @@ class BrawlerUpgradeView(discord.ui.View):
         user_data = await get_user_data(self.user_id)
         brawlers = user_data.get("brawlers", {})
         currencies = user_data.get("currencies", {})
-        
+
         # 2. Get Stats
         current_level = brawlers.get(self.brawler_id, {}).get("level", 1)
         user_coins = currencies.get("coins", 0)
         user_pp = currencies.get("power_points", 0)
-        
+
         # Emojis
         coin_icon = EMOJIS_CURRENCY.get("coins", "💰")
         pp_icon = EMOJIS_CURRENCY.get("power_points", "⚡")
@@ -248,21 +303,21 @@ class BrawlerUpgradeView(discord.ui.View):
         # 3. Build Embed
         embed = discord.Embed(
             title=f"{self.brawler_emoji} Upgrade {self.brawler_name}",
-            color=discord.Color.gold()
+            color=discord.Color.gold(),
         )
-        
+
         # Resource Wallet
         embed.add_field(
             name="🏦 Your Resources",
             value=f"{pp_icon} **{user_pp:,}**\n{coin_icon} **{user_coins:,}**",
-            inline=True
+            inline=True,
         )
 
         # 4. Determine Next Level logic
         if current_level >= 11:
             embed.description = "🔥 **MAXIMUM LEVEL REACHED!** 🔥"
             embed.color = discord.Color.red()
-            
+
             if self.children:
                 self.children[0].disabled = True
                 self.children[0].label = "Max Level"
@@ -270,46 +325,64 @@ class BrawlerUpgradeView(discord.ui.View):
             # next_level is ONLY defined here
             next_level = current_level + 1
             costs = BRAWLER_UPGRADE_COSTS.get(next_level, {"coins": 99999, "pp": 99999})
-            c_cost = costs['coins']
-            pp_cost = costs['pp']
-            
+            c_cost = costs["coins"]
+            pp_cost = costs["pp"]
+
             embed.add_field(
                 name="🆙 Level Progress",
                 value=f"**Lvl {current_level}** ➡️ **Lvl {next_level}**",
-                inline=True
+                inline=True,
             )
-            
+
             embed.add_field(
                 name="📉 Upgrade Cost",
                 value=f"{pp_icon} **{pp_cost:,}**\n{coin_icon} **{c_cost:,}**",
-                inline=True
+                inline=True,
             )
-            
+
             if self.children:
                 self.children[0].disabled = False
                 self.children[0].label = f"Upgrade to Lvl {next_level}"
 
             # MOVE THE MILESTONE CHECKS INSIDE THIS ELSE BLOCK
             if next_level == 7:
-                embed.add_field(name="🔓 Unlock", value=f"Lvl 7 unlocks **Gadgets** {EMOJI_GADGET_DEFAULT}", inline=False)
+                embed.add_field(
+                    name="🔓 Unlock",
+                    value=f"Lvl 7 unlocks **Gadgets** {EMOJI_GADGET_DEFAULT}",
+                    inline=False,
+                )
             elif next_level == 9:
-                embed.add_field(name="🔓 Unlock", value=f"Lvl 9 unlocks **Star Powers** {EMOJI_STARPOWER_DEFAULT}", inline=False)
+                embed.add_field(
+                    name="🔓 Unlock",
+                    value=f"Lvl 9 unlocks **Star Powers** {EMOJI_STARPOWER_DEFAULT}",
+                    inline=False,
+                )
             elif next_level == 11:
-                embed.add_field(name="🔓 Unlock", value=f"Lvl 11 unlocks **Hypercharges** {EMOJI_HYPERCHARGE_DEFAULT}", inline=False)
+                embed.add_field(
+                    name="🔓 Unlock",
+                    value=f"Lvl 11 unlocks **Hypercharges** {EMOJI_HYPERCHARGE_DEFAULT}",
+                    inline=False,
+                )
 
         embed.set_footer(text=SUPERCELL_DISCLAIMER)
         return embed
 
     @discord.ui.button(label="Upgrade", style=discord.ButtonStyle.green)
-    async def upgrade_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def upgrade_button(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ):
         if str(interaction.user.id) != self.user_id:
-            return await interaction.response.send_message("This isn't your session!", ephemeral=True)
+            return await interaction.response.send_message(
+                "This isn't your session!", ephemeral=True
+            )
 
         from database.mongo import upgrade_brawler_level
-        
+
         # Perform the DB upgrade
-        success, msg, new_level = await upgrade_brawler_level(self.user_id, self.brawler_id)
-        
+        success, msg, new_level = await upgrade_brawler_level(
+            self.user_id, self.brawler_id
+        )
+
         if success:
             # Refresh the view to show the NEW level and NEXT costs
             embed = await self.generate_embed()
@@ -319,13 +392,20 @@ class BrawlerUpgradeView(discord.ui.View):
             await interaction.response.send_message(f"❌ {msg}", ephemeral=True)
 
     @discord.ui.button(label="Exit", style=discord.ButtonStyle.red)
-    async def exit_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def exit_button(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ):
         if str(interaction.user.id) != self.user_id:
-            return await interaction.response.send_message("This isn't your session!", ephemeral=True)
-        
-        await interaction.response.edit_message(content="❌ **Upgrade Session Closed.**", view=None, embed=None)
+            return await interaction.response.send_message(
+                "This isn't your session!", ephemeral=True
+            )
+
+        await interaction.response.edit_message(
+            content="❌ **Upgrade Session Closed.**", view=None, embed=None
+        )
         self.stop()
-        
+
+
 class ConfirmPurchaseView(discord.ui.View):
     def __init__(self, user_id, item_name, item_type, cost, brawler_id, parent_view):
         super().__init__(timeout=30)
@@ -334,21 +414,30 @@ class ConfirmPurchaseView(discord.ui.View):
         self.item_type = item_type
         self.cost = cost
         self.brawler_id = brawler_id
-        self.parent_view = parent_view # Reference to the shop view to go back
+        self.parent_view = parent_view  # Reference to the shop view to go back
 
-    @discord.ui.button(label="Confirm Purchase", style=discord.ButtonStyle.green, emoji="🛒")
-    async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if str(interaction.user.id) != self.user_id: return
-        
+    @discord.ui.button(
+        label="Confirm Purchase", style=discord.ButtonStyle.green, emoji="🛒"
+    )
+    async def confirm(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ):
+        if str(interaction.user.id) != self.user_id:
+            return
+
         from database.mongo import (
-            deduct_coins, add_gadget_to_user, 
-            add_star_power_to_user, add_hypercharge_to_user
+            deduct_coins,
+            add_gadget_to_user,
+            add_star_power_to_user,
+            add_hypercharge_to_user,
         )
 
         # 1. Try to pay
         success = await deduct_coins(self.user_id, self.cost)
         if not success:
-            return await interaction.response.send_message("❌ Insufficient Coins!", ephemeral=True)
+            return await interaction.response.send_message(
+                "❌ Insufficient Coins!", ephemeral=True
+            )
 
         # 2. Add the Item
         if self.item_type == "gadget":
@@ -359,31 +448,43 @@ class ConfirmPurchaseView(discord.ui.View):
             await add_hypercharge_to_user(self.user_id, self.brawler_id, self.item_name)
 
         # 3. Refresh the Shop (Go back to main view)
-        await interaction.response.send_message(f"✅ Successfully bought **{self.item_name}**!", ephemeral=True)
-        
+        await interaction.response.send_message(
+            f"✅ Successfully bought **{self.item_name}**!", ephemeral=True
+        )
+
         # Refresh the parent view's data
         await self.parent_view.refresh_state()
-        await interaction.message.edit(embed=self.parent_view.generate_embed(), view=self.parent_view)
+        await interaction.message.edit(
+            embed=self.parent_view.generate_embed(), view=self.parent_view
+        )
 
     @discord.ui.button(label="Cancel", style=discord.ButtonStyle.red)
     async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if str(interaction.user.id) != self.user_id: return
+        if str(interaction.user.id) != self.user_id:
+            return
         # Go back to the shop without buying
-        await interaction.response.edit_message(embed=self.parent_view.generate_embed(), view=self.parent_view)
+        await interaction.response.edit_message(
+            embed=self.parent_view.generate_embed(), view=self.parent_view
+        )
+
 
 class AbilitySelect(discord.ui.Select):
     def __init__(self, options):
-        super().__init__(placeholder="Select an ability to purchase...", options=options)
+        super().__init__(
+            placeholder="Select an ability to purchase...", options=options
+        )
 
     async def callback(self, interaction: discord.Interaction):
         # Extract data from the value string "type|name|cost"
         i_type, i_name, i_cost = self.values[0].split("|")
         cost = int(i_cost)
-        
-        view: AbilityShopView = self.view # Type hint for the parent view
-        
+
+        view: AbilityShopView = self.view  # Type hint for the parent view
+
         if str(interaction.user.id) != view.user_id:
-            return await interaction.response.send_message("Not your shop!", ephemeral=True)
+            return await interaction.response.send_message(
+                "Not your shop!", ephemeral=True
+            )
 
         # Create the Confirmation Embed
         confirm_embed = discord.Embed(
@@ -393,14 +494,15 @@ class AbilitySelect(discord.ui.Select):
                 f"📉 Cost: **{cost:,}** Coins\n"
                 f"💰 Your Balance: **{view.user_coins:,}** Coins"
             ),
-            color=discord.Color.gold()
+            color=discord.Color.gold(),
         )
-        
+
         # Swap to Confirmation View
         confirm_view = ConfirmPurchaseView(
             view.user_id, i_name, i_type, cost, view.brawler_id, view
         )
         await interaction.response.edit_message(embed=confirm_embed, view=confirm_view)
+
 
 class AbilityShopView(discord.ui.View):
     def __init__(self, user_id, brawler_id, brawler_name, brawler_emoji):
@@ -408,7 +510,9 @@ class AbilityShopView(discord.ui.View):
         self.user_id = user_id
         self.brawler_id = brawler_id
         self.brawler_name = brawler_name
-        self.brawler_emoji = brawler_emoji # We need this for the Upgrade View transition
+        self.brawler_emoji = (
+            brawler_emoji  # We need this for the Upgrade View transition
+        )
         self.user_coins = 0
         self.empty_state_reason = ""
         self.can_upgrade = False
@@ -417,17 +521,19 @@ class AbilityShopView(discord.ui.View):
         """Fetches fresh data, builds dropdown, and determines empty state logic."""
         from database.mongo import get_user_data
         from features.config import (
-            EMOJI_GADGET_DEFAULT, EMOJI_STARPOWER_DEFAULT, EMOJI_HYPERCHARGE_DEFAULT
+            EMOJI_GADGET_DEFAULT,
+            EMOJI_STARPOWER_DEFAULT,
+            EMOJI_HYPERCHARGE_DEFAULT,
         )
-        
+
         # 1. Fetch Data
         user_data = await get_user_data(self.user_id)
         self.user_coins = user_data.get("currencies", {}).get("coins", 0)
         brawler_data = user_data.get("brawlers", {}).get(self.brawler_id, {})
-        
+
         # 2. Get Master Data
         b_info = next((b for b in BRAWLER_ROSTER if b.id == self.brawler_id), None)
-        
+
         current_lvl = brawler_data.get("level", 1)
         owned_gadgets = brawler_data.get("gadgets", [])
         owned_sps = brawler_data.get("star_powers", [])
@@ -442,41 +548,53 @@ class AbilityShopView(discord.ui.View):
         if g_missing:
             if current_lvl >= 7:
                 for g in g_missing:
-                    options.append(discord.SelectOption(
-                        label=f"Gadget: {g}", 
-                        description="Cost: 1,000 Coins",
-                        emoji=EMOJI_GADGET_DEFAULT,
-                        value=f"gadget|{g}|1000"
-                    ))
+                    options.append(
+                        discord.SelectOption(
+                            label=f"Gadget: {g}",
+                            description="Cost: 1,000 Coins",
+                            emoji=EMOJI_GADGET_DEFAULT,
+                            value=f"gadget|{g}|1000",
+                        )
+                    )
             else:
-                missing_reasons.append(f"• Reach **Lvl 7** to unlock {len(g_missing)} Gadgets {EMOJI_GADGET_DEFAULT}")
+                missing_reasons.append(
+                    f"• Reach **Lvl 7** to unlock {len(g_missing)} Gadgets {EMOJI_GADGET_DEFAULT}"
+                )
 
         # --- Star Power Check ---
         sp_missing = [sp for sp in b_info.star_powers if sp not in owned_sps]
         if sp_missing:
             if current_lvl >= 9:
                 for sp in sp_missing:
-                    options.append(discord.SelectOption(
-                        label=f"SP: {sp}", 
-                        description="Cost: 2,000 Coins", 
-                        emoji=EMOJI_STARPOWER_DEFAULT,
-                        value=f"star_power|{sp}|2000"
-                    ))
+                    options.append(
+                        discord.SelectOption(
+                            label=f"SP: {sp}",
+                            description="Cost: 2,000 Coins",
+                            emoji=EMOJI_STARPOWER_DEFAULT,
+                            value=f"star_power|{sp}|2000",
+                        )
+                    )
             else:
-                missing_reasons.append(f"• Reach **Lvl 9** to unlock {len(sp_missing)} Star Powers {EMOJI_STARPOWER_DEFAULT}")
+                missing_reasons.append(
+                    f"• Reach **Lvl 9** to unlock {len(sp_missing)} Star Powers {EMOJI_STARPOWER_DEFAULT}"
+                )
 
         # --- Hypercharge Check ---
-        hc_name = getattr(b_info, 'hypercharge', None)
+        hc_name = getattr(b_info, "hypercharge", None)
         if hc_name and not has_hc:
             if current_lvl >= 11:
-                options.append(discord.SelectOption(
-                    label=f"Hypercharge: {hc_name}", 
-                    description="Cost: 5,000 Coins", 
-                    emoji=EMOJI_HYPERCHARGE_DEFAULT,
-                    value=f"hypercharge|{hc_name}|5000"
-                ))
+                options.append(
+                    discord.SelectOption(
+                        label=f"Hypercharge: {hc_name}",
+                        description="Cost: 5,000 Coins",
+                        emoji=EMOJI_HYPERCHARGE_DEFAULT,
+                        value=f"hypercharge|{hc_name}|5000",
+                    )
+                )
             else:
-                missing_reasons.append(f"• Reach **Lvl 11** to unlock Hypercharge {EMOJI_HYPERCHARGE_DEFAULT}")
+                missing_reasons.append(
+                    f"• Reach **Lvl 11** to unlock Hypercharge {EMOJI_HYPERCHARGE_DEFAULT}"
+                )
 
         # 4. Update UI Components
         self.clear_items()
@@ -485,16 +603,22 @@ class AbilityShopView(discord.ui.View):
         if options:
             self.add_item(AbilitySelect(options))
             self.empty_state_reason = ""
-            self.can_upgrade = False # Don't distract them if they can buy stuff (optional choice)
-        
+            self.can_upgrade = (
+                False  # Don't distract them if they can buy stuff (optional choice)
+            )
+
         # If no options, determine WHY
         else:
             if not missing_reasons:
-                self.empty_state_reason = "🎉 **Maxed Out!** You own every ability for this brawler."
+                self.empty_state_reason = (
+                    "🎉 **Maxed Out!** You own every ability for this brawler."
+                )
                 self.can_upgrade = False
             else:
                 # They are missing stuff but level is too low
-                self.empty_state_reason = "🔒 **Unlock Requirements:**\n" + "\n".join(missing_reasons)
+                self.empty_state_reason = "🔒 **Unlock Requirements:**\n" + "\n".join(
+                    missing_reasons
+                )
                 self.can_upgrade = True
 
         # 5. Add Dynamic Upgrade Button if needed
@@ -504,32 +628,41 @@ class AbilityShopView(discord.ui.View):
             self.add_item(self.upgrade_button)
 
     # Define the button as a property or detached method to add dynamically
-    @discord.ui.button(label="Go to Upgrade", style=discord.ButtonStyle.blurple, emoji="🆙", row=1)
-    async def upgrade_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if str(interaction.user.id) != self.user_id: 
-            return await interaction.response.send_message("Not your session!", ephemeral=True)
-            
+    @discord.ui.button(
+        label="Go to Upgrade", style=discord.ButtonStyle.blurple, emoji="🆙", row=1
+    )
+    async def upgrade_button(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ):
+        if str(interaction.user.id) != self.user_id:
+            return await interaction.response.send_message(
+                "Not your session!", ephemeral=True
+            )
+
         # Transition to BrawlerUpgradeView
         # We need to import it here to avoid circular dependencies if defined in same file
         # assuming BrawlerUpgradeView is in the same file:
         view = BrawlerUpgradeView(
-            self.user_id, 
-            self.brawler_id, 
-            self.brawler_name, 
-            self.brawler_emoji
+            self.user_id, self.brawler_id, self.brawler_name, self.brawler_emoji
         )
         embed = await view.generate_embed()
         await interaction.response.edit_message(embed=embed, view=view)
 
     def generate_embed(self):
-        from features.config import EMOJIS_CURRENCY, EMOJI_GADGET_DEFAULT, EMOJI_STARPOWER_DEFAULT, EMOJI_HYPERCHARGE_DEFAULT
+        from features.config import (
+            EMOJIS_CURRENCY,
+            EMOJI_GADGET_DEFAULT,
+            EMOJI_STARPOWER_DEFAULT,
+            EMOJI_HYPERCHARGE_DEFAULT,
+        )
+
         c_icon = EMOJIS_CURRENCY.get("coins", "💰")
-        
+
         embed = discord.Embed(
             title=f"{EMOJI_GADGET_DEFAULT}{EMOJI_STARPOWER_DEFAULT}{EMOJI_HYPERCHARGE_DEFAULT} Ability Shop: {self.brawler_name}",
-            color=discord.Color.green()
+            color=discord.Color.green(),
         )
-        
+
         # Header with Wallet
         embed.description = f"🏦 **Balance:** {c_icon} {self.user_coins:,}\n"
 
@@ -543,7 +676,8 @@ class AbilityShopView(discord.ui.View):
 
         embed.set_footer(text=SUPERCELL_DISCLAIMER)
         return embed
-             
+
+
 class BrawlCommands(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
@@ -552,17 +686,17 @@ class BrawlCommands(commands.Cog):
     async def megabox(self, interaction: discord.Interaction):
         await interaction.response.defer()
         user_id = str(interaction.user.id)
-        
+
         rewards = await open_mega_box(user_id)
         rewards_text = "\n".join(rewards)
-        
+
         # Use Mega Box emoji from config
         box_emoji = EMOJIS_DROPS.get("mega_box", "🟥")
-        
+
         embed = discord.Embed(
             title=f"{box_emoji} MEGA BOX OPENED!",
             description=rewards_text,
-            color=discord.Color.red()
+            color=discord.Color.red(),
         )
         embed.set_footer(text=SUPERCELL_DISCLAIMER)
         await interaction.followup.send(embed=embed)
@@ -571,18 +705,18 @@ class BrawlCommands(commands.Cog):
     async def starrdrop(self, interaction: discord.Interaction):
         await interaction.response.defer()
         user_id = str(interaction.user.id)
-        
+
         rarity, reward_text = await open_starr_drop(user_id)
-        
+
         # Colors for Starr Drop rarities
         colors = {
-            "Rare": 0x54d35e,
-            "Super Rare": 0x3d9df6,
-            "Epic": 0xcf4bf6,
-            "Mythic": 0xfb3a42,
-            "Legendary": 0xfff36d
+            "Rare": 0x54D35E,
+            "Super Rare": 0x3D9DF6,
+            "Epic": 0xCF4BF6,
+            "Mythic": 0xFB3A42,
+            "Legendary": 0xFFF36D,
         }
-        
+
         drop_emoji = EMOJIS_DROPS.get("starr_drop", "⭐")
         rarity_key = rarity.lower().replace(" ", "_")
         rarity_emoji = EMOJIS_RARITIES.get(rarity_key, "")
@@ -590,75 +724,89 @@ class BrawlCommands(commands.Cog):
         embed = discord.Embed(
             title=f"{drop_emoji} {rarity} Starr Drop!",
             description=f"{rarity_emoji} You got: {reward_text}",
-            color=colors.get(rarity, 0xffffff)
+            color=colors.get(rarity, 0xFFFFFF),
         )
         embed.set_footer(text=SUPERCELL_DISCLAIMER)
         await interaction.followup.send(embed=embed)
-        
-    @app_commands.command(name="brawlers", description="View your collection with levels")
+
+    @app_commands.command(
+        name="brawlers", description="View your collection with levels"
+    )
     async def brawlers(self, interaction: discord.Interaction):
         await interaction.response.defer()
-        
+
         user_id = str(interaction.user.id)
-        
+
         # Import get_user_data to fetch the full dictionary (including levels)
         from database.mongo import get_user_data
-        
+
         user_doc = await get_user_data(user_id)
         # Get the brawlers dict, e.g., {'shelly': {'level': 1}, 'colt': {'level': 5}}
         brawlers_data = user_doc.get("brawlers", {})
-        
+
         # Pass the dictionary to the view
         view = BrawlerPagination(interaction.user.name, brawlers_data)
-        embed = view.create_embed(1) 
-        
+        embed = view.create_embed(1)
+
         embed.set_footer(text=SUPERCELL_DISCLAIMER)
         await interaction.followup.send(embed=embed, view=view)
-        
-    @app_commands.command(name="profile", description="View your Brawl Stars profile and currencies")
-    async def profile(self, interaction: discord.Interaction, user: discord.User = None):
+
+    @app_commands.command(
+        name="profile", description="View your Brawl Stars profile and currencies"
+    )
+    async def profile(
+        self, interaction: discord.Interaction, user: discord.User = None
+    ):
         await interaction.response.defer()
-        
+
         target_user = user or interaction.user
         user_id = str(target_user.id)
-        
+
         # 1. Fetch Data
         from database.mongo import get_user_data
+
         user_doc = await get_user_data(user_id)
-        
+
         currencies = user_doc.get("currencies", {})
         brawlers_data = user_doc.get("brawlers", {})
-        
+
         # 2. Calculate Progress
         total_brawlers = len(BRAWLER_ROSTER)
         owned_count = len(brawlers_data)
-        
+
         total_gadgets_owned = 0
         total_sps_owned = 0
         total_hcs_owned = 0
-        
-        total_hcs_possible = sum(1 for b in BRAWLER_ROSTER if getattr(b, 'hypercharge', None))
-        
+
+        total_hcs_possible = sum(
+            1 for b in BRAWLER_ROSTER if getattr(b, "hypercharge", None)
+        )
+
         for data in brawlers_data.values():
             total_gadgets_owned += len(data.get("gadgets", []))
             total_sps_owned += len(data.get("star_powers", []))
-            
-            if data.get("hypercharge"): total_hcs_owned += 1
-            
+
+            if data.get("hypercharge"):
+                total_hcs_owned += 1
+
         # Max possible is total_brawlers * 2
         max_items = total_brawlers * 2
 
         # 3. Get Emojis
-        from features.config import EMOJIS_CURRENCY, EMOJI_GADGET_DEFAULT, EMOJI_STARPOWER_DEFAULT
+        from features.config import (
+            EMOJIS_CURRENCY,
+            EMOJI_GADGET_DEFAULT,
+            EMOJI_STARPOWER_DEFAULT,
+        )
+
         c_emoji = EMOJIS_CURRENCY.get("coins", "💰")
         pp_emoji = EMOJIS_CURRENCY.get("power_points", "⚡")
         cr_emoji = EMOJIS_CURRENCY.get("credits", "💳")
 
         embed = discord.Embed(
-            title=f"👤 {target_user.name}'s Profile",
-            color=discord.Color.green()
+            title=f"👤 {target_user.name}'s Profile", color=discord.Color.green()
         )
-        
+
         # Collection Stats Field
         collection_text = (
             f"🗃️ **Brawlers:** {owned_count} / {total_brawlers}\n"
@@ -666,8 +814,10 @@ class BrawlCommands(commands.Cog):
             f"{EMOJI_STARPOWER_DEFAULT} **Star Powers:** {total_sps_owned} / {max_items}\n"
             f"{EMOJI_HYPERCHARGE_DEFAULT} **Hypercharges:** {total_hcs_owned} / {total_hcs_possible}"
         )
-        embed.add_field(name="📊 Collection Progress", value=collection_text, inline=False)
-        
+        embed.add_field(
+            name="📊 Collection Progress", value=collection_text, inline=False
+        )
+
         # Currencies Field
         currency_text = (
             f"{c_emoji} **Coins:** {currencies.get('coins', 0):,}\n"
@@ -678,126 +828,152 @@ class BrawlCommands(commands.Cog):
 
         if target_user.avatar:
             embed.set_thumbnail(url=target_user.avatar.url)
-            
+
         embed.set_footer(text=SUPERCELL_DISCLAIMER)
         await interaction.followup.send(embed=embed)
-    
-    @app_commands.command(name="buy-brawler", description="Purchase specific brawlers using your Credits")
+
+    @app_commands.command(
+        name="buy-brawler", description="Purchase specific brawlers using your Credits"
+    )
     async def buy_brawler(self, interaction: discord.Interaction):
         user_id = str(interaction.user.id)
         # Fetch the current list of owned brawlers
         owned_ids = await get_user_brawlers(user_id)
-        
+
         # Initialize the view with lowercase IDs for easier matching
         view = BuyBrawlerView(user_id, [id.lower() for id in owned_ids])
-        
+
         embed = discord.Embed(
             title="🛒 Brawler Shop",
             description="Pick a rarity to see brawlers you haven't unlocked yet!",
-            color=discord.Color.blue()
+            color=discord.Color.blue(),
         )
-        
+
         embed.set_footer(text=SUPERCELL_DISCLAIMER)
         await interaction.response.send_message(embed=embed, view=view)
-    
-    async def brawler_autocomplete(self, interaction: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
+
+    async def brawler_autocomplete(
+        self, interaction: discord.Interaction, current: str
+    ) -> list[app_commands.Choice[str]]:
         try:
             user_id = str(interaction.user.id)
             # Fetch user's data
             owned_raw = await get_user_brawlers(user_id)
-            
+
             # CRITICAL FIX: Handle both Dictionary (new system) and List (old system)
             if isinstance(owned_raw, dict):
                 owned_ids = list(owned_raw.keys())
             elif isinstance(owned_raw, list):
                 owned_ids = owned_raw
             else:
-                return [] 
-                
+                return []
+
             choices = []
             for b_id in owned_ids:
                 # Normalize DB ID to lowercase string for safe matching
                 clean_id = str(b_id).lower()
-                
+
                 # Robust Search: Find brawler in roster matching the ID (case-insensitive)
-                b_obj = next((b for b in BRAWLER_ROSTER if b.id.lower() == clean_id), None)
-                
+                b_obj = next(
+                    (b for b in BRAWLER_ROSTER if b.id.lower() == clean_id), None
+                )
+
                 if b_obj:
                     # Filter: Check if user's typed text matches the Brawler's Name
                     if current.lower() in b_obj.name.lower():
-                        choices.append(app_commands.Choice(name=b_obj.name, value=b_obj.id))
-            
-            return choices[:25] # Discord limit
-            
+                        choices.append(
+                            app_commands.Choice(name=b_obj.name, value=b_obj.id)
+                        )
+
+            return choices[:25]  # Discord limit
+
         except Exception as e:
             # This prevents the "Loading options failed" popup
             print(f"Autocomplete Error: {e}")
             return []
 
-    @app_commands.command(name="upgrade", description="Interactive upgrade menu for your brawlers")
-    @app_commands.autocomplete(brawler=brawler_autocomplete) # Uses your existing autocomplete
+    @app_commands.command(
+        name="upgrade", description="Interactive upgrade menu for your brawlers"
+    )
+    @app_commands.autocomplete(
+        brawler=brawler_autocomplete
+    )  # Uses your existing autocomplete
     async def upgrade(self, interaction: discord.Interaction, brawler: str):
         # 'brawler' is the ID from autocomplete
         brawler_id = brawler.lower()
-        
+
         # Get basic info for the view setup
         b_obj = next((b for b in BRAWLER_ROSTER if b.id.lower() == brawler_id), None)
-        
+
         if not b_obj:
-            return await interaction.response.send_message("❌ Brawler not found.", ephemeral=True)
+            return await interaction.response.send_message(
+                "❌ Brawler not found.", ephemeral=True
+            )
 
         user_id = str(interaction.user.id)
-        
+
         # Check if they own it first
         from database.mongo import get_user_brawlers
+
         owned_list = await get_user_brawlers(user_id)
-        
+
         # Handle dict vs list return types from previous mongo iterations
-        if isinstance(owned_list, dict): owned_list = list(owned_list.keys())
+        if isinstance(owned_list, dict):
+            owned_list = list(owned_list.keys())
         owned_list = [x.lower() for x in owned_list]
 
         if brawler_id not in owned_list:
-            return await interaction.response.send_message(f"🔒 You don't own **{b_obj.name}** yet!", ephemeral=True)
+            return await interaction.response.send_message(
+                f"🔒 You don't own **{b_obj.name}** yet!", ephemeral=True
+            )
 
         # Initialize View
         b_emoji = EMOJIS_BRAWLERS.get(brawler_id, "✨")
         view = BrawlerUpgradeView(user_id, brawler_id, b_obj.name, b_emoji)
-        
+
         # Generate initial embed state
         embed = await view.generate_embed()
-        
+
         embed.set_footer(text=SUPERCELL_DISCLAIMER)
         await interaction.response.send_message(embed=embed, view=view)
-        
-    @app_commands.command(name="buy-ability", description="Buy Gadgets, Star Powers, and Hypercharges")
-    @app_commands.autocomplete(brawler=brawler_autocomplete) 
+
+    @app_commands.command(
+        name="buy-ability", description="Buy Gadgets, Star Powers, and Hypercharges"
+    )
+    @app_commands.autocomplete(brawler=brawler_autocomplete)
     async def buy_ability(self, interaction: discord.Interaction, brawler: str):
         brawler_id = brawler.lower()
-        
+
         # 1. Validation
         from database.mongo import get_user_brawlers
+
         owned = await get_user_brawlers(str(interaction.user.id))
-        
-        if isinstance(owned, dict): owned_ids = list(owned.keys())
-        else: owned_ids = owned
-            
+
+        if isinstance(owned, dict):
+            owned_ids = list(owned.keys())
+        else:
+            owned_ids = owned
+
         if brawler_id not in [x.lower() for x in owned_ids]:
-            return await interaction.response.send_message("❌ You don't own this brawler!", ephemeral=True)
+            return await interaction.response.send_message(
+                "❌ You don't own this brawler!", ephemeral=True
+            )
 
         b_obj = next((b for b in BRAWLER_ROSTER if b.id == brawler_id), None)
-        
+
         # 2. Get Emoji
         b_emoji = EMOJIS_BRAWLERS.get(brawler_id, "✨")
 
         # 3. Setup View
-        view = AbilityShopView(str(interaction.user.id), brawler_id, b_obj.name, b_emoji)
-        await view.refresh_state() 
-        
+        view = AbilityShopView(
+            str(interaction.user.id), brawler_id, b_obj.name, b_emoji
+        )
+        await view.refresh_state()
+
         embed = view.generate_embed()
         await interaction.response.send_message(embed=embed, view=view)
-    
 
-        
+
 # This function is required for main.py to load this file as an extension
 async def setup(bot):
     await bot.add_cog(BrawlCommands(bot))
