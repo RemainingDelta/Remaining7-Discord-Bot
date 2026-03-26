@@ -53,7 +53,6 @@ from features.config import (
     PRE_TOURNEY_CLOSED_CATEGORY_ID,
     HALL_OF_FAME_CHANNEL_ID,
     BOT_VERSION,
-    TOURNEY_TEST_MODE,
 )
 from .tourney_utils import (
     close_ticket_via_command,
@@ -604,7 +603,7 @@ class QueueDashboard(commands.Cog):
                 if match:
                     try:
                         active_nums.append(int(match.group(1)))
-                    except:
+                    except Exception:
                         pass
             active_nums.sort()
 
@@ -630,7 +629,7 @@ class QueueDashboard(commands.Cog):
                             num = int(match.group(1))
                             if num > max_closed_num:
                                 max_closed_num = num
-                        except:
+                        except Exception:
                             pass
 
             target_num = max_closed_num + 1
@@ -723,7 +722,7 @@ class QueueDashboard(commands.Cog):
                 if match_res:
                     try:
                         match_num = int(match_res.group(1))
-                    except:
+                    except Exception:
                         continue
                 team_res = re.search(r"team:(.*?)(?:\||$)", channel.topic)
                 if team_res:

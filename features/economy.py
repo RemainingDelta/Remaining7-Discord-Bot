@@ -642,7 +642,7 @@ class Economy(commands.Cog):
 
         user_id = str(message.author.id)
         current_timestamp = time.time()
-        today_date = datetime.utcnow().strftime("%Y-%m-%d")
+        datetime.utcnow().strftime("%Y-%m-%d")
 
         # --- TRACK DAILY MESSAGE COUNT (tied to /daily cooldown window) ---
         # Format: "LAST_DAILY_TIMESTAMP:COUNT" — resets when user claims /daily
@@ -1004,7 +1004,7 @@ class Economy(commands.Cog):
         if msg_count < 5 or cooldown_remaining:
             # Prepare the status strings
             msg_status = (
-                f"✅ **Complete** (5/5)"
+                "✅ **Complete** (5/5)"
                 if msg_count >= 5
                 else f"❌ **Incomplete** ({msg_count}/5)"
             )
@@ -1144,9 +1144,9 @@ class Economy(commands.Cog):
     async def check_budget(self, interaction: discord.Interaction):
         total_budget, total_spent, remaining = await get_budget_totals()
 
-        bp_c = int(await get_setting("brawlpass_redeemed_count", "0"))
-        ni_c = int(await get_setting("nitro_redeemed_count", "0"))
-        pi_c = int(await get_setting("pin_redeemed_count", "0"))
+        int(await get_setting("brawlpass_redeemed_count", "0"))
+        int(await get_setting("nitro_redeemed_count", "0"))
+        int(await get_setting("pin_redeemed_count", "0"))
 
         embed = discord.Embed(title="💰 **Budget Status**", color=discord.Color.blue())
         embed.description = (

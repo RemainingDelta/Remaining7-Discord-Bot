@@ -488,7 +488,7 @@ class AbilitySelect(discord.ui.Select):
 
         # Create the Confirmation Embed
         confirm_embed = discord.Embed(
-            title=f"Confirm Purchase",
+            title="Confirm Purchase",
             description=(
                 f"Are you sure you want to buy **{i_name}**?\n\n"
                 f"📉 Cost: **{cost:,}** Coins\n"

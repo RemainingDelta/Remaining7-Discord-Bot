@@ -1,10 +1,10 @@
 import re
 from deep_translator import GoogleTranslator
-from langdetect import detect, LangDetectException
+from langdetect import detect
 import discord
 from discord.ext import commands
 import io
-from datetime import datetime, timedelta
+from datetime import datetime
 from discord.utils import utcnow
 import asyncio
 from database.mongo import get_blacklisted_user
@@ -18,7 +18,6 @@ from features.config import (
     TOURNEY_ADMIN_CHANNEL_ID,
     TOURNEY_ADMIN_ROLE_ID,
 )
-from features.config import TOURNEY_TEST_MODE
 
 _ticket_counter: int = 1
 _pre_tourney_ticket_counter: int = 1
@@ -904,7 +903,7 @@ async def reopen_ticket_via_command(ctx: commands.Context):
     # React to the command message to show success
     try:
         await ctx.message.add_reaction("✅")
-    except:
+    except Exception:
         pass
 
 

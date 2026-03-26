@@ -12,7 +12,6 @@ from features.tourney.tourney_commands import (
 # Import Database connection check
 from database.mongo import db
 
-from features.config import EMOJIS_BRAWLERS
 
 load_dotenv()
 

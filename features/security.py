@@ -160,7 +160,7 @@ class Security(commands.Cog):
         if isinstance(target_user, discord.User):
             try:
                 target_user = await ctx.guild.fetch_member(target_user.id)
-            except:
+            except Exception:
                 await ctx.send("❌ User is no longer in the server.")
                 return
 

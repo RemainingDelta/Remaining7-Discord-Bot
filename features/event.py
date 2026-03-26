@@ -159,7 +159,7 @@ class PayoutConfirmView(discord.ui.View):
         # Mark original message with a checkmark
         try:
             await self.original_msg.add_reaction("✅")
-        except:
+        except Exception:
             pass
 
         # Update the confirmation message to show success
@@ -359,7 +359,7 @@ class Events(commands.Cog):
 
         try:
             target_message = await ann_channel.fetch_message(int(message_id))
-        except:
+        except Exception:
             await interaction.followup.send(
                 "❌ Could not find that message ID in the announcements channel."
             )

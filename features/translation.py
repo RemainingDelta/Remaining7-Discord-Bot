@@ -3,7 +3,7 @@ from discord import app_commands
 from discord.ext import commands
 import asyncio
 from deep_translator import GoogleTranslator
-from langdetect import detect, LangDetectException
+from langdetect import detect
 from typing import List
 
 # Complete dictionary of 55 languages
@@ -108,7 +108,7 @@ class Translation(commands.Cog):
             original_msg = await ctx.channel.fetch_message(
                 ctx.message.reference.message_id
             )
-        except:
+        except Exception:
             await ctx.reply("❌ Could not find the message.")
             return
 

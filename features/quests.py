@@ -1,7 +1,6 @@
 import discord
 from discord import app_commands
 from discord.ext import commands
-from datetime import datetime
 
 # Import Database Helpers
 from database.mongo import (
@@ -54,7 +53,7 @@ class Quests(commands.Cog):
                 invites = await guild.invites()
                 for invite in invites:
                     self.invite_cache[guild.id][invite.code] = invite.uses
-            except:
+            except Exception:
                 pass
 
     # --- HELPERS ---

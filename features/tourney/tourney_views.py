@@ -2,7 +2,6 @@ import discord
 from database.mongo import (
     get_active_tourney_session,
     update_tourney_queue,
-    increment_staff_closure,
 )
 from features.tourney.matcherino import fetch_ticket_context
 
