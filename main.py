@@ -91,11 +91,11 @@ async def on_ready():
 
 if __name__ == "__main__":
     MODE = os.getenv("BOT_MODE", "TEST").upper()
-    token = os.getenv("DISCORD_TOKEN") if MODE == "REAL" else os.getenv("FAKE_TOKEN")
+    token = os.getenv("PROD_TOKEN") if MODE == "REAL" else os.getenv("DEV_TOKEN")
     if token:
         try:
             bot.run(token)
         except Exception as e:
             print(f"❌ Runtime Error: {e}")
     else:
-        print("❌ DISCORD_TOKEN not found in .env file.")
+        print("❌ Token not found in .env file. Set PROD_TOKEN or DEV_TOKEN.")
