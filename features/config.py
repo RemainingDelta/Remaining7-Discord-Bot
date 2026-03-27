@@ -4,9 +4,9 @@ from dotenv import load_dotenv
 
 load_dotenv()
 BOT_VERSION = "v1.7.5"
-MODE = os.getenv("BOT_MODE", "TEST").upper()
+MODE = os.getenv("BOT_MODE", "DEV").upper()
 
-if MODE == "REAL":
+if MODE == "PROD":
     TOURNEY_CATEGORY_ID = 1442023447252176916
     PRE_TOURNEY_CATEGORY_ID = 1448869532046200992
     TOURNEY_CLOSED_CATEGORY_ID = 1449608630402945055

@@ -195,9 +195,9 @@ This bot requires **Python 3.10+** and a **MongoDB Atlas** database.
 3. **Configure Environment Variables**
     Copy `.env.example` to `.env` and fill in the values:
     ```
-    BOT_MODE=TEST           # TEST (default) or REAL
-    PROD_TOKEN=             # Production bot token (used when BOT_MODE=REAL)
-    DEV_TOKEN=              # Dev/test bot token (used when BOT_MODE=TEST)
+    BOT_MODE=DEV            # DEV (default) or PROD
+    PROD_TOKEN=             # Production bot token (used when BOT_MODE=PROD)
+    DEV_TOKEN=              # Dev/test bot token (used when BOT_MODE=DEV)
     MONGO_URI=              # MongoDB Atlas connection string
     ```
 
@@ -209,7 +209,7 @@ This bot requires **Python 3.10+** and a **MongoDB Atlas** database.
     python main.py
     ```
 
-    There is no test suite. Testing is done by running the bot with `BOT_MODE=TEST` against a test Discord server.
+    There is no test suite. Testing is done by running the bot with `BOT_MODE=DEV` against a test Discord server.
 
 ---
 

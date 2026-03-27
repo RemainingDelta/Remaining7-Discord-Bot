@@ -90,8 +90,8 @@ async def on_ready():
 
 
 if __name__ == "__main__":
-    MODE = os.getenv("BOT_MODE", "TEST").upper()
-    token = os.getenv("PROD_TOKEN") if MODE == "REAL" else os.getenv("DEV_TOKEN")
+    MODE = os.getenv("BOT_MODE", "DEV").upper()
+    token = os.getenv("PROD_TOKEN") if MODE == "PROD" else os.getenv("DEV_TOKEN")
     if token:
         try:
             bot.run(token)
