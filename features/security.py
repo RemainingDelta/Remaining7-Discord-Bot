@@ -52,7 +52,22 @@ class Security(commands.Cog):
         # 3. Add to Database
         await add_hacked_user(str(target_user.id))
 
-        # 4. Global Message Purge
+        # 4. DM the flagged user
+        try:
+            dm_embed = discord.Embed(
+                title="🚨 Account Flagged as Compromised",
+                description=(
+                    "Your account has been flagged as **hacked** on the **Remaining 7** server.\n\n"
+                    "You have been **timed out for 1 week** as a security measure.\n\n"
+                    "If you recover your account, please message <@408419700729708545> to be untimed out."
+                ),
+                color=discord.Color.dark_red(),
+            )
+            await target_user.send(embed=dm_embed)
+        except Exception as e:
+            print(f"Failed to DM hacked user {target_user.id}: {e}")
+
+        # 5. Global Message Purge
         cutoff_date = datetime.utcnow() - timedelta(days=days_to_clean)
         total_deleted = 0
         channels_checked = 0
@@ -83,7 +98,7 @@ class Security(commands.Cog):
             channels_checked += 1
             await asyncio.sleep(0.1)
 
-        # 5. Build Result Embed
+        # 6. Build Result Embed
         embed = discord.Embed(
             title="🚨 User Flagged as Hacked",
             description=f"**Target:** {target_user.mention} (`{target_user.id}`)\n**Action:** 7-Day Timeout & Message Purge",
