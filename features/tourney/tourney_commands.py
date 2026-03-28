@@ -1400,7 +1400,9 @@ def setup_tourney_commands(bot: commands.Bot):
                 updated_perms.update(moderate_members=False)
                 await tourney_admin_role.edit(permissions=updated_perms)
             except Exception as e:
-                print(f"Failed to revoke timeout permission from Tourney Admin role: {e}")
+                print(
+                    f"Failed to revoke timeout permission from Tourney Admin role: {e}"
+                )
 
         session = await get_active_tourney_session()
         if session:
