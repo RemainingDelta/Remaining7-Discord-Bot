@@ -53,6 +53,7 @@ from features.config import (
     PRE_TOURNEY_CLOSED_CATEGORY_ID,
     HALL_OF_FAME_CHANNEL_ID,
     BOT_VERSION,
+    TOURNEY_ADMIN_ROLE_ID,
 )
 from .tourney_utils import (
     close_ticket_via_command,
@@ -1281,6 +1282,16 @@ def setup_tourney_commands(bot: commands.Bot):
             f"✅ Tourney Started! Channels updated and {deleted_count} pre-tourney tickets deleted."
         )
 
+        # Grant Tourney Admin the Timeout Members permission for the duration of the tourney.
+        tourney_admin_role = guild.get_role(TOURNEY_ADMIN_ROLE_ID)
+        if tourney_admin_role:
+            try:
+                updated_perms = tourney_admin_role.permissions
+                updated_perms.update(moderate_members=True)
+                await tourney_admin_role.edit(permissions=updated_perms)
+            except Exception as e:
+                print(f"Failed to grant timeout permission to Tourney Admin role: {e}")
+
         # START THE DASHBOARD
         dashboard_cog = bot.get_cog("QueueDashboard")
         if dashboard_cog:
@@ -1380,6 +1391,18 @@ def setup_tourney_commands(bot: commands.Bot):
         sticky_redirect_state["enabled"] = False
         sticky_redirect_state["region"] = None
         await cleanup_sticky_redirects(guild)
+
+        # Revoke Tourney Admin's Timeout Members permission now that the tourney is over.
+        tourney_admin_role = guild.get_role(TOURNEY_ADMIN_ROLE_ID)
+        if tourney_admin_role:
+            try:
+                updated_perms = tourney_admin_role.permissions
+                updated_perms.update(moderate_members=False)
+                await tourney_admin_role.edit(permissions=updated_perms)
+            except Exception as e:
+                print(
+                    f"Failed to revoke timeout permission from Tourney Admin role: {e}"
+                )
 
         session = await get_active_tourney_session()
         if session:
