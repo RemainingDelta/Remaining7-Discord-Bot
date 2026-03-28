@@ -8,6 +8,8 @@ from .matcherino import (
     fetch_ticket_context,
     fetch_payout_report,
     fetch_bracket_progress,
+    find_match_by_team_name,
+    clear_bracket_teams_cache,
 )
 
 from database.mongo import (
@@ -729,15 +731,56 @@ class QueueDashboard(commands.Cog):
                 if team_res:
                     topic_team_name = team_res.group(1).strip() or None
 
+            # Fallback: no valid match number → resolve from team name
             if match_num is None:
-                continue
+                if not topic_team_name:
+                    continue
+                lookup = find_match_by_team_name(bracket_url, topic_team_name)
+                if lookup.get("status") != "found":
+                    continue
+                match_num = lookup["match_number"]
+                # Persist resolved match number in topic so future refreshes skip the lookup
+                try:
+                    updated_topic = re.sub(
+                        r"bracket:[^|]*",
+                        f"bracket:{match_num}",
+                        channel.topic,
+                    )
+                    await channel.edit(topic=updated_topic)
+                except Exception:
+                    pass
 
             # 4. Fetch Fresh Match Data (with topic team for fuzzy mismatch check)
             data = fetch_ticket_context(
                 bracket_url, match_num, topic_team_name=topic_team_name
             )
             if data.get("status") != "success":
-                continue
+                # Match number not in bracket — try team name fallback
+                if topic_team_name:
+                    lookup = find_match_by_team_name(bracket_url, topic_team_name)
+                    if lookup.get("status") == "found":
+                        match_num = lookup["match_number"]
+                        data = fetch_ticket_context(
+                            bracket_url, match_num, topic_team_name=topic_team_name
+                        )
+                        if data.get("status") == "success":
+                            # Persist corrected match number in topic
+                            if channel.topic:
+                                try:
+                                    updated_topic = re.sub(
+                                        r"bracket:[^|]*",
+                                        f"bracket:{match_num}",
+                                        channel.topic,
+                                    )
+                                    await channel.edit(topic=updated_topic)
+                                except Exception:
+                                    pass
+                        else:
+                            continue
+                    else:
+                        continue
+                else:
+                    continue
 
             # 5. Construct the Live Embed with Relative Timestamp
             now_ts = int(discord.utils.utcnow().timestamp())
@@ -773,7 +816,69 @@ class QueueDashboard(commands.Cog):
                 inline=True,
             )
 
-            # For mismatches, keep the warning simple.
+            # Mismatch: team name doesn't match either team — try to auto-correct
+            if is_mismatch and topic_team_name:
+                lookup = find_match_by_team_name(bracket_url, topic_team_name)
+                if lookup.get("status") == "found":
+                    resolved_num = lookup["match_number"]
+                    data = fetch_ticket_context(
+                        bracket_url, resolved_num, topic_team_name=topic_team_name
+                    )
+                    if data.get("status") == "success":
+                        match_num = resolved_num
+                        is_mismatch = data.get("team_name_mismatch", False)
+                        best_match_team = data.get("team_name_best_match")
+
+                        # Update topic with corrected match number
+                        if channel.topic:
+                            try:
+                                updated_topic = re.sub(
+                                    r"bracket:[^|]*",
+                                    f"bracket:{resolved_num}",
+                                    channel.topic,
+                                )
+                                await channel.edit(topic=updated_topic)
+                            except Exception:
+                                pass
+
+                        # Rebuild embed with corrected data
+                        now_ts = int(discord.utils.utcnow().timestamp())
+                        embed = discord.Embed(
+                            title=f"📊 Live Match Update: Match #{resolved_num}",
+                            description=f"**Last Update:** <t:{now_ts}:R>",
+                            color=discord.Color.red()
+                            if is_mismatch
+                            else discord.Color.gold(),
+                        )
+                        embed.add_field(
+                            name="Match Status",
+                            value=f"`{data['match_status'].upper()}`",
+                            inline=True,
+                        )
+                        embed.add_field(name="\u200b", value="\u200b", inline=True)
+                        embed.add_field(name="\u200b", value="\u200b", inline=True)
+
+                        team_a, team_b = data["team_a"], data["team_b"]
+                        p_a = (
+                            "\n".join([f"• {p}" for p in team_a["players"]])
+                            or "• *No players*"
+                        )
+                        p_b = (
+                            "\n".join([f"• {p}" for p in team_b["players"]])
+                            or "• *No players*"
+                        )
+                        embed.add_field(
+                            name=f"🔵 {team_a['name']} ({team_a['score']})",
+                            value=f"**Roster:**\n{p_a}",
+                            inline=True,
+                        )
+                        embed.add_field(name="⚔️", value="\u200b", inline=True)
+                        embed.add_field(
+                            name=f"🔴 {team_b['name']} ({team_b['score']})",
+                            value=f"**Roster:**\n{p_b}",
+                            inline=True,
+                        )
+
             if is_mismatch:
                 warning_text = "The team name in this ticket does not closely match either team in the bracket for this match."
                 if topic_team_name:
@@ -1474,6 +1579,7 @@ def setup_tourney_commands(bot: commands.Bot):
 
             # 4. Close Session in DB
             await end_tourney_session(session["_id"])
+            clear_bracket_teams_cache()
         # ------------------------------
 
         await unlock_command(ctx)

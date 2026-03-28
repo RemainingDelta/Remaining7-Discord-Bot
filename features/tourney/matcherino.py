@@ -23,6 +23,15 @@ session.headers.update(HEADERS)
 # Fuzzy match: ratio >= this → accept (minor typos). Below → team name mismatch warning.
 TEAM_NAME_SIMILARITY_THRESHOLD = 0.60
 
+# Per-tourney cache of bracket team names (teams don't change mid-tourney).
+# Keyed by bounty_id → list of {"name": str, "entrant_id": int}.
+_bracket_teams_cache: dict[str, list[dict]] = {}
+
+
+def clear_bracket_teams_cache():
+    """Clear cached team lists. Call when a tourney session ends."""
+    _bracket_teams_cache.clear()
+
 
 def _normalize_for_compare(s: str) -> str:
     """Normalize string for similarity: strip, lower, collapse whitespace."""
@@ -74,6 +83,129 @@ def _team_name_matches(
 
     matches = best_ratio >= TEAM_NAME_SIMILARITY_THRESHOLD
     return matches, best_ratio, best_name
+
+
+def find_match_by_team_name(url: str, topic_team_name: str) -> dict:
+    """
+    Fallback when no valid match number is provided: fuzzy-match the team
+    name against all bracket entrants, then locate their current match.
+
+    Returns dict with:
+      - status: "found" | "no_match"  (or "error" key on failure)
+      - match_number: visual match number (if found)
+      - matched_team: bracket team name (if found)
+      - ratio: similarity ratio (if found)
+    """
+    id_match = re.search(r"tournaments/(\d+)", url)
+    if not id_match:
+        return {"error": "Invalid Matcherino URL."}
+
+    topic_n = _normalize_for_compare(topic_team_name)
+    if not topic_n:
+        return {"error": "No team name provided for lookup."}
+
+    bounty_id = id_match.group(1)
+    api_url = f"https://api.matcherino.com/__api/brackets?bountyId={bounty_id}&id=0&isAdmin=false"
+
+    try:
+        response = session.get(api_url, timeout=10)
+        if response.status_code != 200:
+            return {"error": f"Failed to fetch API. Status: {response.status_code}"}
+        data = response.json()
+    except requests.exceptions.RequestException as e:
+        return {"error": f"Matcherino connection failed: {str(e)}"}
+    except Exception as e:
+        return {"error": f"Parsing failed: {str(e)}"}
+
+    try:
+        bracket_data = data["body"][0]
+        raw_matches = bracket_data.get("matches", [])
+        raw_entrants = bracket_data.get("entrants", [])
+
+        if not raw_matches:
+            return {"error": "Bracket is empty."}
+
+        # Build entrant map (id → name)
+        entrant_map: dict[int, str] = {}
+        for e in raw_entrants:
+            e_id = e.get("id")
+            name = (
+                e.get("name")
+                or (e.get("team") and e["team"].get("name"))
+                or "Unknown Team"
+            )
+            entrant_map[e_id] = name
+
+        # Cache team list per tournament (teams don't change mid-tourney)
+        if bounty_id not in _bracket_teams_cache:
+            _bracket_teams_cache[bounty_id] = [
+                {"name": name, "entrant_id": eid}
+                for eid, name in entrant_map.items()
+                if eid > 1 and name.upper() not in ("TBD", "BYE", "UNKNOWN TEAM")
+            ]
+
+        # Fuzzy match against cached teams
+        best_ratio = 0.0
+        best_team_name: str | None = None
+        best_entrant_id: int | None = None
+        for team in _bracket_teams_cache[bounty_id]:
+            team_n = _normalize_for_compare(team["name"])
+            ratio = difflib.SequenceMatcher(None, topic_n, team_n).ratio()
+            if ratio > best_ratio:
+                best_ratio = ratio
+                best_team_name = team["name"]
+                best_entrant_id = team["entrant_id"]
+
+        if best_ratio < TEAM_NAME_SIMILARITY_THRESHOLD:
+            return {
+                "status": "no_match",
+                "best_ratio": best_ratio,
+                "best_team": best_team_name,
+            }
+
+        # Team found — locate their current visual match number
+        visible_matches = []
+        for m in raw_matches:
+            e_a = m.get("entrantA", {}).get("entrantId", 0)
+            e_b = m.get("entrantB", {}).get("entrantId", 0)
+            if e_a != 1 and e_b != 1:
+                visible_matches.append(m)
+
+        visible_matches.sort(key=lambda x: x.get("matchNum", 9999))
+
+        # Collect all matches this team participates in
+        team_matches: list[tuple[int, dict]] = []
+        for i, m in enumerate(visible_matches, start=1):
+            e_a = m.get("entrantA", {}).get("entrantId", 0)
+            e_b = m.get("entrantB", {}).get("entrantId", 0)
+            if best_entrant_id in (e_a, e_b):
+                team_matches.append((i, m))
+
+        if not team_matches:
+            return {
+                "status": "no_match",
+                "best_ratio": best_ratio,
+                "best_team": best_team_name,
+            }
+
+        # Prefer the latest non-closed match; fall back to last match overall
+        finished = ("closed", "completed", "complete", "done")
+        latest_active = None
+        for visual_num, m in team_matches:
+            if str(m.get("status", "")).lower() not in finished:
+                latest_active = (visual_num, m)
+
+        resolved_visual_num = latest_active[0] if latest_active else team_matches[-1][0]
+
+        return {
+            "status": "found",
+            "match_number": resolved_visual_num,
+            "matched_team": best_team_name,
+            "ratio": best_ratio,
+        }
+
+    except Exception as e:
+        return {"error": f"An unexpected error occurred: {e}"}
 
 
 def fetch_ticket_context(
