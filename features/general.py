@@ -1,6 +1,8 @@
 import discord
 from discord import app_commands
 from discord.ext import commands
+from datetime import datetime
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from features.config import ADMIN_ROLE_ID, MODERATOR_ROLE_ID, BOT_VERSION
 
@@ -162,6 +164,96 @@ class General(commands.Cog):
 
         # Ephemeral = True ensures only the Admin sees this menu
         await interaction.response.send_message(embed=embed, ephemeral=True)
+
+    TIMEZONE_ALIASES: dict[str, str] = {
+        "ET": "America/New_York",
+        "EST": "America/New_York",
+        "EDT": "America/New_York",
+        "CT": "America/Chicago",
+        "CST": "America/Chicago",
+        "CDT": "America/Chicago",
+        "MT": "America/Denver",
+        "MST": "America/Denver",
+        "MDT": "America/Denver",
+        "PT": "America/Los_Angeles",
+        "PST": "America/Los_Angeles",
+        "PDT": "America/Los_Angeles",
+        "GMT": "Europe/London",
+        "BST": "Europe/London",
+        "UTC": "UTC",
+        "CET": "Europe/Berlin",
+        "CEST": "Europe/Berlin",
+        "IST": "Asia/Kolkata",
+        "JST": "Asia/Tokyo",
+        "AEST": "Australia/Sydney",
+        "AEDT": "Australia/Sydney",
+        "BRT": "America/Sao_Paulo",
+    }
+
+    @app_commands.command(
+        name="convert-time",
+        description="Convert a date and time to all Discord timestamp formats.",
+    )
+    @app_commands.describe(
+        date="Date in YYYY-MM-DD format (e.g. 2026-03-27)",
+        time="Time in H:MM AM/PM format (e.g. 8:13 PM)",
+        timezone="Timezone abbreviation (e.g. EST, PT) or IANA name (e.g. America/New_York)",
+    )
+    async def convert_time(
+        self,
+        interaction: discord.Interaction,
+        date: str,
+        time: str,
+        timezone: str,
+    ):
+        tz_key = self.TIMEZONE_ALIASES.get(timezone.upper(), timezone)
+        try:
+            tz = ZoneInfo(tz_key)
+        except (ZoneInfoNotFoundError, KeyError):
+            await interaction.response.send_message(
+                f"❌ Invalid timezone: `{timezone}`. Use an abbreviation like `EST`, `PT`, `GMT` or an IANA timezone like `America/New_York`.",
+                ephemeral=True,
+            )
+            return
+
+        try:
+            dt = datetime.strptime(f"{date} {time}", "%Y-%m-%d %I:%M %p")
+        except ValueError:
+            await interaction.response.send_message(
+                "❌ Invalid date or time. Use `YYYY-MM-DD` for date and `H:MM AM/PM` for time (e.g. `2026-03-27` and `8:13 PM`).",
+                ephemeral=True,
+            )
+            return
+
+        dt = dt.replace(tzinfo=tz)
+        unix = int(dt.timestamp())
+
+        formats = [
+            ("F", "Full Date & Time"),
+            ("f", "Short Date & Time"),
+            ("D", "Full Date"),
+            ("d", "Short Date"),
+            ("T", "Full Time"),
+            ("t", "Short Time"),
+            ("R", "Relative"),
+        ]
+
+        lines = []
+        for fmt, label in formats:
+            raw = f"<t:{unix}:{fmt}>"
+            lines.append(f"**{label}**\n`{raw}` → {raw}")
+
+        embed = discord.Embed(
+            title="Discord Timestamps",
+            description="\n\n".join(lines),
+            color=discord.Color.blurple(),
+        )
+        footer = f"Unix: {unix} | {tz_key}"
+        if timezone.upper() != tz_key:
+            footer += f" (from {timezone.upper()})"
+        embed.set_footer(text=footer)
+
+        await interaction.response.send_message(embed=embed)
 
 
 async def setup(bot):
