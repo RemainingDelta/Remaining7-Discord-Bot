@@ -3,7 +3,7 @@ from dotenv import load_dotenv
 
 
 load_dotenv()
-BOT_VERSION = "v1.7.5"
+BOT_VERSION = "v1.8.0"
 MODE = os.getenv("BOT_MODE", "DEV").upper()
 
 if MODE == "PROD":
