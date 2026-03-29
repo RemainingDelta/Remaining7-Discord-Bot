@@ -2,6 +2,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands, tasks
 import asyncio
+import functools
 import re
 import datetime
 from .matcherino import (
@@ -735,7 +736,10 @@ class QueueDashboard(commands.Cog):
             if match_num is None:
                 if not topic_team_name:
                     continue
-                lookup = find_match_by_team_name(bracket_url, topic_team_name)
+                loop = asyncio.get_event_loop()
+                lookup = await loop.run_in_executor(
+                    None, find_match_by_team_name, bracket_url, topic_team_name
+                )
                 if lookup.get("status") != "found":
                     continue
                 match_num = lookup["match_number"]
@@ -751,17 +755,32 @@ class QueueDashboard(commands.Cog):
                     pass
 
             # 4. Fetch Fresh Match Data (with topic team for fuzzy mismatch check)
-            data = fetch_ticket_context(
-                bracket_url, match_num, topic_team_name=topic_team_name
+            loop = asyncio.get_event_loop()
+            data = await loop.run_in_executor(
+                None,
+                functools.partial(
+                    fetch_ticket_context,
+                    bracket_url,
+                    match_num,
+                    topic_team_name=topic_team_name,
+                ),
             )
             if data.get("status") != "success":
                 # Match number not in bracket — try team name fallback
                 if topic_team_name:
-                    lookup = find_match_by_team_name(bracket_url, topic_team_name)
+                    lookup = await loop.run_in_executor(
+                        None, find_match_by_team_name, bracket_url, topic_team_name
+                    )
                     if lookup.get("status") == "found":
                         match_num = lookup["match_number"]
-                        data = fetch_ticket_context(
-                            bracket_url, match_num, topic_team_name=topic_team_name
+                        data = await loop.run_in_executor(
+                            None,
+                            functools.partial(
+                                fetch_ticket_context,
+                                bracket_url,
+                                match_num,
+                                topic_team_name=topic_team_name,
+                            ),
                         )
                         if data.get("status") == "success":
                             # Persist corrected match number in topic
