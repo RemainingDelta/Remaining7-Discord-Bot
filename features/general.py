@@ -14,12 +14,11 @@ class General(commands.Cog):
     @app_commands.command(name="help", description="View all available bot commands.")
     async def help_command(self, interaction: discord.Interaction):
         embed = discord.Embed(
-            # 2. Add it right to the title!
             title=f"🤖 **R7 Bot Command Directory | {BOT_VERSION}**",
             description=(
                 "Here is a list of all the commands you can use in the server!\n\n"
                 "💡 **Want to know how to get tokens?**\n"
-                "Use `/economy_help` for a full guide on earning and spending."
+                "Use `/economy-help` for a full guide on earning and spending."
             ),
             color=discord.Color.blurple(),
         )
@@ -30,20 +29,20 @@ class General(commands.Cog):
             "`/quests` - View active daily and weekly quests\n"
             "`/leaderboard` - See top token holders\n"
             "`/level` - Check your rank & XP progress\n"
-            "`/levels_leaderboard` - See top server levels\n"
+            "`/levels-leaderboard` - See top server levels\n"
             "`/shop` - Browse the token store\n"
             "`/buy` - Purchase an item from the shop\n"
             "`/redeem` - Claim your purchased rewards\n"
-            "`/checkbudget` - See remaining monthly reward budget"
+            "`/check-budget` - See remaining monthly reward budget"
         )
         embed.add_field(name="💰 Economy", value=economy_text, inline=False)
 
         brawler_text = (
             "`/profile` - View your profile, collection progress, and currencies\n"
             "`/brawlers` - View your owned brawlers and their levels\n"
-            "`/buy_brawler` - Purchase new brawlers using Credits\n"
+            "`/buy-brawler` - Purchase new brawlers using Credits\n"
             "`/upgrade` - Level up your brawlers\n"
-            "`/buy_ability` - Buy Gadgets, Star Powers, and Hypercharges\n"
+            "`/buy-ability` - Buy Gadgets, Star Powers, and Hypercharges\n"
             "`/megabox` - Open a Mega Box\n"
             "`/starrdrop` - Open a random Starr Drop"
         )
@@ -62,6 +61,11 @@ class General(commands.Cog):
             "`/translate` - Translate your English text into 55 other languages"
         )
         embed.add_field(name="🌐 Translation", value=translation_text, inline=False)
+
+        utility_text = (
+            "`/convert-time` - Convert a date and time to Discord timestamp formats"
+        )
+        embed.add_field(name="🔧 Utility", value=utility_text, inline=False)
 
         embed.set_footer(text="Staff & Admin commands are hidden from this list.")
         embed.set_thumbnail(url=self.bot.user.display_avatar.url)

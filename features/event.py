@@ -433,6 +433,13 @@ class Events(commands.Cog):
         )
         embed.add_field(name="🧹 Manual Purge Commands", value=mgmt_text, inline=False)
 
+        # --- Reward Distribution ---
+        reward_text = (
+            "`/event-rewards <message_id>` - Process token distribution from an announcement message.\n"
+            "*(Message must use `@User 500` format. Admin only.)*"
+        )
+        embed.add_field(name="🏆 Reward Distribution", value=reward_text, inline=False)
+
         # --- Automated Cleanup ---
         cleanup_text = (
             "Every day at **12:00 AM ET**, the bot checks for messages older than **7 days**.\n"

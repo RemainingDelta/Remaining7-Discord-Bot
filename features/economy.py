@@ -1350,14 +1350,15 @@ class Economy(commands.Cog):
             "**Standard Commands:**\n"
             "`/balance` - View your token total\n"
             "`/daily` - Claim daily tokens & check progress\n"
+            "`/quests` - View active daily and weekly quests\n"
             "`/leaderboard` - See top token holders\n"
             "`/level` - Check your rank & XP progress\n"
-            "`/levels_leaderboard` - See top server levels\n"
+            "`/levels-leaderboard` - See top server levels\n"
             "`/shop` - Browse the token store\n"
             "`/buy` - Purchase an item from the shop\n"
             "`/redeem` - Claim your purchased rewards\n\n"
             "**Utility:**\n"
-            "`/checkbudget` - See remaining monthly reward budget"
+            "`/check-budget` - See remaining monthly reward budget"
         )
         cmd_embed.description = cmd_text
 
