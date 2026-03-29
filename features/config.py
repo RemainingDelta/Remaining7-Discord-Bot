@@ -1,18 +1,17 @@
 import os
-import random
 from dotenv import load_dotenv
 
 
 load_dotenv()
-BOT_VERSION = "v1.7.5"
-MODE = os.getenv('BOT_MODE', 'TEST').upper()
+BOT_VERSION = "v1.8.0"
+MODE = os.getenv("BOT_MODE", "DEV").upper()
 
-if MODE == "REAL":
-    TOURNEY_CATEGORY_ID = 1442023447252176916   
+if MODE == "PROD":
+    TOURNEY_CATEGORY_ID = 1442023447252176916
     PRE_TOURNEY_CATEGORY_ID = 1448869532046200992
-    TOURNEY_CLOSED_CATEGORY_ID = 1449608630402945055      
+    TOURNEY_CLOSED_CATEGORY_ID = 1449608630402945055
     PRE_TOURNEY_CLOSED_CATEGORY_ID = 1449608576858456134
-    
+
     TOURNEY_SUPPORT_CHANNEL_ID = 1442037795987259464
     PRE_TOURNEY_SUPPORT_CHANNEL_ID = 1448917516071207133
     TOURNEY_ADMIN_CHANNEL_ID = 724835692395626516
@@ -57,27 +56,27 @@ if MODE == "REAL":
     BOT_COMMANDS_CHANNEL_ID = 546405233736155151
 
     EMOJIS_CURRENCY = {
-        "coins": "<:bs_coin:1454305320015888516>",        
+        "coins": "<:bs_coin:1454305320015888516>",
         "power_points": "<:bs_power_point:1454305322263908486>",
         "credits": "<:bs_credit:1454305320838103186>",
-        "brawler": "🥊"
+        "brawler": "🥊",
     }
-    
+
     EMOJIS_RARITIES = {
         "rare": "<:bs_rare:1454351705150984274>",
         "super_rare": "<:bs_super_rare:1454351706707202049>",
         "epic": "<:bs_epic:1454351713623474239>",
         "mythic": "<:bs_mythic:1454351715053863024>",
         "legendary": "<:bs_legendary:1454351704240685117>",
-        "ultra_legendary": "<:bs_ultra_legendary:1454351716446371880>"
+        "ultra_legendary": "<:bs_ultra_legendary:1454351716446371880>",
     }
-    
+
     EMOJIS_DROPS = {
         "starr_drop": "<:starr_drop:1454358502431785074>",
         "mega_box": "<:mega_box:1454358500271591556>",
     }
-    
-    EMOJIS_BRAWLERS = { 
+
+    EMOJIS_BRAWLERS = {
         "glowbert": "<:brawler_glowbert:1469950807267868683>",
         "pierce": "<:brawler_pierce:1454345574890606744>",
         "gigi": "<:brawler_gigi:1454345573707677746>",
@@ -176,25 +175,25 @@ if MODE == "REAL":
         "bonnie": "<:brawler_bonnie:1454345454329528565>",
         "penny": "<:brawler_penny:1454345453175836742>",
         "gus": "<:brawler_gus:1454345452161077248>",
-        "sam": "<:brawler_sam:1454345450646798487>"
+        "sam": "<:brawler_sam:1454345450646798487>",
     }
-    
+
     EMOJI_GADGET_DEFAULT = "<:gadget_default:1454928295970738237>"
     EMOJI_STARPOWER_DEFAULT = "<:starpower_default:1454928295035670713>"
     EMOJI_HYPERCHARGE_DEFAULT = "<:hypercharge_default:1455686351466004694>"
-    
+
 else:
-    TOURNEY_CATEGORY_ID = 1442029102185054290    
+    TOURNEY_CATEGORY_ID = 1442029102185054290
     PRE_TOURNEY_CATEGORY_ID = 1448871112598618203
-    TOURNEY_CLOSED_CATEGORY_ID = 1449594168006414398   
-    PRE_TOURNEY_CLOSED_CATEGORY_ID = 1449594321031401544 
+    TOURNEY_CLOSED_CATEGORY_ID = 1449594168006414398
+    PRE_TOURNEY_CLOSED_CATEGORY_ID = 1449594321031401544
 
     TOURNEY_SUPPORT_CHANNEL_ID = 1448916985713791000
     PRE_TOURNEY_SUPPORT_CHANNEL_ID = 1448917121743716485
     TOURNEY_ADMIN_CHANNEL_ID = 1452338842798526514
     SPANISH_CHANNEL_ID = 1477148473710084127
 
-    TOURNEY_ADMIN_ROLE_ID = 1442028161889079469   
+    TOURNEY_ADMIN_ROLE_ID = 1442028161889079469
     FOUNDER_ROLE_ID = 1442028361810444379
     ADMIN_ROLE_ID = 1442028239009615925
     MODERATOR_ROLE_ID = 528976783173877771
@@ -210,7 +209,7 @@ else:
     REDEMPTION_TICKET_CATEGORY_ID = 1481455542236086293
     SUPPORT_TRANSCRIPT_LOG_CHANNEL_ID = 1480735066924781711
     SUPPORT_STAFF_APPS_INFO_CHANNEL_ID = 1481083131342618754
-    
+
     LOG_CHANNEL_ID = 1442227896302174298
     HALL_OF_FAME_CHANNEL_ID = 1442663794903089325
     GENERAL_CHANNEL_ID = 528717317526388758
@@ -233,27 +232,27 @@ else:
     BOT_COMMANDS_CHANNEL_ID = 1484768347756167228
 
     EMOJIS_CURRENCY = {
-        "coins": "<:bs_coin:1454290949780934678>",        
+        "coins": "<:bs_coin:1454290949780934678>",
         "power_points": "<:bs_power_point:1454291060183400489>",
         "credits": "<:bs_credit:1454291577190224060>",
-        "brawler": "🥊"
+        "brawler": "🥊",
     }
-    
+
     EMOJIS_RARITIES = {
         "rare": "<:bs_rare:1454353264958247043>",
         "super_rare": "<:bs_super_rare:1454353266241700070>",
         "epic": "<:bs_epic:1454353267155927052>",
         "mythic": "<:bs_mythic:1454353275771027476>",
         "legendary": "<:bs_legendary:1454353263666266152>",
-        "ultra_legendary": "<:bs_ultra_legendary:1454353260956745920>"
+        "ultra_legendary": "<:bs_ultra_legendary:1454353260956745920>",
     }
-    
+
     EMOJIS_DROPS = {
         "starr_drop": "<:starr_drop:1454357223106023467>",
         "mega_box": "<:mega_box:1454356750797901896>",
     }
-    
-    EMOJIS_BRAWLERS = { 
+
+    EMOJIS_BRAWLERS = {
         "glowbert": "<:brawler_glowbert:1469949063175737364>",
         "pierce": "<:brawler_pierce:1454328096206487572>",
         "gigi": "<:brawler_gigi:1454328095413895168>",
@@ -352,9 +351,9 @@ else:
         "bonnie": "<:brawler_bonnie:1454327984071774301>",
         "penny": "<:brawler_penny:1454327983019135129>",
         "gus": "<:brawler_gus:1454327981685080178>",
-        "sam": "<:brawler_sam:1454327979894247566>"
+        "sam": "<:brawler_sam:1454327979894247566>",
     }
-    
+
     EMOJI_GADGET_DEFAULT = "<:gadget_default:1454928324945121523>"
     EMOJI_STARPOWER_DEFAULT = "<:starpower_default:1454928324248993952>"
     EMOJI_HYPERCHARGE_DEFAULT = "<:hypercharge_default:1455686652017115196>"
@@ -371,61 +370,73 @@ SHOP_DATA = {
     "brawl pass": {
         "display": "🎮 **Brawl Pass**",
         "desc": "Unlock exclusive rewards in Brawl Stars!",
-        "price": 15300
+        "price": 15300,
     },
     "brawl pass+": {
         "display": "💎 **Brawl Pass+**",
         "desc": "Unlock even more exclusive rewards in Brawl Stars!",
-        "price": 22100
+        "price": 22100,
     },
     "coc gold pass": {
         "display": "🛡️ **Clash of Clans Gold Pass**",
         "desc": "Unlock the Gold Pass for the current season!",
-        "price": 11900  
+        "price": 11900,
     },
     "cr diamond pass": {
         "display": "💠 **Clash Royale Diamond Pass**",
         "desc": "Unlock the Diamond Pass for exclusive perks!",
-        "price": 20400  
+        "price": 20400,
     },
     "nitro": {
         "display": "🤖 **Discord Nitro**",
         "desc": "Get Discord Nitro for 1 month!",
-        "price": 17000
+        "price": 17000,
     },
     "paypal": {
         "display": "💵 **15 USD PayPal**",
         "desc": "Redeem 15 USD via PayPal!",
-        "price": 25500
+        "price": 25500,
     },
     "shoutout": {
         "display": "📣 **Shoutout**",
         "desc": "Get a personal shoutout in announcements!",
-        "price": 12000
-    }
+        "price": 12000,
+    },
 }
 
 MEGA_BOX_LOOT = [
     {"type": "coins", "amount": 50, "weight": 45.00},
     {"type": "power_points", "amount": 25, "weight": 45.00},
     {"type": "credits", "amount": 5, "weight": 10.00},
-    
-    {"type": "gadget", "weight": 0.20},  
+    {"type": "gadget", "weight": 0.20},
     {"type": "star_power", "weight": 0.10},
     {"type": "hypercharge", "weight": 0.02},
-
     {"type": "credits", "amount": 30, "weight": 0.50},
     {"type": "coins", "amount": 500, "weight": 0.25},
     {"type": "coins", "amount": 1000, "weight": 0.05},
     {"type": "power_points", "amount": 500, "weight": 0.25},
     {"type": "power_points", "amount": 1000, "weight": 0.05},
-
     {"type": "brawler", "rarity": "rare", "fallback_credits": 100, "weight": 0.50},
-    {"type": "brawler", "rarity": "super_rare", "fallback_credits": 200, "weight": 0.25},
+    {
+        "type": "brawler",
+        "rarity": "super_rare",
+        "fallback_credits": 200,
+        "weight": 0.25,
+    },
     {"type": "brawler", "rarity": "epic", "fallback_credits": 500, "weight": 0.15},
     {"type": "brawler", "rarity": "mythic", "fallback_credits": 1000, "weight": 0.08},
-    {"type": "brawler", "rarity": "legendary", "fallback_credits": 2000, "weight": 0.02},
-    {"type": "brawler", "rarity": "ultra legendary", "fallback_credits": 3000, "weight": 0.01}, 
+    {
+        "type": "brawler",
+        "rarity": "legendary",
+        "fallback_credits": 2000,
+        "weight": 0.02,
+    },
+    {
+        "type": "brawler",
+        "rarity": "ultra legendary",
+        "fallback_credits": 3000,
+        "weight": 0.01,
+    },
 ]
 # 2. STARR DROP RARITY CHANCES
 STARR_DROP_RARITIES = {
@@ -433,11 +444,11 @@ STARR_DROP_RARITIES = {
     "Super Rare": 28,
     "Epic": 15,
     "Mythic": 5,
-    "Legendary": 2
+    "Legendary": 2,
 }
 
 # 3. STARR DROP REWARDS (Per Rarity)
-# Cosmetics/XP Doublers removed. 
+# Cosmetics/XP Doublers removed.
 # Weights based on your image/text but normalized for "Useful" items only.
 
 STARR_DROP_LOOT = {
@@ -456,22 +467,32 @@ STARR_DROP_LOOT = {
         {"type": "power_points", "amount": 100, "weight": 21.0},
         {"type": "credits", "amount": 150, "weight": 5.3},
         # Assuming "Random Brawler" slots here or Fallback Coins for Gadgets
-        {"type": "coins", "amount": 500, "weight": 15.8}, # Gadget Fallback
+        {"type": "coins", "amount": 500, "weight": 15.8},  # Gadget Fallback
     ],
     "Mythic": [
-        {"type": "gadget", "weight": 15.82}, # Added direct Gadget roll
+        {"type": "gadget", "weight": 15.82},  # Added direct Gadget roll
         {"type": "coins", "amount": 500, "weight": 9.49},
         {"type": "power_points", "amount": 200, "weight": 18.99},
         {"type": "credits", "amount": 500, "weight": 6.33},
-        {"type": "brawler", "rarity": "mythic", "fallback_credits": 1000, "weight": 2.53},
+        {
+            "type": "brawler",
+            "rarity": "mythic",
+            "fallback_credits": 1000,
+            "weight": 2.53,
+        },
     ],
     "Legendary": [
         {"type": "hypercharge", "weight": 16.3},
-        {"type": "star_power", "weight": 38.04}, 
-        {"type": "brawler", "rarity": "legendary", "fallback_credits": 2000, "weight": 2.17}, 
-        {"type": "brawler", "rarity": "epic", "fallback_credits": 500, "weight": 8.86}, 
+        {"type": "star_power", "weight": 38.04},
+        {
+            "type": "brawler",
+            "rarity": "legendary",
+            "fallback_credits": 2000,
+            "weight": 2.17,
+        },
+        {"type": "brawler", "rarity": "epic", "fallback_credits": 500, "weight": 8.86},
         {"type": "credits", "amount": 1000, "weight": 2.17},
-    ]
+    ],
 }
 
 BRAWLER_PRICES = {
@@ -480,20 +501,20 @@ BRAWLER_PRICES = {
     "Epic": 925,
     "Mythic": 1900,
     "Legendary": 3800,
-    "Ultra Legendary": 5500
+    "Ultra Legendary": 5500,
 }
 
 BRAWLER_UPGRADE_COSTS = {
-    2:  {"pp": 20,   "coins": 20},
-    3:  {"pp": 30,   "coins": 35},
-    4:  {"pp": 50,   "coins": 75},
-    5:  {"pp": 80,   "coins": 140},
-    6:  {"pp": 130,  "coins": 290},
-    7:  {"pp": 210,  "coins": 480},
-    8:  {"pp": 340,  "coins": 800},
-    9:  {"pp": 550,  "coins": 1250},
-    10: {"pp": 890,  "coins": 1875},
-    11: {"pp": 1440, "coins": 2800}
+    2: {"pp": 20, "coins": 20},
+    3: {"pp": 30, "coins": 35},
+    4: {"pp": 50, "coins": 75},
+    5: {"pp": 80, "coins": 140},
+    6: {"pp": 130, "coins": 290},
+    7: {"pp": 210, "coins": 480},
+    8: {"pp": 340, "coins": 800},
+    9: {"pp": 550, "coins": 1250},
+    10: {"pp": 890, "coins": 1875},
+    11: {"pp": 1440, "coins": 2800},
 }
 
 TOURNEY_TEST_MODE = False

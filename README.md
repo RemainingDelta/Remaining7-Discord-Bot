@@ -1,117 +1,195 @@
-# Project Blueprint: Remaining7 Discord Bot
+# Remaining7 Discord Bot
 
-## Overview 
-**Name:** Remaining7 Discord Bot      
-**Contributors:** nightwarrior5, remainingdelta    
-**Objective:** To provide comprehensive economy, moderation, leveling, and event management features for the Remaining7 community Discord server, supporting over 15k members. The bot centralizes server engagement by offering an R7 token system, automatic rewards, a redemption shop with real-world item tracking, tools for competitive tournament management, and an interactive Brawl Stars collection minigame.    
+## Overview
+**Name:** Remaining7 Discord Bot
+**Version:** v1.7.5
+**Contributors:** remainingdelta, nightwarrior5
+**Objective:** A feature-rich Discord bot for the Remaining7 community server (16k+ members). Handles an R7 Token economy, leveling, quests, a Brawl Stars collection minigame, tournament management with Matcherino integration, support tickets, event operations, a security protocol, and multi-language translation.
 **Server Link:** https://discord.gg/6MzrjS2X8k
 
 ---
 
-## Goals 🎯
-- Implement a persistent R7 Token Economy with MongoDB storage.
-- Provide a token shop (`/shop`) where users can exchange tokens for real-world items (Brawl Pass, Nitro, PayPal) while respecting a monthly spending cap.
-- Automatically track and reset the monthly budget for redemptions to prevent overspending.
-- Include a Leveling System based on user activity (XP/Levels) and provide level-based bonuses.
-- Introduce an Automatic Supply Drop system to encourage server activity and token distribution.
-- Streamline Tournament & Ticketing Operations by providing specific commands for match reporting and bracket management.
-- Automate maintenance of event channels (`#red-event`, `#blue-event`, `#green-event`) to ensure messages are cleared before they exceed the 14-day bulk-delete limit.
-- Implement a rapid-response security protocol to instantly isolate compromised accounts and purge malicious content from all server channels.
----
-
-## Tech Stack 
-
-### Backend / Bot Core
-- **Framework:** `discord.py` 
-- **Database:** MongoDB 
-
+## Tech Stack
+- **Language:** Python 3.10+
+- **Framework:** `discord.py` (slash commands + prefix commands)
+- **Database:** MongoDB Atlas via `motor` (async)
+- **Translation:** `deep-translator` + `langdetect`
+- **External API:** Matcherino (tournament brackets, payouts)
+- **Linting:** Ruff (`ruff check .` / `ruff format .`)
 
 ---
 
-## Core Functionalities 
+## Project Structure
+```
+Remaining7-Discord-Bot/
+├── main.py                          # Entry point — loads cogs, syncs commands
+├── requirements.txt
+├── .env.example
+├── .gitignore
+├── CLAUDE.md
+├── README.md
+├── database/
+│   └── mongo.py                     # All MongoDB helper functions
+├── features/
+│   ├── config.py                    # IDs, shop data, loot tables, emojis (REAL/TEST branches)
+│   ├── economy.py                   # R7 Tokens, shop, daily, leveling, leaderboards
+│   ├── quests.py                    # Daily & weekly quest system
+│   ├── security.py                  # Hacked protocol (timeout, purge, flag)
+│   ├── event.py                     # Event channel cleanup & reward payouts
+│   ├── general.py                   # /help, /mod-help, /admin-help, /convert-time
+│   ├── translation.py               # !t prefix & /translate slash command (55 languages)
+│   ├── support_tickets.py           # General support tickets (issues, support, apps, partnership)
+│   ├── ticket_command_router.py     # Shared routing for tourney & support ticket commands
+│   ├── brawl/
+│   │   ├── brawlers.json            # Brawler data (name, rarity, gadgets, star powers, hypercharges)
+│   │   ├── brawlers.py              # Brawler dataclass definitions
+│   │   ├── commands.py              # /megabox, /starrdrop, /profile, /upgrade, etc.
+│   │   └── drops.py                 # Weighted RNG drop logic
+│   └── tourney/
+│       ├── tourney_commands.py      # All tournament slash & prefix commands
+│       ├── tourney_utils.py         # Ticket lifecycle helpers, auto-translation
+│       ├── tourney_views.py         # discord.ui.View classes for ticket buttons
+│       └── matcherino.py            # Matcherino API integration
+└── .github/
+    ├── ISSUE_TEMPLATE/
+    │   ├── bug.md
+    │   ├── enhancement.md
+    │   └── feature.md
+    └── workflows/
+        └── lint.yml                 # Ruff linting CI
+```
+
+---
+
+## Core Features
 
 ### R7 Token Economy
-- **Token Management:** `/balance`, `/give` (Admin), `/setbalance` (Admin).
-- **Passive Income:** Users automatically earn **2-5 R7 Tokens** for active chatting (1-minute cooldown).
-- **Daily Rewards:** `/daily` command with Level-based bonus multiplier.
-- **Supply Drop:** `/drop` (Admin) timed automatic drops (on average every 6 hours with random delay).
-
-### Quest System
-- **Daily & Weekly Challenges:** Automated message-based quests (e.g., "Send 80 messages today", "Send 500 messages this week").
-- **Status Check:** `/quests` displays an interactive progress bar for current tasks.
-- **Automatic Rewards:** Completing quests instantly grants **R7 Tokens** and **XP** directly to the user's balance.
-- **Dynamic Assignment:** The system automatically assigns a random quest from the database if the user has none active.
+- **Passive Income:** Users earn 2–5 R7 Tokens per message (20-second cooldown). Server Boosters get a 2% average bonus.
+- **Daily Rewards:** `/daily` grants 80–160 tokens (scaled by level). Requires 5 messages sent since last claim and a 24-hour cooldown.
+- **Supply Drop:** `/drop <amount>` (Admin) to force a token drop in general chat.
+- **Balance & Ranking:** `/balance [user]`, `/leaderboard [page]`.
+- **Give & Set:** `/give <user> <token/xp/level> <amount>`, `/set-balance <user> <amount>` (Admin).
+- **Permissions:** `/perm <add/remove> <user>` to grant/revoke command access.
+- **Guide:** `/economy-help` for a full user-facing guide.
 
 ### Shop & Budget System
-- **Shop Display:** `/shop` (lists items, prices, and descriptions).
-- **Purchasing:** `/buy` with strict dropdown menu of valid items and price check.
-- **Redemption & Budget:** `/redeem` creates a staff ticket and increments a database counter.
-- **Monthly Cap:** Automatically checks and enforces a **\$50.00 monthly budget** reset at the start of every month.
-- **Budget Tracking:** `/checkbudget` shows spent vs. remaining budget based on item real-world dollar value.
+- **Browse:** `/shop` lists items with prices and descriptions.
+- **Purchase:** `/buy <item>` with dropdown selection and balance check.
+- **Redeem:** `/redeem <item>` to claim a purchased reward.
+- **Monthly Cap:** $50.00 monthly budget, auto-resets each calendar month.
+- **Budget Check:** `/check-budget` shows spent vs. remaining.
+- **Budget Override:** `/set-budget <amount>` (Admin).
 
-### Leveling & Leaderboards
-- **Leveling:** Tracks user XP and level progress.
-- **Progress Check:** `/level` shows individual progress bar and next level EXP goal.
-- **Token Ranking:** `/leaderboard` for tokens
-- **Level Ranking:** `/levels_leaderboard` for levels
+### Leveling & XP
+- XP earned passively from messages alongside tokens.
+- `/level [user]` — progress bar and next-level XP goal.
+- `/levels-leaderboard [page]` — server-wide level rankings (paginated).
 
-### Tournament & Ticketing
-- **Phase Management (`!starttourney`, `!endtourney`):** Tourney admin commands to switch the server between pre-tourney and main tourney phases. This includes resetting ticket counters, locking/reopening the general support channel, updating channel permissions, and automatically deleting old tickets.
-- **Live Queue Dashboard:** A real-time, auto-updating embed (every 15s) posted in the main support channel. It displays the **"Currently Serving"** ticket number and the total number of users **"In Line"**, complete with a relative "Last Updated" timestamp.
-- **Queue Status (`/queue`):** Allows users inside an active ticket to check their specific position in the line (e.g., "3/10") and see their wait status.
-- **Support Panels (`/tourney-panel`, `/pre-tourney-panel`):** Commands to post the interactive button panels for opening new tickets (for live match issues or pre-tourney questions).
-- **Ticket Control (`!close`, `!c`):** Tourney admin command to close an active ticket. Automatically identifies and deletes the oldest archived tickets if the closed category reaches the Discord 50-channel limit, ensuring new tickets can always be closed safely. 
-- **Ticket Deletion (`!delete`, `!del`):** A command-based backup to manually delete a ticket channel and save the transcript (useful if button interactions fail).
-- **Ticket Reopen (`!reopen`):** Reopens a closed ticket, moving it from the Closed category back to the Active category and restoring user permissions.
-- **Ticket Access (`/add`, `/remove`):** Tourney admin commands to manually add or remove a specific user to/from an active ticket channel.
-- **Support Channel Lock (`!lock`, `!reopen`):** Tourney admin commands to temporarily lock the general support channel from non-staff members, with an automatic timer to reopen after 6 hours.
-- **Blacklist Management (`/blacklist add`, `/blacklist remove`, `/blacklist list`):** Stores blacklisted user through their Discord id, along with their matcherino profile, reason for blacklist, and their alts. 
-- **Hall of Fame (`/hall-of-fame`):** Tourney admin to post structured, calculated results (prize money split: 50/25/15/10%) to the designated Hall of Fame channel.
+### Quest System
+- **Daily Quests:** 80 / 160 / 240 messages → 50–100 tokens + 200–300 XP.
+- **Weekly Quests:** 500 / 750 / 1000 messages → 250–600 tokens + 1000–3000 XP.
+- `/quests` — interactive progress bars for active quests.
+- Quests auto-assign randomly; completion rewards are granted instantly.
 
-### Tourney Admin Compensation System
-- **Payout Tracking:** `/payout-add` records debts to tourney admins using unique Batch IDs ("receipts"). Supports **Split** (divides amount evenly) or **Flat** (full amount each) modes with reason logging.
-- **Ledger Management:** `/payout-list` displays a live view of all outstanding tourney admin balances.
-- **Smart History:** `/payout-history` displays a log of multi-user payouts. It dynamically filters the view to show *only* users who have not yet been paid for that specific event (hides users who have been reset).
-- **Cash Out:** `/payout-reset` clears a staff member's balance and "shreds" their unpaid receipts, removing them from the pending history log.
+### Brawl Stars Collection Minigame
+- **Gacha Drops:**
+  - `/megabox` — open a Mega Box (coins, power points, brawlers, gadgets, star powers).
+  - `/starrdrop` — open a Starr Drop with tiered rarity (Rare → Ultra Legendary).
+- **Collection:**
+  - `/profile [user]` — currencies, collection progress, stats.
+  - `/brawlers` — paginated view of owned brawlers with levels.
+  - `/buy-brawler` — purchase unowned brawlers by rarity using Credits.
+- **Progression:**
+  - `/upgrade <brawler>` — interactive upgrade dashboard (Level 1–11).
+  - `/buy-ability <brawler>` — Gadgets (Lvl 7+), Star Powers (Lvl 9+), Hypercharges (Lvl 11+).
+- **Currencies:** Coins, Power Points, Credits, Gems (separate from R7 Tokens).
+- **Rarities:** Starting, Rare, Super Rare, Epic, Mythic, Legendary, Ultra Legendary, Chromatic.
+- New users auto-receive Shelly at Level 1. Duplicate brawlers convert to Power Points.
 
-### Event Maintenance
-- **Automated Monitoring**: A daily background task (12:00 AM ET) scans the three event channels (`#red-event`, `#blue-event`, `#green-event`).
-- **Smart Alerts**: If the oldest message in a channel is 7 days or older, an alert is sent to `#event-staff` containing a "Purge" button. This prevents messages from exceeding Discord's 14-day limit for bulk deletion.
-- **Manual Cleanup**: `/clear-red`, `/clear-blue`, `/clear-green` allow Event Staff to manually wipe channels instantly.
-- **Payout Automation**: `/event-rewards` (Admin Only) parses announcement messages (Format: `@User [Amount]`) to batch-distribute tokens. It includes a confirmation preview and prevents duplicate payouts.
-- **Safety Checks**: These commands are restricted to the `#event-staff` channel and require the Event Staff or Admin role.
+### Tournament System
+- **Phase Management:**
+  - `!starttourney [region]` — start live tournament, reset counters, init queue dashboard. Use `!starttourney SA` for South America mode.
+  - `!endtourney` — end tournament, clean up dashboards and tickets.
+- **Ticket Panels:** `/tourney-panel` (live) and `/pre-tourney-panel` (pre-tourney) post interactive open buttons.
+- **Ticket Operations:**
+  - `!close` / `!c` — close a ticket.
+  - `!lock` / `!unlock` — lock/unlock a ticket channel.
+  - `!delete` / `!del` — delete ticket with transcript.
+  - `!reopen` — reopen a closed ticket.
+  - `/add <user>` / `/remove <user>` — manage ticket access.
+- **Queue:** `/queue` — check your position in line (inside a tourney ticket only).
+- **Queue Dashboard:** Auto-updating embed every 15 seconds showing currently serving and queue length.
+- **Matcherino Integration:**
+  - `/set-matcherino <id>` — link active Matcherino bracket.
+  - `/match-info <match_id>` — display roster for a specific match.
+  - `/match-history <team>` — view match history.
+  - `/set-ticket-match <team1> <team2>` — assign match context to a ticket.
+  - `/tourney-progress` — bracket progress dashboard with semi-final/final announcements.
+- **Hall of Fame:** `/hall-of-fame` — post winning teams with prize distribution.
+- **Blacklist:** `/blacklist add/remove/list` — manage banned users (Discord ID, Matcherino profile, reason, alts).
+- **Rate Limits:** Max 3 open tickets per user, 180s cooldown. Auto-reopen after 6-hour lock.
+- **Auto-translation:** Ticket messages auto-translated via `deep-translator` + `langdetect`.
+- **Test Mode:** `/tourney-test-mode` — toggle 100-ticket limit and 0.1s cooldown for testing.
+- **Staff Guide:** `/tourney-admin-help`.
+- **SA Mode:** South America region variant with separate ticket categories and region-specific workflow.
 
-### Security System
-- **Hacked Protocol:** `/hacked` (Slash) or `!hacked` (Reply) to instantly secure a compromised account.
-- **Automated Cleanup:** triggers a 7-day timeout, flags the user in the database, and recursively purges their recent messages from **Text, Voice, and Thread** channels.
-- **Recovery:** `/unhacked` removes the timeout and database flag once the user recovers their account.
-- **Visibility:** `/hackedlist` displays all currently flagged/compromised users.
+### Tournament Admin Compensation
+- `/payout-add <users...> <amount>` — record staff payouts (Split or Flat mode).
+- `/payout-list` — view pending balances.
+- `/payout-history [page]` — audit log of group payouts (filters out paid users).
+- `/payout-reset` — clear a staff member's balance and archive receipts.
 
-### Brawl Stars Collection System
-- **Gacha Summoning:** 
-  - `/megabox`: Simulates opening a Brawl Stars Mega Box with weighted rarity drops (Rare to Ultra Legendary) and multiple items per pull.
-  - `/starrdrop`: Opens a single Starr Drop with rarity upgrade animations.
-  - **Drop Logic:** Features intelligent RNG that handles duplicate brawlers (converting them to resources) and tracks user inventory in MongoDB.
-- **Collection Management:** - `/brawlers`: Displays the user's owned brawlers in a paginated, interactive embed view.
-  - **Dynamic Status:** Visual indicators for locked vs. unlocked brawlers and current level display.
-- **Progression & Leveling:** 
-  - **Leveling System:** Users can upgrade brawlers from Level 1 using resources (Coins/Power Points).
-  - **Resource Management:** Dedicated tracking for game-specific currencies distinct from the main R7 Token economy.
+### Support Tickets (Non-Tournament)
+- `/support-panel` — post the master support ticket panel.
+- **Ticket Types:**
+  - Report an Issue — bugs, rule violations, technical problems.
+  - Server Support — general server assistance.
+  - Staff Application — apply for Tourney Admin or Event Staff.
+  - Server Partnership — propose a partnership.
+- One open ticket per type per user.
+- Staff can close, reopen, and delete tickets with transcript generation.
+- Transcripts DM'd to the opener and archived in a log channel.
 
-### Admin Tools
-- **Permissions:** `/perm` (Admin) Add/Remove ability to use staff commands.
+### Event Management
+- **Automated Monitoring:** Daily background task at 12:00 AM ET scans event channels.
+- **Smart Alerts:** Alert sent when messages are 7+ days old (prevents exceeding Discord's 14-day bulk-delete limit).
+- **Manual Cleanup:** `/clear-red`, `/clear-blue`, `/clear-green` for instant channel wipes.
+- **Reward Payouts:** `/event-rewards <message_id>` parses `@User 500` format to batch-distribute tokens with confirmation.
+- **Staff Guide:** `/event-staff-help`.
+
+### Security Protocol
+- `/hacked <user> [days]` or `!hacked` (reply) — instantly timeout (7 days), flag in DB, purge messages across all channels.
+- `/unhacked <user>` — remove flag and timeout.
+- `/hacked-list` — view all currently flagged users.
+- Logs to moderator logs channel. Prevents targeting equal/higher role members.
+
+### Translation
+- `!t [language]` / `!translate [language]` — reply to a message to translate it to English.
+- `/translate <language> <phrase>` — translate English text into any of 55 supported languages.
+- Auto-detects source language. Google Translate backend.
+
+### Utility
+- `/convert-time <date> <time> <timezone>` — convert a date and time to all Discord timestamp formats. Supports 20+ timezone aliases (EST, PT, GMT, etc.) and IANA names.
+
+### Help Commands
+- `/help` — user command directory.
+- `/economy-help` — full guide to earning and spending R7 Tokens.
+- `/mod-help` — moderator guide (economy oversight, security protocol).
+- `/admin-help` — admin manual (economy, events, security, tournaments, financials).
+- `/tourney-admin-help` — tournament staff cheat sheet.
+- `/event-staff-help` — event channel management guide.
 
 ---
 
-## Setup & Run Instructions 
+## Setup & Run Instructions
 
-This bot requires Python 3.10+ and a MongoDB Atlas database.
+This bot requires **Python 3.10+** and a **MongoDB Atlas** database.
 
 1. **Clone the Repository**
     ```bash
     git clone https://github.com/RemainingDelta/Remaining7-Discord-Bot
     cd Remaining7-Discord-Bot
-    ``` 
+    ```
 
 2. **Setup Virtual Environment & Dependencies**
     ```bash
@@ -122,47 +200,81 @@ This bot requires Python 3.10+ and a MongoDB Atlas database.
     ```
 
 3. **Configure Environment Variables**
-    This bot requires secrets to be set as environment variables on your hosting platform (or locally in a `.env` file). Reference the `.env.example` file for necessary keys.
-
-    You **MUST** set at least the following:
+    Copy `.env.example` to `.env` and fill in the values:
     ```
-    DISCORD_TOKEN= [Your Bot Token]
-    MONGO_URI= [Your MongoDB Atlas Connection String]
+    BOT_MODE=DEV            # DEV (default) or PROD
+    PROD_TOKEN=             # Production bot token (used when BOT_MODE=PROD)
+    DEV_TOKEN=              # Dev/test bot token (used when BOT_MODE=DEV)
+    MONGO_URI=              # MongoDB Atlas connection string
     ```
 
 4. **Update Configuration**
-    Verify and update critical IDs in `features/config.py` (e.g., `ADMIN_ROLE_ID`, `GENERAL_CHANNEL_ID`) with your server's live IDs.
+    Verify and update IDs in `features/config.py` (channels, roles, categories, emojis) for your server. Both `REAL` and `TEST` branches must be maintained.
 
 5. **Run the Bot**
     ```bash
     python main.py
     ```
 
+    There is no test suite. Testing is done by running the bot with `BOT_MODE=DEV` against a test Discord server.
+
 ---
 
-## Future Roadmap 
-- Budget Fixes
-- Update general server ticket system 
-- Add giveaway functionality with extra entries via R7 tokens
-- Tracker for rewards given away
-- Brawl Stars Collectible Game (Large)
-  - Phase 1: Data & Models
-    - [x] Create JSON file for Brawler stats and assets
-    - [x] Define Python dataclass to load Brawler data
-    - [x] Update MongoDB schema to support user inventory
-    - [x] Create helper function to fetch user collection
-  - Phase 2: The Gacha (Summoning)
-    - [x] Implement RNG logic for weighted rarity drops
-    - [x] Create slash command to open mega boxes/starr drops
-    - [x] Add logic to deduct tokens and save Brawler
-    - [x] Design embed to display summoned Brawler image
-  - Phase 3: Inventory Management
-    - [x] Create inventory command with pagination view
-  - Phase 4: Expansion & Depth
-    - [x] Add leveling system to brawlers
-    - [x] Add gadgets
-    - [x] Add starpowers
-    - [x] Add hypercharges 
-    - [x] Update drops to also include brawler emoji when unlocking a new brawler
-    - [x] Add buying gadgets, starpowers, hypercharges
-    - [ ] View for specific brawler 
+## Database
+
+Uses MongoDB database `r7_bot_db` with the following collections:
+
+| Collection | Purpose |
+|---|---|
+| `users` | Balance, XP, level, brawler collection, currencies, inventory |
+| `user_quests` | Quest progress tracking (daily/weekly) |
+| `quests` | Quest definitions |
+| `hacked_users` | Flagged compromised accounts |
+| `blacklist` | Tournament-banned users |
+| `payouts` | Pending staff payouts |
+| `payout_logs` | Payout batch audit logs |
+| `tourney_sessions` | Active tournament session data |
+| `tourney_staff_stats` | Staff performance metrics |
+| `support_ticket_counters` | Ticket counters per type |
+| `settings` | Global bot settings (budget, etc.) |
+
+---
+
+## Background Tasks
+
+| Task | Schedule | Description |
+|---|---|---|
+| Message listener | On every message | Passive token + XP generation (20s cooldown) |
+| Quest tracker | On every message | Track quest progress, auto-complete and reward |
+| Event cleanup | Daily at 12:00 AM ET | Scan event channels for stale messages |
+| Queue dashboard | Every 15 seconds | Update tourney queue embed during live tournaments |
+| Supply drop | Every 6 hours | Random token drop in general chat |
+| Progress dashboard | Every 5 minutes (live) | Semi-final/final bracket announcements |
+| Match refresher | Every 1 minute (live) | Refresh Matcherino scores in active tickets |
+| Budget reset | On interaction | Auto-reset monthly redemption cap on month change |
+
+---
+
+## Permission Hierarchy
+
+| Role | Access |
+|---|---|
+| Admin | Full access to all commands |
+| Moderator | Economy oversight, security protocol |
+| Tourney Admin | Tournament commands, ticket management |
+| Event Staff | Event channel cleanup, reward distribution |
+| Member | Economy, quests, brawl, translation, help |
+
+---
+
+## Workflow
+- Active development on `dev` branch.
+- Feature/bug branches merge into `dev` via PR.
+- `dev` merges into `main` for release.
+- Ruff enforced via CI (`.github/workflows/lint.yml`).
+
+---
+
+## Future Roadmap
+- [ ] Brawl Stars: View for a specific brawler's details
+- [ ] Giveaway system with extra entries via R7 Tokens

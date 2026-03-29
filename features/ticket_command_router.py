@@ -33,7 +33,10 @@ def is_support_ticket_channel(channel: discord.abc.GuildChannel | None) -> bool:
 def is_redemption_ticket_channel(channel: discord.abc.GuildChannel | None) -> bool:
     if not isinstance(channel, discord.TextChannel):
         return False
-    if not isinstance(REDEMPTION_TICKET_CATEGORY_ID, int) or REDEMPTION_TICKET_CATEGORY_ID <= 0:
+    if (
+        not isinstance(REDEMPTION_TICKET_CATEGORY_ID, int)
+        or REDEMPTION_TICKET_CATEGORY_ID <= 0
+    ):
         return False
     return channel.category_id == REDEMPTION_TICKET_CATEGORY_ID
 

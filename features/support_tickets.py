@@ -70,7 +70,8 @@ TICKET_TYPES = {
 
 def _support_staff_role_ids() -> set[int]:
     return {
-        rid for rid in (ADMIN_ROLE_ID, MODERATOR_ROLE_ID)
+        rid
+        for rid in (ADMIN_ROLE_ID, MODERATOR_ROLE_ID)
         if isinstance(rid, int) and rid > 0
     }
 
@@ -126,7 +127,9 @@ def _is_support_ticket_channel(channel: discord.abc.GuildChannel) -> bool:
     return channel.category_id in _support_category_ids() and "ticket-" in channel.name
 
 
-def _set_remaining7_footer(embed: discord.Embed, bot_user: discord.abc.User | None) -> None:
+def _set_remaining7_footer(
+    embed: discord.Embed, bot_user: discord.abc.User | None
+) -> None:
     icon_url = None
     if bot_user is not None:
         icon_url = bot_user.display_avatar.url
@@ -311,7 +314,9 @@ async def close_support_ticket_via_command(ctx: commands.Context):
 
     ok = await close_support_ticket_channel(ctx.channel, ctx.author)
     if not ok:
-        await ctx.reply("This command can only be used inside an active support ticket channel.")
+        await ctx.reply(
+            "This command can only be used inside an active support ticket channel."
+        )
 
 
 async def reopen_support_ticket_via_command(ctx: commands.Context):
@@ -324,7 +329,9 @@ async def reopen_support_ticket_via_command(ctx: commands.Context):
 
     ok = await reopen_support_ticket_channel(ctx.channel, ctx.author)
     if not ok:
-        await ctx.reply("This command can only be used inside a support ticket channel.")
+        await ctx.reply(
+            "This command can only be used inside a support ticket channel."
+        )
 
 
 async def delete_support_ticket_via_command(ctx: commands.Context):
@@ -337,7 +344,9 @@ async def delete_support_ticket_via_command(ctx: commands.Context):
 
     ok = await delete_support_ticket_channel(ctx.channel, ctx.author, ctx.bot)
     if not ok:
-        await ctx.reply("This command can only be used inside a support ticket channel.")
+        await ctx.reply(
+            "This command can only be used inside a support ticket channel."
+        )
 
 
 class SupportTicketSelect(discord.ui.Select):
@@ -365,7 +374,9 @@ class SupportTicketSelect(discord.ui.Select):
     async def callback(self, interaction: discord.Interaction):
         guild = interaction.guild
         if guild is None:
-            await interaction.response.send_message("This can only be used in a server.", ephemeral=True)
+            await interaction.response.send_message(
+                "This can only be used in a server.", ephemeral=True
+            )
             return
 
         selected = self.values[0]
@@ -391,7 +402,10 @@ class SupportTicketSelect(discord.ui.Select):
         user_id = interaction.user.id
         for ch in category.channels:
             if isinstance(ch, discord.TextChannel) and ch.topic:
-                if f"support-opener:{user_id}" in ch.topic and f"type:{selected}" in ch.topic:
+                if (
+                    f"support-opener:{user_id}" in ch.topic
+                    and f"type:{selected}" in ch.topic
+                ):
                     if "「❗」" in ch.name:  # only block if still open
                         await interaction.response.send_message(
                             f"You already have an open **{cfg['label']}** ticket: {ch.mention}\n"
@@ -432,7 +446,10 @@ class SupportTicketSelect(discord.ui.Select):
             overwrites=overwrites,
             reason=f"Support ticket ({selected}) from {interaction.user}",
         )
-        await channel.edit(topic=f"support-opener:{interaction.user.id}|type:{selected}", reason="Store support opener")
+        await channel.edit(
+            topic=f"support-opener:{interaction.user.id}|type:{selected}",
+            reason="Store support opener",
+        )
 
         await interaction.response.send_message(
             f"Your ticket has been created: {channel.mention}",
@@ -459,13 +476,23 @@ class SupportClosedTicketView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
 
-    @discord.ui.button(label="Delete Ticket", style=discord.ButtonStyle.danger, custom_id="support_delete_ticket")
-    async def delete_ticket_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+    @discord.ui.button(
+        label="Delete Ticket",
+        style=discord.ButtonStyle.danger,
+        custom_id="support_delete_ticket",
+    )
+    async def delete_ticket_button(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ):
         if not isinstance(interaction.user, discord.Member):
-            await interaction.response.send_message("Only server members can use this.", ephemeral=True)
+            await interaction.response.send_message(
+                "Only server members can use this.", ephemeral=True
+            )
             return
         if not isinstance(interaction.channel, discord.TextChannel):
-            await interaction.response.send_message("This only works in support ticket channels.", ephemeral=True)
+            await interaction.response.send_message(
+                "This only works in support ticket channels.", ephemeral=True
+            )
             return
 
         deferred = False
@@ -476,26 +503,44 @@ class SupportClosedTicketView(discord.ui.View):
             # Interaction expired; continue with deletion flow anyway.
             deferred = False
 
-        ok = await delete_support_ticket_channel(interaction.channel, interaction.user, interaction.client)
+        ok = await delete_support_ticket_channel(
+            interaction.channel, interaction.user, interaction.client
+        )
         if ok:
             # Channel is deleted — any followup will fail with 10003 Unknown Channel.
             # The disappearing channel is confirmation enough; suppress silently.
             return
         try:
             if deferred or interaction.response.is_done():
-                await interaction.followup.send("This button can only be used in support tickets by staff.", ephemeral=True)
+                await interaction.followup.send(
+                    "This button can only be used in support tickets by staff.",
+                    ephemeral=True,
+                )
             else:
-                await interaction.response.send_message("This button can only be used in support tickets by staff.", ephemeral=True)
+                await interaction.response.send_message(
+                    "This button can only be used in support tickets by staff.",
+                    ephemeral=True,
+                )
         except discord.NotFound:
             pass
 
-    @discord.ui.button(label="Reopen Ticket", style=discord.ButtonStyle.success, custom_id="support_reopen_ticket")
-    async def reopen_ticket_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+    @discord.ui.button(
+        label="Reopen Ticket",
+        style=discord.ButtonStyle.success,
+        custom_id="support_reopen_ticket",
+    )
+    async def reopen_ticket_button(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ):
         if not isinstance(interaction.user, discord.Member):
-            await interaction.response.send_message("Only server members can use this.", ephemeral=True)
+            await interaction.response.send_message(
+                "Only server members can use this.", ephemeral=True
+            )
             return
         if not isinstance(interaction.channel, discord.TextChannel):
-            await interaction.response.send_message("This only works in support ticket channels.", ephemeral=True)
+            await interaction.response.send_message(
+                "This only works in support ticket channels.", ephemeral=True
+            )
             return
 
         deferred = False
@@ -509,9 +554,15 @@ class SupportClosedTicketView(discord.ui.View):
         if not ok:
             try:
                 if deferred or interaction.response.is_done():
-                    await interaction.followup.send("This button can only be used in support tickets by staff.", ephemeral=True)
+                    await interaction.followup.send(
+                        "This button can only be used in support tickets by staff.",
+                        ephemeral=True,
+                    )
                 else:
-                    await interaction.response.send_message("This button can only be used in support tickets by staff.", ephemeral=True)
+                    await interaction.response.send_message(
+                        "This button can only be used in support tickets by staff.",
+                        ephemeral=True,
+                    )
             except discord.NotFound:
                 pass
             return
@@ -519,7 +570,9 @@ class SupportClosedTicketView(discord.ui.View):
             if deferred or interaction.response.is_done():
                 await interaction.followup.send("Ticket reopened.", ephemeral=True)
             else:
-                await interaction.response.send_message("Ticket reopened.", ephemeral=True)
+                await interaction.response.send_message(
+                    "Ticket reopened.", ephemeral=True
+                )
         except discord.NotFound:
             # Reopen already completed; ignore expired interaction response.
             pass
@@ -533,32 +586,52 @@ class SupportTickets(commands.Cog):
         self.bot.add_view(SupportTicketPanelView(self.bot))
         self.bot.add_view(SupportClosedTicketView())
 
-    @app_commands.command(name="support-panel", description="Post the master support ticket panel.")
+    @app_commands.command(
+        name="support-panel", description="Post the master support ticket panel."
+    )
     async def support_panel(self, interaction: discord.Interaction):
         if not isinstance(interaction.user, discord.Member):
-            await interaction.response.send_message("This command can only be used in a server.", ephemeral=True)
+            await interaction.response.send_message(
+                "This command can only be used in a server.", ephemeral=True
+            )
             return
 
         allowed_roles = _support_staff_role_ids()
         if not any(role.id in allowed_roles for role in interaction.user.roles):
-            await interaction.response.send_message("You do not have permission to post this panel.", ephemeral=True)
+            await interaction.response.send_message(
+                "You do not have permission to post this panel.", ephemeral=True
+            )
             return
 
         channel = interaction.channel
         if not isinstance(channel, discord.TextChannel):
-            await interaction.response.send_message("This command can only be used in a text channel.", ephemeral=True)
+            await interaction.response.send_message(
+                "This command can only be used in a text channel.", ephemeral=True
+            )
             return
 
         if channel.id != OTHER_TICKET_CHANNEL_ID:
-            target = f"<#{OTHER_TICKET_CHANNEL_ID}>" if OTHER_TICKET_CHANNEL_ID else "the configured support panel channel"
+            target = (
+                f"<#{OTHER_TICKET_CHANNEL_ID}>"
+                if OTHER_TICKET_CHANNEL_ID
+                else "the configured support panel channel"
+            )
             await interaction.response.send_message(
                 f"Please run this command in {target}.",
                 ephemeral=True,
             )
             return
 
-        staff_info = f"<#{SUPPORT_STAFF_APPS_INFO_CHANNEL_ID}>" if isinstance(SUPPORT_STAFF_APPS_INFO_CHANNEL_ID, int) else "the info channel"
-        tourney_ch = f"<#{PRE_TOURNEY_SUPPORT_CHANNEL_ID}>" if isinstance(PRE_TOURNEY_SUPPORT_CHANNEL_ID, int) else "the tourney support channel"
+        staff_info = (
+            f"<#{SUPPORT_STAFF_APPS_INFO_CHANNEL_ID}>"
+            if isinstance(SUPPORT_STAFF_APPS_INFO_CHANNEL_ID, int)
+            else "the info channel"
+        )
+        tourney_ch = (
+            f"<#{PRE_TOURNEY_SUPPORT_CHANNEL_ID}>"
+            if isinstance(PRE_TOURNEY_SUPPORT_CHANNEL_ID, int)
+            else "the tourney support channel"
+        )
         embed = discord.Embed(
             title="Support Tickets",
             description=(
@@ -575,7 +648,9 @@ class SupportTickets(commands.Cog):
         )
         _set_remaining7_footer(embed, interaction.client.user)
 
-        await interaction.response.send_message(embed=embed, view=SupportTicketPanelView(self.bot))
+        await interaction.response.send_message(
+            embed=embed, view=SupportTicketPanelView(self.bot)
+        )
 
 
 async def setup(bot: commands.Bot):

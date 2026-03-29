@@ -1,62 +1,75 @@
 import random
+
 # Import your new config dictionaries
 from features.config import (
-    MEGA_BOX_LOOT, STARR_DROP_RARITIES, STARR_DROP_LOOT, 
-    EMOJIS_CURRENCY, EMOJIS_RARITIES, EMOJIS_BRAWLERS,     
-    EMOJI_GADGET_DEFAULT, EMOJI_STARPOWER_DEFAULT, 
-    EMOJI_HYPERCHARGE_DEFAULT
+    MEGA_BOX_LOOT,
+    STARR_DROP_RARITIES,
+    STARR_DROP_LOOT,
+    EMOJIS_CURRENCY,
+    EMOJIS_RARITIES,
+    EMOJIS_BRAWLERS,
+    EMOJI_GADGET_DEFAULT,
+    EMOJI_STARPOWER_DEFAULT,
+    EMOJI_HYPERCHARGE_DEFAULT,
 )
 from database.mongo import (
-    add_brawl_coins, 
-    add_power_points, 
-    add_credits, 
+    add_brawl_coins,
+    add_power_points,
+    add_credits,
     add_brawler_to_user,
-    get_user_data,           
-    add_gadget_to_user, 
+    get_user_data,
+    add_gadget_to_user,
     add_star_power_to_user,
-    add_hypercharge_to_user
+    add_hypercharge_to_user,
 )
 from .brawlers import load_brawlers
 
 # 1. Load the full roster into memory once when the bot starts
 BRAWLER_ROSTER = load_brawlers()
 
+
 def pick_weighted_item(loot_table):
     """Selects an item based on 'weight' key using standard RNG."""
-    weights = [item['weight'] for item in loot_table]
+    weights = [item["weight"] for item in loot_table]
     return random.choices(loot_table, weights=weights, k=1)[0]
+
 
 async def process_reward(user_id: str, reward: dict):
     """Interprets the reward dict, picks specific brawlers, and updates DB."""
     r_type = reward["type"]
-    
+
     # --- Currency Handling ---
     if r_type in ["coins", "power_points", "credits"]:
         icon = EMOJIS_CURRENCY.get(r_type, "")
         amount = reward["amount"]
-        if r_type == "coins": await add_brawl_coins(user_id, amount)
-        elif r_type == "power_points": await add_power_points(user_id, amount)
-        elif r_type == "credits": await add_credits(user_id, amount)
+        if r_type == "coins":
+            await add_brawl_coins(user_id, amount)
+        elif r_type == "power_points":
+            await add_power_points(user_id, amount)
+        elif r_type == "credits":
+            await add_credits(user_id, amount)
         return f"{icon} **{amount} {r_type.replace('_', ' ').title()}**"
 
     # --- Specific Brawler Selection ---
     elif r_type == "brawler":
-        raw_rarity = reward['rarity']
+        raw_rarity = reward["rarity"]
         formatted_rarity = raw_rarity.replace("_", " ").title()
         rarity_key = raw_rarity.lower().replace(" ", "_")
         rarity_emoji = EMOJIS_RARITIES.get(rarity_key, "🥊")
 
-        eligible = [b for b in BRAWLER_ROSTER if b.rarity.lower() == formatted_rarity.lower()]
-        
+        eligible = [
+            b for b in BRAWLER_ROSTER if b.rarity.lower() == formatted_rarity.lower()
+        ]
+
         if not eligible:
             return f"❌ Error: No brawlers found for rarity '{formatted_rarity}'"
 
         selected_brawler = random.choice(eligible)
         status = await add_brawler_to_user(user_id, selected_brawler.id.lower())
-        
+
         # Get the specific brawler emoji
         b_emoji = EMOJIS_BRAWLERS.get(selected_brawler.id.lower(), "❓")
-        
+
         if status == "new":
             # Format: <rarity emoji> NEW BRAWLER! <brawler emoji> <brawler> (<rarity>)
             return f"{rarity_emoji} **NEW BRAWLER!** {b_emoji} **{selected_brawler.name}** ({formatted_rarity})"
@@ -72,36 +85,52 @@ async def process_reward(user_id: str, reward: dict):
         owned_brawlers = user_doc.get("brawlers", {})
 
         # Determine level requirement
-        if r_type == "gadget": req_lvl = 7
-        elif r_type == "star_power": req_lvl = 9
-        else: req_lvl = 11  # Hypercharge requirement
+        if r_type == "gadget":
+            req_lvl = 7
+        elif r_type == "star_power":
+            req_lvl = 9
+        else:
+            req_lvl = 11  # Hypercharge requirement
 
-        icon = EMOJI_GADGET_DEFAULT if r_type == "gadget" else \
-               EMOJI_STARPOWER_DEFAULT if r_type == "star_power" else \
-               EMOJI_HYPERCHARGE_DEFAULT
-        
+        icon = (
+            EMOJI_GADGET_DEFAULT
+            if r_type == "gadget"
+            else EMOJI_STARPOWER_DEFAULT
+            if r_type == "star_power"
+            else EMOJI_HYPERCHARGE_DEFAULT
+        )
+
         eligible = []
         for b_id, data in owned_brawlers.items():
             # Robust matching: ensure b_id from DB matches roster
-            b_info = next((b for b in BRAWLER_ROSTER if b.id.lower() == b_id.lower()), None)
-            if not b_info: continue
-            
+            b_info = next(
+                (b for b in BRAWLER_ROSTER if b.id.lower() == b_id.lower()), None
+            )
+            if not b_info:
+                continue
+
             b_level = data.get("level", 1)
 
             if r_type == "hypercharge":
                 # Ensure the JSON brawler actually has a Hypercharge name
-                master_hc = getattr(b_info, 'hypercharge', "")
+                master_hc = getattr(b_info, "hypercharge", "")
                 current_hc = data.get("hypercharge", "")
-                
+
                 # Check Level 11 and ensure it's not already owned
                 if b_level >= 11 and master_hc and not current_hc:
                     eligible.append((b_id, b_info.name, master_hc))
             else:
-                master_list = b_info.gadgets if r_type == "gadget" else b_info.star_powers
-                current_owned = data.get("gadgets" if r_type == "gadget" else "star_powers", [])
-                
+                master_list = (
+                    b_info.gadgets if r_type == "gadget" else b_info.star_powers
+                )
+                current_owned = data.get(
+                    "gadgets" if r_type == "gadget" else "star_powers", []
+                )
+
                 if b_level >= req_lvl and len(current_owned) < len(master_list):
-                    missing = [item for item in master_list if item not in current_owned]
+                    missing = [
+                        item for item in master_list if item not in current_owned
+                    ]
                     if missing:
                         eligible.append((b_id, b_info.name, random.choice(missing)))
 
@@ -112,7 +141,7 @@ async def process_reward(user_id: str, reward: dict):
 
         # Select winner
         target_b_id, b_name, choice = random.choice(eligible)
-        
+
         if r_type == "hypercharge":
             await add_hypercharge_to_user(user_id, target_b_id, choice)
         elif r_type == "gadget":
@@ -123,7 +152,10 @@ async def process_reward(user_id: str, reward: dict):
         return f"{icon} **NEW {r_type.upper()}: {choice}** ({b_name})"
 
     return "🎁 **Reward Received**"
+
+
 # --- These functions MUST be defined here for commands.py to find them ---
+
 
 async def open_mega_box(user_id: str):
     """Opens a Mega Box with 10 items."""
@@ -134,16 +166,18 @@ async def open_mega_box(user_id: str):
         rewards_log.append(msg)
     return rewards_log
 
+
 async def open_starr_drop(user_id: str):
     """Rolls rarity, then rolls reward from that rarity."""
     rarity_names = list(STARR_DROP_RARITIES.keys())
     rarity_weights = list(STARR_DROP_RARITIES.values())
     rarity = random.choices(rarity_names, weights=rarity_weights, k=1)[0]
-    
+
     loot_table = STARR_DROP_LOOT.get(rarity)
-    if not loot_table: return rarity, "Error: Empty Loot Table"
-        
+    if not loot_table:
+        return rarity, "Error: Empty Loot Table"
+
     item = pick_weighted_item(loot_table)
     reward_msg = await process_reward(user_id, item)
-    
+
     return rarity, reward_msg
