@@ -36,7 +36,7 @@ Remaining7-Discord-Bot/
 │   ├── quests.py                    # Daily & weekly quest system
 │   ├── security.py                  # Hacked protocol (timeout, purge, flag)
 │   ├── event.py                     # Event channel cleanup & reward payouts
-│   ├── general.py                   # /help, /mod-help, /admin-help
+│   ├── general.py                   # /help, /mod-help, /admin-help, /convert-time
 │   ├── translation.py               # !t prefix & /translate slash command (55 languages)
 │   ├── support_tickets.py           # General support tickets (issues, support, apps, partnership)
 │   ├── ticket_command_router.py     # Shared routing for tourney & support ticket commands
@@ -64,8 +64,8 @@ Remaining7-Discord-Bot/
 ## Core Features
 
 ### R7 Token Economy
-- **Passive Income:** Users earn 2–5 R7 Tokens per message (1-minute cooldown).
-- **Daily Rewards:** `/daily` with streak tracking and level-based bonus.
+- **Passive Income:** Users earn 2–5 R7 Tokens per message (20-second cooldown). Server Boosters get a 2% average bonus.
+- **Daily Rewards:** `/daily` grants 80–160 tokens (scaled by level). Requires 5 messages sent since last claim and a 24-hour cooldown.
 - **Supply Drop:** `/drop <amount>` (Admin) to force a token drop in general chat.
 - **Balance & Ranking:** `/balance [user]`, `/leaderboard [page]`.
 - **Give & Set:** `/give <user> <token/xp/level> <amount>`, `/set-balance <user> <amount>` (Admin).
@@ -108,7 +108,7 @@ Remaining7-Discord-Bot/
 
 ### Tournament System
 - **Phase Management:**
-  - `!starttourney [region]` — start live tournament, reset counters, init queue dashboard.
+  - `!starttourney [region]` — start live tournament, reset counters, init queue dashboard. Use `!starttourney SA` for South America mode.
   - `!endtourney` — end tournament, clean up dashboards and tickets.
 - **Ticket Panels:** `/tourney-panel` (live) and `/pre-tourney-panel` (pre-tourney) post interactive open buttons.
 - **Ticket Operations:**
@@ -129,8 +129,9 @@ Remaining7-Discord-Bot/
 - **Blacklist:** `/blacklist add/remove/list` — manage banned users (Discord ID, Matcherino profile, reason, alts).
 - **Rate Limits:** Max 3 open tickets per user, 180s cooldown. Auto-reopen after 6-hour lock.
 - **Auto-translation:** Ticket messages auto-translated via `deep-translator` + `langdetect`.
-- **Test Mode:** `/tourney-test-mode` — toggle dynamic rate limits for testing.
+- **Test Mode:** `/tourney-test-mode` — toggle 100-ticket limit and 0.1s cooldown for testing.
 - **Staff Guide:** `/tourney-admin-help`.
+- **SA Mode:** South America region variant with separate ticket categories and region-specific workflow.
 
 ### Tournament Admin Compensation
 - `/payout-add <users...> <amount>` — record staff payouts (Split or Flat mode).
@@ -167,10 +168,16 @@ Remaining7-Discord-Bot/
 - `/translate <language> <phrase>` — translate English text into any of 55 supported languages.
 - Auto-detects source language. Google Translate backend.
 
+### Utility
+- `/convert-time <date> <time> <timezone>` — convert a date and time to all Discord timestamp formats. Supports 20+ timezone aliases (EST, PT, GMT, etc.) and IANA names.
+
 ### Help Commands
 - `/help` — user command directory.
+- `/economy-help` — full guide to earning and spending R7 Tokens.
 - `/mod-help` — moderator guide (economy oversight, security protocol).
 - `/admin-help` — admin manual (economy, events, security, tournaments, financials).
+- `/tourney-admin-help` — tournament staff cheat sheet.
+- `/event-staff-help` — event channel management guide.
 
 ---
 
@@ -237,12 +244,13 @@ Uses MongoDB database `r7_bot_db` with the following collections:
 
 | Task | Schedule | Description |
 |---|---|---|
-| Message listener | On every message | Passive token + XP generation (1-min cooldown) |
+| Message listener | On every message | Passive token + XP generation (20s cooldown) |
 | Quest tracker | On every message | Track quest progress, auto-complete and reward |
 | Event cleanup | Daily at 12:00 AM ET | Scan event channels for stale messages |
 | Queue dashboard | Every 15 seconds | Update tourney queue embed during live tournaments |
-| Progress dashboard | During tournaments | Semi-final/final bracket announcements |
-| Match refresher | During tournaments | Monitor active Matcherino tickets |
+| Supply drop | Every 6 hours | Random token drop in general chat |
+| Progress dashboard | Every 5 minutes (live) | Semi-final/final bracket announcements |
+| Match refresher | Every 1 minute (live) | Refresh Matcherino scores in active tickets |
 | Budget reset | On interaction | Auto-reset monthly redemption cap on month change |
 
 ---
@@ -270,4 +278,3 @@ Uses MongoDB database `r7_bot_db` with the following collections:
 ## Future Roadmap
 - [ ] Brawl Stars: View for a specific brawler's details
 - [ ] Giveaway system with extra entries via R7 Tokens
-- [ ] Tracker for rewards given away

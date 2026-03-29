@@ -2242,15 +2242,17 @@ def setup_tourney_commands(bot: commands.Bot):
 
         # --- 1. Session & Channel Management ---
         session_text = (
-            "`!starttourney` - Wipes old tickets, locks the general server support channel, and posts the live support panel.\n"
+            "`!starttourney [region]` - Wipes old tickets, locks general support, and posts the live panel. Use `!starttourney SA` for South America mode.\n"
             "`!endtourney` - Closes all active tickets, generates staff stats, posts the Pre-Tourney panel, and unlocks general support.\n"
-            "`!lock` / `!unlock` - Manually close or open the general server support channel."
+            "`!lock` / `!unlock` - Manually close or open the general server support channel.\n"
+            "`/tourney-test-mode` - Toggle 100-ticket limit and 0.1s cooldown for testing."
         )
         embed.add_field(name="⚙️ Session Management", value=session_text, inline=False)
 
         # --- 2. Ticket Commands ---
         ticket_text = (
             "`!close` (or `!c`) - Closes the current ticket and adds to your completed stats.\n"
+            "`!delete` (or `!del`) - Deletes a ticket with transcript.\n"
             "`!reopen` - Moves a closed ticket back to the active category.\n"
             "`/add` / `/remove` - Add or remove a specific user to/from the current ticket."
         )
@@ -2261,7 +2263,8 @@ def setup_tourney_commands(bot: commands.Bot):
             "`/set-matcherino` - Set the active Matcherino bracket ID for the session.\n"
             "`/match-info` - Show live rosters, scores, and match status for a match number.\n"
             "`/match-history` - Show a team's previous rounds for a given match.\n"
-            "`/set-ticket-match` - Correct this ticket's match number or team name."
+            "`/set-ticket-match` - Correct this ticket's match number or team name.\n"
+            "`/tourney-progress` - Real-time bracket health check with stage announcements."
         )
         embed.add_field(
             name="📊 Live Bracket / Matcherino", value=matcherino_text, inline=False
