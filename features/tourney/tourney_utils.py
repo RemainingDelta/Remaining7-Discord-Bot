@@ -468,16 +468,12 @@ async def close_ticket_via_command(ctx: commands.Context):
         asyncio.create_task(channel.edit(name=new_name, reason="Tourney ticket closed"))
 
     # 4. Update Permissions
-    if opener_id is not None:
-        opener = guild.get_member(opener_id)
-        if opener is not None:
-            overwrite = channel.overwrites_for(opener)
-            if not _is_staff(opener):
-                overwrite.send_messages = False
-            else:
-                overwrite.send_messages = None
+    # Lock send_messages for every non-staff user overwrite (opener + anyone added via /add)
+    for target, overwrite in channel.overwrites.items():
+        if isinstance(target, discord.Member) and not _is_staff(target):
+            overwrite.send_messages = False
             overwrite.view_channel = True
-            await channel.set_permissions(opener, overwrite=overwrite)
+            await channel.set_permissions(target, overwrite=overwrite)
 
     for role_id in ALLOWED_STAFF_ROLES:
         staff_role = guild.get_role(role_id)
