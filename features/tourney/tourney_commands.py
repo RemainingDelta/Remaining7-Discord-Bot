@@ -2815,11 +2815,23 @@ def setup_tourney_commands(bot: commands.Bot):
             )
 
             if is_sa_tourney:
-                description = f"# ⚠️ ¡Atención!\n# Por favor, usa {support_mention} para abrir un ticket de soporte para el torneo."
+                embeds = [
+                    discord.Embed(
+                        description=f"# ⚠️ ¡Atención!\n# Por favor, usa {support_mention} para abrir un ticket de soporte para el torneo.",
+                        color=discord.Color.red(),
+                    ),
+                    discord.Embed(
+                        description=f"# ⚠️ Atenção!\n# Por favor, use {support_mention} para abrir um ticket de suporte para o torneio.",
+                        color=discord.Color.red(),
+                    ),
+                ]
             else:
-                description = f"# ⚠️ Attention!\n# Please use {support_mention} to open a support ticket for the tournament."
-
-            embed = discord.Embed(description=description, color=discord.Color.red())
+                embeds = [
+                    discord.Embed(
+                        description=f"# ⚠️ Attention!\n# Please use {support_mention} to open a support ticket for the tournament.",
+                        color=discord.Color.red(),
+                    )
+                ]
 
             # Try deleting the previously tracked sticky message first.
             old_msg_id = sticky_redirect_message_ids.get(channel.id)
@@ -2834,13 +2846,13 @@ def setup_tourney_commands(bot: commands.Bot):
             async for msg in channel.history(limit=30):
                 if msg.author != bot.user or not msg.embeds:
                     continue
-                if msg.embeds[0].description == embed.description:
+                if msg.embeds[0].description == embeds[0].description:
                     try:
                         await msg.delete()
                     except (discord.NotFound, discord.Forbidden):
                         pass
 
-            new_msg = await channel.send(embed=embed)
+            new_msg = await channel.send(embeds=embeds)
             sticky_redirect_message_ids[channel.id] = new_msg.id
 
     @bot.listen()
