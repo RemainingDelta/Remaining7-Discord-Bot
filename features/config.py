@@ -1,9 +1,14 @@
 import os
+import tomllib
+from pathlib import Path
 from dotenv import load_dotenv
 
 
 load_dotenv()
-BOT_VERSION = "v1.8.0"
+
+_pyproject = Path(__file__).resolve().parent.parent / "pyproject.toml"
+with open(_pyproject, "rb") as f:
+    BOT_VERSION = "v" + tomllib.load(f)["project"]["version"]
 MODE = os.getenv("BOT_MODE", "DEV").upper()
 
 if MODE == "PROD":
