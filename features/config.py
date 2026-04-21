@@ -1,9 +1,14 @@
 import os
+import re
+from pathlib import Path
 from dotenv import load_dotenv
 
 
 load_dotenv()
-BOT_VERSION = "v1.8.0"
+
+_pyproject = Path(__file__).resolve().parent.parent / "pyproject.toml"
+_match = re.search(r'^version\s*=\s*"(.+?)"', _pyproject.read_text(), re.MULTILINE)
+BOT_VERSION = "v" + _match.group(1) if _match else "v0.0.0"
 MODE = os.getenv("BOT_MODE", "DEV").upper()
 
 if MODE == "PROD":
