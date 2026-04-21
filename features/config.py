@@ -1,5 +1,5 @@
 import os
-import tomllib
+import re
 from pathlib import Path
 from dotenv import load_dotenv
 
@@ -7,8 +7,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 _pyproject = Path(__file__).resolve().parent.parent / "pyproject.toml"
-with open(_pyproject, "rb") as f:
-    BOT_VERSION = "v" + tomllib.load(f)["project"]["version"]
+_match = re.search(r'^version\s*=\s*"(.+?)"', _pyproject.read_text(), re.MULTILINE)
+BOT_VERSION = "v" + _match.group(1) if _match else "v0.0.0"
 MODE = os.getenv("BOT_MODE", "DEV").upper()
 
 if MODE == "PROD":
