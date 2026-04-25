@@ -1008,9 +1008,7 @@ class QueueDashboard(commands.Cog):
             except Exception as e:
                 print(f"Refresher error in {channel.name}: {e}")
 
-    @tasks.loop(
-        minutes=1
-    )  # TODO: revert to minutes=5 before merging to main (snapshot POC testing)
+    @tasks.loop(minutes=5)
     async def progress_dashboard_task(self):
         """Refreshes the tournament progress dashboard every 1 minute (POC testing)."""
         await self.bot.wait_until_ready()
