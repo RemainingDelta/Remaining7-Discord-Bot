@@ -526,4 +526,3 @@ TOURNEY_TEST_MODE = False
 
 GITHUB_REPO = "RemainingDelta/Remaining7-Discord-Bot"
 TICKET_CREATOR_ID = 408419700729708545
-    
