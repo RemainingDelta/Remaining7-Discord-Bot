@@ -1403,7 +1403,7 @@ def setup_tourney_commands(bot: commands.Bot):
                             print(f"Failed to delete pre-tourney ticket {ch.name}: {e}")
 
         await ctx.send(
-            f"✅ Tourney Started! Channels updated and {deleted_count} pre-tourney tickets deleted."
+            f"✅ Tourney Started! Channels updated and {deleted_count} pre-tourney tickets deleted.\n⚠️ Don't forget to set the new Matcherino ID with `/set-matcherino`."
         )
 
         # Grant Tourney Admin the Timeout Members permission for the duration of the tourney.
@@ -1419,6 +1419,23 @@ def setup_tourney_commands(bot: commands.Bot):
         # START THE DASHBOARD
         dashboard_cog = bot.get_cog("QueueDashboard")
         if dashboard_cog:
+            dashboard_cog._announcement_matcherino_id = None
+            dashboard_cog._winner_announcement_state = {
+                "winner": None,
+                "message_id": None,
+            }
+            dashboard_cog._stage_announcement_state = {
+                "semi_finals": {
+                    "signature": None,
+                    "message_id": None,
+                    "hype_message_id": None,
+                },
+                "finals": {
+                    "signature": None,
+                    "message_id": None,
+                    "hype_message_id": None,
+                },
+            }
             await dashboard_cog.start_dashboard()
 
     @bot.command(name="endtourney")

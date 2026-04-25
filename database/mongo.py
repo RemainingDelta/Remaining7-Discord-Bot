@@ -803,7 +803,7 @@ async def reset_tourney_session_start_time(session_id):
     try:
         result = await db.tourney_sessions.update_one(
             {"_id": session_id, "status": "active"},
-            {"$set": {"start_time": datetime.utcnow()}},
+            {"$set": {"start_time": datetime.utcnow(), "matcherino_id": None}},
         )
         return result.modified_count > 0
     except Exception as e:
