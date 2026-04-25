@@ -708,6 +708,23 @@ def fetch_bracket_progress(url: str) -> dict:
                 }
             )
 
+    # --- Snapshot timestamp helpers (POC) ---
+    done_timestamps = []
+    for m in closed_matches:
+        ts = m.get("statusAt")
+        if ts:
+            done_timestamps.append(ts)
+
+    active_timestamps = []
+    for m in active_matches:
+        ts = m.get("statusAt") or m.get("createdAt")
+        if ts:
+            active_timestamps.append(ts)
+
+    matches_in_dominant = sum(
+        1 for m in real_matches if m["resolved_round"] == dominant_round
+    )
+
     return {
         "status": "success",
         "total": total_matches,
@@ -728,4 +745,9 @@ def fetch_bracket_progress(url: str) -> dict:
             all_match_details,
             key=lambda x: (x["round"], x["id"] if isinstance(x["id"], int) else 9999),
         ),
+        "latest_done_status_at": max(done_timestamps) if done_timestamps else None,
+        "earliest_active_status_at": min(active_timestamps)
+        if active_timestamps
+        else None,
+        "matches_in_dominant_round": matches_in_dominant,
     }

@@ -33,6 +33,7 @@ from database.mongo import (
     increment_staff_closure,
     get_top_staff_stats,
     get_matcherino_id_from_active,
+    insert_tourney_snapshot,
 )
 
 # Import Config and Utils
@@ -100,6 +101,50 @@ class PayoutResetConfirmView(discord.ui.View):
         self.value = False
         await interaction.response.defer()
         self.stop()
+
+
+class MLDataCollectionPromptView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=60)
+        self.value = None
+
+    @discord.ui.button(
+        label="Enable ML Data Collection", style=discord.ButtonStyle.green
+    )
+    async def enable(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.value = True
+        await interaction.response.defer()
+        self.stop()
+
+    @discord.ui.button(label="Skip", style=discord.ButtonStyle.grey)
+    async def skip(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.value = False
+        await interaction.response.defer()
+        self.stop()
+
+
+async def _write_snapshot(data: dict, session: dict):
+    """Write a tournament state snapshot to MongoDB."""
+    now = datetime.datetime.now(datetime.timezone.utc)
+    snapshot = {
+        "timestamp": now.isoformat(),
+        "matcherino_id": session.get("matcherino_id"),
+        "dominant_round": data.get("dominant_round"),
+        "max_round": data.get("max_round"),
+        "round_position_from_end": data.get("max_round", 0)
+        - data.get("dominant_round", 0),
+        "matches_in_dominant_round": data.get("matches_in_dominant_round"),
+        "bottleneck_count": len(data.get("bottlenecks", [])),
+        "completion_pct": data.get("completion_pct"),
+        "total_matches": data.get("total"),
+        "closed_matches": data.get("closed"),
+        "active_count": data.get("active_count"),
+        "time_of_day": now.hour + now.minute / 60,
+        "day_of_week": now.weekday(),
+        "latest_done_status_at": data.get("latest_done_status_at"),
+        "earliest_active_status_at": data.get("earliest_active_status_at"),
+    }
+    await insert_tourney_snapshot(snapshot)
 
 
 class QueueDashboard(commands.Cog):
@@ -467,6 +512,13 @@ class QueueDashboard(commands.Cog):
             data = fetch_bracket_progress(bracket_url)
             if data.get("status") != "success":
                 return
+
+            # --- POC: Snapshot data collection ---
+            if session.get("collect_data"):
+                try:
+                    await _write_snapshot(data, session)
+                except Exception as e:
+                    print(f"⚠️ Snapshot collection error: {e}")
 
             try:
                 await self.announce_high_stakes_matches(m_id, data)
@@ -956,9 +1008,11 @@ class QueueDashboard(commands.Cog):
             except Exception as e:
                 print(f"Refresher error in {channel.name}: {e}")
 
-    @tasks.loop(minutes=5)
+    @tasks.loop(
+        minutes=1
+    )  # TODO: revert to minutes=5 before merging to main (snapshot POC testing)
     async def progress_dashboard_task(self):
-        """Refreshes the tournament progress dashboard every 5 minutes."""
+        """Refreshes the tournament progress dashboard every 1 minute (POC testing)."""
         await self.bot.wait_until_ready()
         await self.update_progress_dashboard()
 
@@ -2336,8 +2390,13 @@ def setup_tourney_commands(bot: commands.Bot):
     @app_commands.command(
         name="set-matcherino", description="STAFF ONLY: Set the active Matcherino ID."
     )
-    @app_commands.describe(m_id="The numeric Matcherino ID (e.g., 180454)")
-    async def set_matcherino(interaction: discord.Interaction, m_id: str):
+    @app_commands.describe(
+        m_id="The numeric Matcherino ID (e.g., 180454)",
+        collect_data="Enable ML training data collection for this tournament",
+    )
+    async def set_matcherino(
+        interaction: discord.Interaction, m_id: str, collect_data: bool = False
+    ):
         if not is_staff(interaction.user):
             await interaction.response.send_message(
                 "❌ Permission denied.", ephemeral=True
@@ -2359,10 +2418,15 @@ def setup_tourney_commands(bot: commands.Bot):
             )
             return
 
-        await update_matcherino_id(active_session["_id"], clean_id)
-        await interaction.response.send_message(
-            f"✅ Active Matcherino ID set to: `{clean_id}`", ephemeral=True
+        await update_matcherino_id(
+            active_session["_id"],
+            clean_id,
+            collect_data=collect_data,
         )
+        msg = f"✅ Active Matcherino ID set to: `{clean_id}`"
+        if collect_data:
+            msg += " | 🧪 ML data collection enabled."
+        await interaction.response.send_message(msg, ephemeral=True)
 
     @app_commands.command(
         name="tourney-test-mode",

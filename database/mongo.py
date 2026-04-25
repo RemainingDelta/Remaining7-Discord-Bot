@@ -884,13 +884,32 @@ async def get_top_staff_stats(session_id, limit: int = 12):
         return []
 
 
-async def update_matcherino_id(session_id: str, matcherino_id: str):
+async def update_matcherino_id(
+    session_id: str, matcherino_id: str, collect_data: bool = None
+):
     """Saves the Matcherino ID to the active tournament session."""
     if tourney_sessions is None:
         return
+    update_fields = {"matcherino_id": matcherino_id}
+    if collect_data is not None:
+        update_fields["collect_data"] = collect_data
+    await tourney_sessions.update_one({"_id": session_id}, {"$set": update_fields})
+
+
+async def set_tourney_collect_data(session_id, enabled: bool):
+    """Sets the collect_data flag on a tournament session."""
+    if tourney_sessions is None:
+        return
     await tourney_sessions.update_one(
-        {"_id": session_id}, {"$set": {"matcherino_id": matcherino_id}}
+        {"_id": session_id}, {"$set": {"collect_data": enabled}}
     )
+
+
+async def insert_tourney_snapshot(snapshot: dict):
+    """Inserts a single snapshot document into tourney_snapshots."""
+    if db is None:
+        return
+    await db["tourney_snapshots"].insert_one(snapshot)
 
 
 async def get_matcherino_id_from_active():
