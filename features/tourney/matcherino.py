@@ -708,22 +708,26 @@ def fetch_bracket_progress(url: str) -> dict:
                 }
             )
 
-    # --- Snapshot timestamp helpers (POC) ---
-    done_timestamps = []
-    for m in closed_matches:
-        ts = m.get("statusAt")
-        if ts:
-            done_timestamps.append(ts)
-
-    active_timestamps = []
-    for m in active_matches:
+    # --- Per-round timestamp data (for snapshot round_duration) ---
+    round_timestamps = {}
+    for m in real_matches:
+        r = m["resolved_round"]
+        if r not in round_timestamps:
+            round_timestamps[r] = {
+                "start_candidates": [],
+                "end_candidates": [],
+                "match_count": 0,
+            }
+        round_timestamps[r]["match_count"] += 1
+        # min(statusAt) across all matches in the round = round start proxy
         ts = m.get("statusAt") or m.get("createdAt")
         if ts:
-            active_timestamps.append(ts)
-
-    matches_in_dominant = sum(
-        1 for m in real_matches if m["resolved_round"] == dominant_round
-    )
+            round_timestamps[r]["start_candidates"].append(ts)
+        # max(endAt) across done matches only = round end proxy
+        if str(m.get("status", "")).lower() in finished_statuses:
+            end_ts = m.get("endAt") or m.get("statusAt")
+            if end_ts:
+                round_timestamps[r]["end_candidates"].append(end_ts)
 
     return {
         "status": "success",
@@ -745,9 +749,5 @@ def fetch_bracket_progress(url: str) -> dict:
             all_match_details,
             key=lambda x: (x["round"], x["id"] if isinstance(x["id"], int) else 9999),
         ),
-        "latest_done_status_at": max(done_timestamps) if done_timestamps else None,
-        "earliest_active_status_at": min(active_timestamps)
-        if active_timestamps
-        else None,
-        "matches_in_dominant_round": matches_in_dominant,
+        "round_timestamps": round_timestamps,
     }

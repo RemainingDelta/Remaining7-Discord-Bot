@@ -912,6 +912,16 @@ async def insert_tourney_snapshot(snapshot: dict):
     await db["tourney_snapshots"].insert_one(snapshot)
 
 
+async def get_last_tourney_snapshot(tourney_id: str):
+    """Returns the most recent snapshot for a tourney, or None."""
+    if db is None:
+        return None
+    return await db["tourney_snapshots"].find_one(
+        {"tourney_id": tourney_id},
+        sort=[("snapshot_at", -1)],
+    )
+
+
 async def get_matcherino_id_from_active():
     """Retrieves the Matcherino ID from the currently active session."""
     session = await get_active_tourney_session()

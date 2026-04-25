@@ -33,7 +33,9 @@ from database.mongo import (
     increment_staff_closure,
     get_top_staff_stats,
     get_matcherino_id_from_active,
+    set_tourney_collect_data,
     insert_tourney_snapshot,
+    get_last_tourney_snapshot,
 )
 
 # Import Config and Utils
@@ -103,46 +105,62 @@ class PayoutResetConfirmView(discord.ui.View):
         self.stop()
 
 
-class MLDataCollectionPromptView(discord.ui.View):
-    def __init__(self):
-        super().__init__(timeout=60)
-        self.value = None
-
-    @discord.ui.button(
-        label="Enable ML Data Collection", style=discord.ButtonStyle.green
-    )
-    async def enable(self, interaction: discord.Interaction, button: discord.ui.Button):
-        self.value = True
-        await interaction.response.defer()
-        self.stop()
-
-    @discord.ui.button(label="Skip", style=discord.ButtonStyle.grey)
-    async def skip(self, interaction: discord.Interaction, button: discord.ui.Button):
-        self.value = False
-        await interaction.response.defer()
-        self.stop()
-
-
 async def _write_snapshot(data: dict, session: dict):
-    """Write a tournament state snapshot to MongoDB."""
+    """Write a snapshot on every poll; include round_duration only on transition."""
+    tourney_id = session.get("matcherino_id")
+    if not tourney_id:
+        return
+
+    current_dominant = data.get("dominant_round")
+    if current_dominant is None:
+        return
+
+    # Check for round transition
+    last_snapshot = await get_last_tourney_snapshot(tourney_id)
+    last_dominant = last_snapshot.get("dominant_round") if last_snapshot else None
+
+    is_transition = last_dominant is None or last_dominant != current_dominant
+
+    # On transition, compute round_duration for the completed round
+    round_duration = None
+    match_count = 0
+    if is_transition:
+        completed_round = (
+            last_dominant if last_dominant is not None else current_dominant
+        )
+        round_ts = data.get("round_timestamps", {}).get(completed_round, {})
+        match_count = round_ts.get("match_count", 0)
+
+        start_candidates = round_ts.get("start_candidates", [])
+        end_candidates = round_ts.get("end_candidates", [])
+        if start_candidates and end_candidates:
+            try:
+                start_dt = datetime.datetime.fromisoformat(
+                    min(start_candidates).replace("Z", "+00:00")
+                )
+                end_dt = datetime.datetime.fromisoformat(
+                    max(end_candidates).replace("Z", "+00:00")
+                )
+                round_duration = (end_dt - start_dt).total_seconds()
+            except (ValueError, TypeError):
+                pass
+
     now = datetime.datetime.now(datetime.timezone.utc)
+    max_round = data.get("max_round", 0)
+
     snapshot = {
-        "timestamp": now.isoformat(),
-        "matcherino_id": session.get("matcherino_id"),
-        "dominant_round": data.get("dominant_round"),
-        "max_round": data.get("max_round"),
-        "round_position_from_end": data.get("max_round", 0)
-        - data.get("dominant_round", 0),
-        "matches_in_dominant_round": data.get("matches_in_dominant_round"),
+        "tourney_id": tourney_id,
+        "snapshot_at": now.isoformat(),
+        "dominant_round": current_dominant,
+        "round_position_from_end": max_round - current_dominant,
+        "match_count_in_round": match_count if is_transition else None,
+        "round_duration": round_duration,
+        "duration_per_match": (round_duration / match_count)
+        if round_duration and match_count
+        else None,
         "bottleneck_count": len(data.get("bottlenecks", [])),
-        "completion_pct": data.get("completion_pct"),
-        "total_matches": data.get("total"),
-        "closed_matches": data.get("closed"),
-        "active_count": data.get("active_count"),
-        "time_of_day": now.hour + now.minute / 60,
+        "time_of_day": now.hour,
         "day_of_week": now.weekday(),
-        "latest_done_status_at": data.get("latest_done_status_at"),
-        "earliest_active_status_at": data.get("earliest_active_status_at"),
     }
     await insert_tourney_snapshot(snapshot)
 
@@ -1455,7 +1473,7 @@ def setup_tourney_commands(bot: commands.Bot):
                             print(f"Failed to delete pre-tourney ticket {ch.name}: {e}")
 
         await ctx.send(
-            f"✅ Tourney Started! Channels updated and {deleted_count} pre-tourney tickets deleted.\n⚠️ Don't forget to set the new Matcherino ID with `/set-matcherino`."
+            f"✅ Tourney Started! Channels updated and {deleted_count} pre-tourney tickets deleted.\n⚠️ Don't forget to set the new Matcherino ID with `/set-matcherino` and enable ML data collection if needed."
         )
 
         # Grant Tourney Admin the Timeout Members permission for the duration of the tourney.
@@ -1667,6 +1685,7 @@ def setup_tourney_commands(bot: commands.Bot):
 
             # 4. Close Session in DB
             await end_tourney_session(session["_id"])
+            await set_tourney_collect_data(session["_id"], False)
             clear_bracket_teams_cache()
         # ------------------------------
 
