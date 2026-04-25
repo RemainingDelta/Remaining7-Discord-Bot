@@ -1,4 +1,4 @@
-.PHONY: test lint fix ci
+.PHONY: test lint fix ci up
 
 test:
 	BOT_MODE=TEST pytest
@@ -12,3 +12,6 @@ fix:
 	ruff format .
 
 ci: lint test
+
+up:
+	python main.py
