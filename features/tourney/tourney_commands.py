@@ -2443,7 +2443,7 @@ def setup_tourney_commands(bot: commands.Bot):
         msg = f"✅ Active Matcherino ID set to: `{clean_id}`"
         if collect_data:
             msg += " | 🧪 ML data collection enabled."
-        await interaction.response.send_message(msg, ephemeral=True)
+        await interaction.response.send_message(msg)
 
     @app_commands.command(
         name="tourney-test-mode",
