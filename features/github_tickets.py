@@ -245,6 +245,52 @@ async def update_github_issue(issue_number: int, body: str) -> None:
                 )
 
 
+class ConfirmView(discord.ui.View):
+    def __init__(self, raw_text: str, author_id: int):
+        super().__init__(timeout=60)
+        self.raw_text = raw_text
+        self.author_id = author_id
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        return interaction.user.id == self.author_id
+
+    async def on_timeout(self):
+        for item in self.children:
+            item.disabled = True
+        if self.message:
+            await self.message.edit(view=self)
+
+    @discord.ui.button(label="Yes", style=discord.ButtonStyle.green)
+    async def confirm(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ):
+        await interaction.response.edit_message(
+            content="Creating GitHub issue...", view=None
+        )
+
+        ticket = await call_gemini(self.raw_text)
+
+        label_map = {"bug": "Bug", "enhancement": "Enhancement", "feature": "Feature"}
+        label = label_map[ticket["type"]]
+
+        issue = await create_github_issue(ticket["title"], ticket["body"], label)
+
+        branch = f"{issue['number']}-{label}"
+        updated_body = ticket["body"].replace(f"-{label}", branch)
+        await update_github_issue(issue["number"], updated_body)
+
+        await interaction.edit_original_response(
+            content=f"Created issue #{issue['number']}: <{issue['html_url']}>\nBranch: `{branch}`",
+            view=None,
+        )
+
+    @discord.ui.button(label="No", style=discord.ButtonStyle.red)
+    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
+        for item in self.children:
+            item.disabled = True
+        await interaction.response.edit_message(content="Cancelled", view=None)
+
+
 class GitHubTickets(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
@@ -269,24 +315,9 @@ class GitHubTickets(commands.Cog):
             )
             return
 
-        reply = await message.reply("Creating GitHub issue...")
-
-        ticket = await call_gemini(raw_text)
-
-        # Fix 2: Map type to label name
-        label_map = {"bug": "Bug", "enhancement": "Enhancement", "feature": "Feature"}
-        label = label_map[ticket["type"]]
-
-        issue = await create_github_issue(ticket["title"], ticket["body"], label)
-
-        # Fix 4: Patch the body to prepend issue number to branch field
-        branch = f"{issue['number']}-{label}"
-        updated_body = ticket["body"].replace(f"-{label}", branch)
-        await update_github_issue(issue["number"], updated_body)
-
-        await reply.edit(
-            content=f"Created issue #{issue['number']}: <{issue['html_url']}>\nBranch: `{branch}`"
-        )
+        view = ConfirmView(raw_text, message.author.id)
+        reply = await message.reply("Create a GitHub issue?", view=view)
+        view.message = reply
 
 
 async def setup(bot):
