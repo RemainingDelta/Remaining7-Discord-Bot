@@ -708,6 +708,27 @@ def fetch_bracket_progress(url: str) -> dict:
                 }
             )
 
+    # --- Per-round timestamp data (for snapshot round_duration) ---
+    round_timestamps = {}
+    for m in real_matches:
+        r = m["resolved_round"]
+        if r not in round_timestamps:
+            round_timestamps[r] = {
+                "start_candidates": [],
+                "end_candidates": [],
+                "match_count": 0,
+            }
+        round_timestamps[r]["match_count"] += 1
+        # min(statusAt) across all matches in the round = round start proxy
+        ts = m.get("statusAt") or m.get("createdAt")
+        if ts:
+            round_timestamps[r]["start_candidates"].append(ts)
+        # max(endAt) across done matches only = round end proxy
+        if str(m.get("status", "")).lower() in finished_statuses:
+            end_ts = m.get("endAt") or m.get("statusAt")
+            if end_ts:
+                round_timestamps[r]["end_candidates"].append(end_ts)
+
     return {
         "status": "success",
         "total": total_matches,
@@ -728,4 +749,5 @@ def fetch_bracket_progress(url: str) -> dict:
             all_match_details,
             key=lambda x: (x["round"], x["id"] if isinstance(x["id"], int) else 9999),
         ),
+        "round_timestamps": round_timestamps,
     }
