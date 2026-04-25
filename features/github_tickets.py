@@ -6,7 +6,7 @@ import aiohttp
 import discord
 from discord.ext import commands
 
-from features.config import GITHUB_REPO
+from features.config import GITHUB_REPO, TICKET_CREATOR_ID
 
 GEMINI_TOKEN = os.getenv("GEMINI_TOKEN")
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
@@ -255,6 +255,9 @@ class GitHubTickets(commands.Cog):
             return
 
         if not re.search(rf"<@!?{self.bot.user.id}>", message.content):
+            return
+
+        if message.author.id != TICKET_CREATOR_ID:
             return
 
         raw_text = re.sub(rf"<@!?{self.bot.user.id}>", "", message.content).strip()
