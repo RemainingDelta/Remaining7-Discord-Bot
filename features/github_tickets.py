@@ -311,12 +311,15 @@ class GitHubTickets(commands.Cog):
         if not raw_text:
             await message.reply(
                 "@ me with a description of your bug, enhancement, or feature"
-                " and I'll create a GitHub issue."
+                " and I'll create a GitHub issue.",
+                mention_author=True,
             )
             return
 
         view = ConfirmView(raw_text, message.author.id)
-        reply = await message.reply("Create a GitHub issue?", view=view)
+        reply = await message.reply(
+            "Create a GitHub issue?", view=view, mention_author=True
+        )
         view.message = reply
 
 
