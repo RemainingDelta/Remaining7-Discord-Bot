@@ -264,6 +264,7 @@ class ConfirmView(discord.ui.View):
     async def confirm(
         self, interaction: discord.Interaction, button: discord.ui.Button
     ):
+        self.stop()
         await interaction.response.edit_message(
             content="Creating GitHub issue...", view=None
         )
@@ -286,8 +287,7 @@ class ConfirmView(discord.ui.View):
 
     @discord.ui.button(label="No", style=discord.ButtonStyle.red)
     async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
-        for item in self.children:
-            item.disabled = True
+        self.stop()
         await interaction.response.edit_message(content="Cancelled", view=None)
 
 
