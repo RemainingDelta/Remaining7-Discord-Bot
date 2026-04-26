@@ -33,6 +33,9 @@ from database.mongo import (
     increment_staff_closure,
     get_top_staff_stats,
     get_matcherino_id_from_active,
+    set_tourney_collect_data,
+    insert_tourney_snapshot,
+    get_last_tourney_snapshot,
 )
 
 # Import Config and Utils
@@ -100,6 +103,66 @@ class PayoutResetConfirmView(discord.ui.View):
         self.value = False
         await interaction.response.defer()
         self.stop()
+
+
+async def _write_snapshot(data: dict, session: dict):
+    """Write a snapshot on every poll; include round_duration only on transition."""
+    tourney_id = session.get("matcherino_id")
+    if not tourney_id:
+        return
+
+    current_dominant = data.get("dominant_round")
+    if current_dominant is None:
+        return
+
+    # Check for round transition
+    last_snapshot = await get_last_tourney_snapshot(tourney_id)
+    last_dominant = last_snapshot.get("dominant_round") if last_snapshot else None
+
+    is_transition = last_dominant is None or last_dominant != current_dominant
+
+    # On transition, compute round_duration for the completed round
+    round_duration = None
+    match_count = 0
+    if is_transition:
+        completed_round = (
+            last_dominant if last_dominant is not None else current_dominant
+        )
+        round_ts = data.get("round_timestamps", {}).get(completed_round, {})
+        match_count = round_ts.get("match_count", 0)
+
+        start_candidates = round_ts.get("start_candidates", [])
+        end_candidates = round_ts.get("end_candidates", [])
+        if start_candidates and end_candidates:
+            try:
+                start_dt = datetime.datetime.fromisoformat(
+                    min(start_candidates).replace("Z", "+00:00")
+                )
+                end_dt = datetime.datetime.fromisoformat(
+                    max(end_candidates).replace("Z", "+00:00")
+                )
+                round_duration = (end_dt - start_dt).total_seconds()
+            except (ValueError, TypeError):
+                pass
+
+    now = datetime.datetime.now(datetime.timezone.utc)
+    max_round = data.get("max_round", 0)
+
+    snapshot = {
+        "tourney_id": tourney_id,
+        "snapshot_at": now.isoformat(),
+        "dominant_round": current_dominant,
+        "round_position_from_end": max_round - current_dominant,
+        "match_count_in_round": match_count if is_transition else None,
+        "round_duration": round_duration,
+        "duration_per_match": (round_duration / match_count)
+        if round_duration and match_count
+        else None,
+        "bottleneck_count": len(data.get("bottlenecks", [])),
+        "time_of_day": now.hour,
+        "day_of_week": now.weekday(),
+    }
+    await insert_tourney_snapshot(snapshot)
 
 
 class QueueDashboard(commands.Cog):
@@ -467,6 +530,13 @@ class QueueDashboard(commands.Cog):
             data = fetch_bracket_progress(bracket_url)
             if data.get("status") != "success":
                 return
+
+            # --- POC: Snapshot data collection ---
+            if session.get("collect_data"):
+                try:
+                    await _write_snapshot(data, session)
+                except Exception as e:
+                    print(f"⚠️ Snapshot collection error: {e}")
 
             try:
                 await self.announce_high_stakes_matches(m_id, data)
@@ -958,7 +1028,7 @@ class QueueDashboard(commands.Cog):
 
     @tasks.loop(minutes=5)
     async def progress_dashboard_task(self):
-        """Refreshes the tournament progress dashboard every 5 minutes."""
+        """Refreshes the tournament progress dashboard every 1 minute (POC testing)."""
         await self.bot.wait_until_ready()
         await self.update_progress_dashboard()
 
@@ -1403,7 +1473,7 @@ def setup_tourney_commands(bot: commands.Bot):
                             print(f"Failed to delete pre-tourney ticket {ch.name}: {e}")
 
         await ctx.send(
-            f"✅ Tourney Started! Channels updated and {deleted_count} pre-tourney tickets deleted."
+            f"✅ Tourney Started! Channels updated and {deleted_count} pre-tourney tickets deleted.\n⚠️ Don't forget to set the new Matcherino ID with `/set-matcherino` and enable ML data collection if needed."
         )
 
         # Grant Tourney Admin the Timeout Members permission for the duration of the tourney.
@@ -1419,6 +1489,23 @@ def setup_tourney_commands(bot: commands.Bot):
         # START THE DASHBOARD
         dashboard_cog = bot.get_cog("QueueDashboard")
         if dashboard_cog:
+            dashboard_cog._announcement_matcherino_id = None
+            dashboard_cog._winner_announcement_state = {
+                "winner": None,
+                "message_id": None,
+            }
+            dashboard_cog._stage_announcement_state = {
+                "semi_finals": {
+                    "signature": None,
+                    "message_id": None,
+                    "hype_message_id": None,
+                },
+                "finals": {
+                    "signature": None,
+                    "message_id": None,
+                    "hype_message_id": None,
+                },
+            }
             await dashboard_cog.start_dashboard()
 
     @bot.command(name="endtourney")
@@ -1598,6 +1685,7 @@ def setup_tourney_commands(bot: commands.Bot):
 
             # 4. Close Session in DB
             await end_tourney_session(session["_id"])
+            await set_tourney_collect_data(session["_id"], False)
             clear_bracket_teams_cache()
         # ------------------------------
 
@@ -2319,8 +2407,13 @@ def setup_tourney_commands(bot: commands.Bot):
     @app_commands.command(
         name="set-matcherino", description="STAFF ONLY: Set the active Matcherino ID."
     )
-    @app_commands.describe(m_id="The numeric Matcherino ID (e.g., 180454)")
-    async def set_matcherino(interaction: discord.Interaction, m_id: str):
+    @app_commands.describe(
+        m_id="The numeric Matcherino ID (e.g., 180454)",
+        collect_data="Enable ML training data collection for this tournament",
+    )
+    async def set_matcherino(
+        interaction: discord.Interaction, m_id: str, collect_data: bool = False
+    ):
         if not is_staff(interaction.user):
             await interaction.response.send_message(
                 "❌ Permission denied.", ephemeral=True
@@ -2342,10 +2435,15 @@ def setup_tourney_commands(bot: commands.Bot):
             )
             return
 
-        await update_matcherino_id(active_session["_id"], clean_id)
-        await interaction.response.send_message(
-            f"✅ Active Matcherino ID set to: `{clean_id}`", ephemeral=True
+        await update_matcherino_id(
+            active_session["_id"],
+            clean_id,
+            collect_data=collect_data,
         )
+        msg = f"✅ Active Matcherino ID set to: `{clean_id}`"
+        if collect_data:
+            msg += " | 🧪 ML data collection enabled."
+        await interaction.response.send_message(msg)
 
     @app_commands.command(
         name="tourney-test-mode",
@@ -2815,11 +2913,23 @@ def setup_tourney_commands(bot: commands.Bot):
             )
 
             if is_sa_tourney:
-                description = f"# ⚠️ ¡Atención!\n# Por favor, usa {support_mention} para abrir un ticket de soporte para el torneo."
+                embeds = [
+                    discord.Embed(
+                        description=f"# ⚠️ ¡Atención!\n# Por favor, usa {support_mention} para abrir un ticket de soporte para el torneo.",
+                        color=discord.Color.red(),
+                    ),
+                    discord.Embed(
+                        description=f"# ⚠️ Atenção!\n# Por favor, use {support_mention} para abrir um ticket de suporte para o torneio.",
+                        color=discord.Color.red(),
+                    ),
+                ]
             else:
-                description = f"# ⚠️ Attention!\n# Please use {support_mention} to open a support ticket for the tournament."
-
-            embed = discord.Embed(description=description, color=discord.Color.red())
+                embeds = [
+                    discord.Embed(
+                        description=f"# ⚠️ Attention!\n# Please use {support_mention} to open a support ticket for the tournament.",
+                        color=discord.Color.red(),
+                    )
+                ]
 
             # Try deleting the previously tracked sticky message first.
             old_msg_id = sticky_redirect_message_ids.get(channel.id)
@@ -2834,13 +2944,13 @@ def setup_tourney_commands(bot: commands.Bot):
             async for msg in channel.history(limit=30):
                 if msg.author != bot.user or not msg.embeds:
                     continue
-                if msg.embeds[0].description == embed.description:
+                if msg.embeds[0].description == embeds[0].description:
                     try:
                         await msg.delete()
                     except (discord.NotFound, discord.Forbidden):
                         pass
 
-            new_msg = await channel.send(embed=embed)
+            new_msg = await channel.send(embeds=embeds)
             sticky_redirect_message_ids[channel.id] = new_msg.id
 
     @bot.listen()
