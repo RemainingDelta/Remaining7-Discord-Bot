@@ -2,6 +2,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 from datetime import timedelta, datetime
+from math import ceil
 import asyncio
 
 from database.mongo import add_hacked_user, get_hacked_users, remove_hacked_user
@@ -229,24 +230,71 @@ class Security(commands.Cog):
             )
             return
 
-        embed = discord.Embed(
-            title="🚨 Hacked Users List", color=discord.Color.dark_red()
+        view = HackedListView(users, interaction.user)
+        await interaction.followup.send(embed=view.create_embed(), view=view)
+
+
+class HackedListView(discord.ui.View):
+    def __init__(self, users: list, author: discord.User):
+        super().__init__(timeout=300)
+        self.users = sorted(
+            users, key=lambda u: u.get("timestamp", datetime.min), reverse=True
         )
-        description_lines = []
-        for u in users:
+        self.author = author
+        self.per_page = 10
+        self.current_page = 0
+        self.total_pages = ceil(len(users) / self.per_page)
+        self.update_buttons()
+
+    def create_embed(self) -> discord.Embed:
+        start = self.current_page * self.per_page
+        end = start + self.per_page
+        page_users = self.users[start:end]
+
+        entries = []
+        for u in page_users:
             user_id = u["_id"]
             reason = u.get("reason", "No reason provided")
             time_str = u.get("timestamp", datetime.utcnow()).strftime("%Y-%m-%d")
-            description_lines.append(
-                f"• <@{user_id}> (`{user_id}`)\n   Reason: *{reason}* ({time_str})"
+            entries.append(
+                f"<@{user_id}> (`{user_id}`)\nReason: *{reason}* ({time_str})"
             )
 
-        full_text = "\n".join(description_lines)
-        if len(full_text) > 4000:
-            full_text = full_text[:3900] + "..."
+        embed = discord.Embed(
+            title="🚨 Hacked Users List",
+            description="\n\n".join(entries),
+            color=discord.Color.dark_red(),
+        )
+        embed.set_footer(text=f"Page {self.current_page + 1}/{self.total_pages}")
+        return embed
 
-        embed.description = full_text
-        await interaction.followup.send(embed=embed)
+    def update_buttons(self):
+        self.prev_button.disabled = self.current_page == 0
+        self.next_button.disabled = self.current_page == self.total_pages - 1
+
+    @discord.ui.button(
+        label="◀ Previous", style=discord.ButtonStyle.blurple, disabled=True
+    )
+    async def prev_button(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ):
+        if interaction.user.id != self.author.id:
+            await interaction.response.defer()
+            return
+        self.current_page -= 1
+        self.update_buttons()
+        await interaction.response.edit_message(embed=self.create_embed(), view=self)
+
+    @discord.ui.button(label="Next ▶", style=discord.ButtonStyle.blurple)
+    async def next_button(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ):
+        if interaction.user.id != self.author.id:
+            await interaction.response.defer()
+            return
+        self.current_page += 1
+        self.update_buttons()
+        await interaction.response.edit_message(embed=self.create_embed(), view=self)
 
 
 async def setup(bot):
