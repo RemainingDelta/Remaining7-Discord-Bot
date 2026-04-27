@@ -229,7 +229,7 @@ async def add_hacked_user(user_id: str, reason: str = "Compromised Account"):
 async def get_hacked_users():
     """Retrieves all currently hacked users."""
     cursor = db.hacked_users.find({"status": "hacked"})
-    return await cursor.to_list(length=100)
+    return await cursor.to_list(length=None)
 
 
 async def remove_hacked_user(user_id: str):
