@@ -977,9 +977,17 @@ class Economy(commands.Cog):
                 description=f"{interaction.user.mention}, please provide the following details in this ticket channel:\n\n{instructions}",
                 color=discord.Color.blue(),
             )
-            ticket_embed.add_field(name="Item Price", value=f"{item_price:,} R7 tokens", inline=True)
-            ticket_embed.add_field(name="Balance Before", value=f"{balance_display_before:,} R7 tokens", inline=True)
-            ticket_embed.add_field(name="Balance After", value=f"{balance_after:,} R7 tokens", inline=True)
+            ticket_embed.add_field(
+                name="Item Price", value=f"{item_price:,} R7 tokens", inline=True
+            )
+            ticket_embed.add_field(
+                name="Balance Before",
+                value=f"{balance_display_before:,} R7 tokens",
+                inline=True,
+            )
+            ticket_embed.add_field(
+                name="Balance After", value=f"{balance_after:,} R7 tokens", inline=True
+            )
             await ch.send(embed=ticket_embed)
 
         except Exception as e:
