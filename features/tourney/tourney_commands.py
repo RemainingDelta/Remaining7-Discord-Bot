@@ -1508,6 +1508,14 @@ def setup_tourney_commands(bot: commands.Bot):
             }
             await dashboard_cog.start_dashboard()
 
+        # Apply 60s slow mode to general channel during tourney.
+        general_channel = guild.get_channel(GENERAL_CHANNEL_ID)
+        if isinstance(general_channel, discord.TextChannel):
+            try:
+                await general_channel.edit(slowmode_delay=60)
+            except Exception as e:
+                print(f"Failed to set slow mode on general channel: {e}")
+
     @bot.command(name="endtourney")
     async def end_tourney_command(ctx: commands.Context):
         """
@@ -1690,6 +1698,14 @@ def setup_tourney_commands(bot: commands.Bot):
         # ------------------------------
 
         await unlock_command(ctx)
+
+        # Remove slow mode from general channel now that tourney is over.
+        general_channel = guild.get_channel(GENERAL_CHANNEL_ID)
+        if isinstance(general_channel, discord.TextChannel):
+            try:
+                await general_channel.edit(slowmode_delay=0)
+            except Exception as e:
+                print(f"Failed to remove slow mode on general channel: {e}")
 
         from features.config import SPANISH_CHANNEL_ID
 
