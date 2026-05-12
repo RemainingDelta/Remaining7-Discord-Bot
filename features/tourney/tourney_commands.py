@@ -1513,7 +1513,9 @@ def setup_tourney_commands(bot: commands.Bot):
         if isinstance(general_channel, discord.TextChannel):
             try:
                 await general_channel.edit(slowmode_delay=60)
-                await ctx.send(f"🐢 Slow mode (60s) has been enabled in {general_channel.mention}.")
+                await ctx.send(
+                    f"🐢 Slow mode (60s) has been enabled in {general_channel.mention}."
+                )
             except Exception as e:
                 print(f"Failed to set slow mode on general channel: {e}")
 
@@ -1705,7 +1707,9 @@ def setup_tourney_commands(bot: commands.Bot):
         if isinstance(general_channel, discord.TextChannel):
             try:
                 await general_channel.edit(slowmode_delay=0)
-                await ctx.send(f"🐇 Slow mode has been removed from {general_channel.mention}.")
+                await ctx.send(
+                    f"🐇 Slow mode has been removed from {general_channel.mention}."
+                )
             except Exception as e:
                 print(f"Failed to remove slow mode on general channel: {e}")
 
