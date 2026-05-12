@@ -159,6 +159,9 @@ class Security(commands.Cog):
         if not await self.has_security_permission(ctx):
             return
 
+        if ctx.message.content.strip() != "!hacked":
+            return
+
         if not ctx.message.reference:
             await ctx.send("❌ Reply to a message with `!hacked` to flag that user.")
             return
