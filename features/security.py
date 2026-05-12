@@ -27,9 +27,7 @@ class Security(commands.Cog):
         return False
 
     # --- CORE LOGIC: The shared hacked/purge process ---
-    async def _execute_hacked_action(
-        self, guild, target_user, moderator, days_to_clean=7
-    ):
+    async def _execute_hacked_action(self, guild, target_user, moderator):
         """
         Shared logic that performs the timeout, DB update, and message purge.
         """
@@ -69,7 +67,7 @@ class Security(commands.Cog):
             print(f"Failed to DM hacked user {target_user.id}: {e}")
 
         # 5. Global Message Purge
-        cutoff_date = datetime.utcnow() - timedelta(days=days_to_clean)
+        cutoff_date = datetime.utcnow() - timedelta(hours=1)
         total_deleted = 0
         channels_checked = 0
 
@@ -108,7 +106,7 @@ class Security(commands.Cog):
         embed.add_field(name="Status", value=timeout_status, inline=False)
         embed.add_field(
             name="Cleanup Stats",
-            value=f"🗑️ Deleted **{total_deleted} messages** across **{channels_checked} channels** (Past {days_to_clean} days).",
+            value=f"🗑️ Deleted **{total_deleted} messages** across **{channels_checked} channels** (Past 1 hour).",
             inline=False,
         )
         embed.add_field(
@@ -131,14 +129,11 @@ class Security(commands.Cog):
         name="hacked",
         description="MOD/ADMIN: Flag user as hacked, timeout them, and delete messages.",
     )
-    @app_commands.describe(
-        user="The hacked user", days_to_clean="Days of messages to delete (default 7)"
-    )
+    @app_commands.describe(user="The hacked user")
     async def hacked_slash(
         self,
         interaction: discord.Interaction,
         user: discord.Member,
-        days_to_clean: int = 7,
     ):
         if not await self.has_security_permission(interaction):
             await interaction.response.send_message(
@@ -148,7 +143,7 @@ class Security(commands.Cog):
 
         await interaction.response.defer()
         result_embed = await self._execute_hacked_action(
-            interaction.guild, user, interaction.user, days_to_clean
+            interaction.guild, user, interaction.user
         )
         await interaction.followup.send(embed=result_embed)
 
