@@ -1,0 +1,43 @@
+name: PR Issue Reference Check
+
+on:
+  pull_request:
+    branches: [dev]
+    types: [opened, edited, synchronize, reopened]
+
+jobs:
+  pr-issue-reference-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check issue number is consistent across branch, title, and body
+        env:
+          BRANCH: ${{ github.head_ref }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          # Extract leading issue number from branch name
+          if [[ "$BRANCH" =~ ^([0-9]+)- ]]; then
+            ISSUE_NUM="${BASH_REMATCH[1]}"
+            echo "Issue number: $ISSUE_NUM"
+          else
+            echo "ERROR: Branch name '$BRANCH' does not start with an issue number (e.g. 258-Bug)."
+            exit 1
+          fi
+
+          # Assert PR body contains "Closes #<issue_num>" (case-insensitive)
+          if echo "$PR_BODY" | grep -iqE "closes #${ISSUE_NUM}([^0-9]|$)"; then
+            echo "PR body contains 'Closes #${ISSUE_NUM}'. OK."
+          else
+            echo "ERROR: PR body must contain 'Closes #${ISSUE_NUM}'."
+            exit 1
+          fi
+
+          # Assert PR title references the issue number as a whole word
+          if echo "$PR_TITLE" | grep -qwE "${ISSUE_NUM}"; then
+            echo "PR title references issue #${ISSUE_NUM}. OK."
+          else
+            echo "ERROR: PR title must reference issue number ${ISSUE_NUM}."
+            exit 1
+          fi
+
+          echo "All issue reference checks passed."
