@@ -883,12 +883,14 @@ class Economy(commands.Cog):
                 await interaction.response.send_message(embed=embed, ephemeral=True)
                 return
 
+        await interaction.response.defer()
+
         try:
             if (
                 not isinstance(REDEMPTION_TICKET_CATEGORY_ID, int)
                 or REDEMPTION_TICKET_CATEGORY_ID <= 0
             ):
-                await interaction.response.send_message(
+                await interaction.followup.send(
                     "❌ Redemption category is not configured.",
                     ephemeral=True,
                 )
@@ -896,11 +898,13 @@ class Economy(commands.Cog):
 
             category = interaction.guild.get_channel(REDEMPTION_TICKET_CATEGORY_ID)
             if not isinstance(category, discord.CategoryChannel):
-                await interaction.response.send_message(
+                await interaction.followup.send(
                     "❌ Configured redemption category channel was not found.",
                     ephemeral=True,
                 )
                 return
+
+            balance_before = await get_user_balance(user_id)
 
             await remove_item_token(user_id, item)
 
@@ -964,17 +968,23 @@ class Economy(commands.Cog):
                 description=f"A ticket has been created in {ch.mention}.\nPlease provide the following details to redeem your **{item_info['display']}**:\n{instructions}",
                 color=discord.Color.green(),
             )
-            await interaction.response.send_message(embed=embed)
+            await interaction.followup.send(embed=embed)
+            item_price = item_info["price"]
+            balance_after = balance_before
+            balance_display_before = balance_before + item_price
             ticket_embed = discord.Embed(
                 title=f"🎫 **{item.title()} Redemption Ticket**",
                 description=f"{interaction.user.mention}, please provide the following details in this ticket channel:\n\n{instructions}",
                 color=discord.Color.blue(),
             )
+            ticket_embed.add_field(name="Item Price", value=f"{item_price:,} R7 tokens", inline=True)
+            ticket_embed.add_field(name="Balance Before", value=f"{balance_display_before:,} R7 tokens", inline=True)
+            ticket_embed.add_field(name="Balance After", value=f"{balance_after:,} R7 tokens", inline=True)
             await ch.send(embed=ticket_embed)
 
         except Exception as e:
             await add_item_token(user_id, item, quantity=1)
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 f"❌ **Error** Failed to create ticket: {e}", ephemeral=True
             )
 
