@@ -1495,6 +1495,9 @@ def setup_tourney_commands(bot: commands.Bot):
             async def _rename_admin_role():
                 try:
                     await admin_role.edit(name="[NOT TOURNEY ADMIN] Admin")
+                    await ctx.send(
+                        f"✏️ **{admin_role_original_name[0]}** has been renamed to **[NOT TOURNEY ADMIN] Admin**."
+                    )
                 except Exception as e:
                     print(f"Failed to rename Admin role: {e}")
 
@@ -1640,19 +1643,6 @@ def setup_tourney_commands(bot: commands.Bot):
                     f"Failed to revoke timeout permission from Tourney Admin role: {e}"
                 )
 
-        # Restore Admin role name.
-        admin_role = guild.get_role(ADMIN_ROLE_ID)
-        if admin_role:
-            original_name = admin_role_original_name[0] or "Admin"
-
-            async def _restore_admin_role():
-                try:
-                    await admin_role.edit(name=original_name)
-                except Exception as e:
-                    print(f"Failed to restore Admin role name: {e}")
-
-            asyncio.create_task(_restore_admin_role())
-
         session = await get_active_tourney_session()
         if session:
             # 1. Calculate Duration
@@ -1728,6 +1718,18 @@ def setup_tourney_commands(bot: commands.Bot):
         # ------------------------------
 
         await unlock_command(ctx)
+
+        # Restore Admin role name.
+        admin_role = guild.get_role(ADMIN_ROLE_ID)
+        if admin_role:
+            original_name = admin_role_original_name[0] or "Admin"
+            try:
+                await admin_role.edit(name=original_name)
+                await ctx.send(
+                    f"✏️ Admin role has been restored to **{original_name}**."
+                )
+            except Exception as e:
+                print(f"Failed to restore Admin role name: {e}")
 
         # Remove slow mode from general channel now that tourney is over.
         general_channel = guild.get_channel(GENERAL_CHANNEL_ID)
