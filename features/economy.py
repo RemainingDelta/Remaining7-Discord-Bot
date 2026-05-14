@@ -682,12 +682,12 @@ class Economy(commands.Cog):
         if should_award_tokens:
             earned_tokens = random.randint(2, 5)
 
-            # Booster Bonus: 7% Chance (Avg 2% increase)
+            # Booster Bonus: 17.5% Chance (Avg 5% increase)
             SERVER_BOOSTER_ROLE_ID = 647685778255642626
             if message.guild:
                 booster_role = message.guild.get_role(SERVER_BOOSTER_ROLE_ID)
                 if booster_role and booster_role in message.author.roles:
-                    if random.random() < 0.07:
+                    if random.random() < 0.175:
                         earned_tokens += 1
 
             current_balance = await get_user_balance(user_id)
@@ -1342,7 +1342,7 @@ class Economy(commands.Cog):
             "*Requires 5 messages sent since your last `/daily` claim.*\n"
             f"🪂 **Supply Drops:** Random crates appear in {general_ch}! Click the button to claim.\n"
             f"🏆 **Events:** Earn massive token rewards in {event_ch}.\n"
-            "🚀 **Booster Bonus:** Server Boosters receive a **2% increase** in coins on average."
+            "🚀 **Booster Bonus:** Server Boosters receive a **5% increase** in coins on average."
         )
         earn_embed.add_field(name="📈 Earning Methods", value=earn_text, inline=False)
         earn_embed.set_thumbnail(url=self.bot.user.display_avatar.url)
