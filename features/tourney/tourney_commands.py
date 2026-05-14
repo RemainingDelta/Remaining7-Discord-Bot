@@ -1161,6 +1161,7 @@ class BlacklistGroup(app_commands.Group):
 
 def setup_tourney_commands(bot: commands.Bot):
     sticky_redirect_state = {"enabled": False, "region": None}
+    admin_role_original_name: list[str | None] = [None]  # mutable container for closure
 
     @bot.command(name="close", aliases=["c"])
     async def close_command(ctx: commands.Context):
@@ -1486,6 +1487,22 @@ def setup_tourney_commands(bot: commands.Bot):
             except Exception as e:
                 print(f"Failed to grant timeout permission to Tourney Admin role: {e}")
 
+        # Rename Admin role to indicate it is not a Tourney Admin.
+        admin_role = guild.get_role(ADMIN_ROLE_ID)
+        if admin_role:
+            admin_role_original_name[0] = admin_role.name
+
+            async def _rename_admin_role():
+                try:
+                    await admin_role.edit(name="[NOT TOURNEY ADMIN] Admin")
+                    await ctx.send(
+                        f"✏️ **{admin_role_original_name[0]}** has been renamed to **[NOT TOURNEY ADMIN] Admin**."
+                    )
+                except Exception as e:
+                    print(f"Failed to rename Admin role: {e}")
+
+            asyncio.create_task(_rename_admin_role())
+
         # START THE DASHBOARD
         dashboard_cog = bot.get_cog("QueueDashboard")
         if dashboard_cog:
@@ -1701,6 +1718,18 @@ def setup_tourney_commands(bot: commands.Bot):
         # ------------------------------
 
         await unlock_command(ctx)
+
+        # Restore Admin role name.
+        admin_role = guild.get_role(ADMIN_ROLE_ID)
+        if admin_role:
+            original_name = admin_role_original_name[0] or "Admin"
+            try:
+                await admin_role.edit(name=original_name)
+                await ctx.send(
+                    f"✏️ Admin role has been restored to **{original_name}**."
+                )
+            except Exception as e:
+                print(f"Failed to restore Admin role name: {e}")
 
         # Remove slow mode from general channel now that tourney is over.
         general_channel = guild.get_channel(GENERAL_CHANNEL_ID)
