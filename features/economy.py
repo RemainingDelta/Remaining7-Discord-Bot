@@ -27,6 +27,7 @@ from database.mongo import (
 # --- CONFIGURATION ---
 from features.config import (
     ADMIN_ROLE_ID,
+    BOTS_CATEGORY_ID,
     GENERAL_CHANNEL_ID,
     EVENT_ANNOUNCEMENTS_CHANNEL_ID,
     SHOP_DATA,
@@ -638,6 +639,10 @@ class Economy(commands.Cog):
         if message.author.bot:
             return
         if message.content.startswith("!"):
+            return
+
+        # Skip token rewards for messages in the 'BOTS' category
+        if message.channel.category and message.channel.category.id == BOTS_CATEGORY_ID:
             return
 
         user_id = str(message.author.id)
