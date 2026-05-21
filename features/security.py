@@ -67,7 +67,7 @@ class Security(commands.Cog):
             print(f"Failed to DM hacked user {target_user.id}: {e}")
 
         # 5. Global Message Purge
-        cutoff_date = datetime.utcnow() - timedelta(hours=1)
+        cutoff_date = datetime.utcnow() - timedelta(hours=12)
         total_deleted = 0
         channels_checked = 0
 
@@ -106,7 +106,7 @@ class Security(commands.Cog):
         embed.add_field(name="Status", value=timeout_status, inline=False)
         embed.add_field(
             name="Cleanup Stats",
-            value=f"🗑️ Deleted **{total_deleted} messages** across **{channels_checked} channels** (Past 1 hour).",
+            value=f"🗑️ Deleted **{total_deleted} messages** across **{channels_checked} channels** (Past 12 hours).",
             inline=False,
         )
         embed.add_field(
