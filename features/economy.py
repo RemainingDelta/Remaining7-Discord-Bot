@@ -27,6 +27,7 @@ from database.mongo import (
 # --- CONFIGURATION ---
 from features.config import (
     ADMIN_ROLE_ID,
+    BOTS_CATEGORY_ID,
     GENERAL_CHANNEL_ID,
     EVENT_ANNOUNCEMENTS_CHANNEL_ID,
     SHOP_DATA,
@@ -640,6 +641,10 @@ class Economy(commands.Cog):
         if message.content.startswith("!"):
             return
 
+        # Skip token rewards for messages in the 'BOTS' category
+        if message.channel.category and message.channel.category.id == BOTS_CATEGORY_ID:
+            return
+
         user_id = str(message.author.id)
         current_timestamp = time.time()
         datetime.utcnow().strftime("%Y-%m-%d")
@@ -682,12 +687,12 @@ class Economy(commands.Cog):
         if should_award_tokens:
             earned_tokens = random.randint(2, 5)
 
-            # Booster Bonus: 7% Chance (Avg 2% increase)
+            # Booster Bonus: 17.5% Chance (Avg 5% increase)
             SERVER_BOOSTER_ROLE_ID = 647685778255642626
             if message.guild:
                 booster_role = message.guild.get_role(SERVER_BOOSTER_ROLE_ID)
                 if booster_role and booster_role in message.author.roles:
-                    if random.random() < 0.07:
+                    if random.random() < 0.175:
                         earned_tokens += 1
 
             current_balance = await get_user_balance(user_id)
@@ -883,12 +888,14 @@ class Economy(commands.Cog):
                 await interaction.response.send_message(embed=embed, ephemeral=True)
                 return
 
+        await interaction.response.defer()
+
         try:
             if (
                 not isinstance(REDEMPTION_TICKET_CATEGORY_ID, int)
                 or REDEMPTION_TICKET_CATEGORY_ID <= 0
             ):
-                await interaction.response.send_message(
+                await interaction.followup.send(
                     "❌ Redemption category is not configured.",
                     ephemeral=True,
                 )
@@ -896,11 +903,13 @@ class Economy(commands.Cog):
 
             category = interaction.guild.get_channel(REDEMPTION_TICKET_CATEGORY_ID)
             if not isinstance(category, discord.CategoryChannel):
-                await interaction.response.send_message(
+                await interaction.followup.send(
                     "❌ Configured redemption category channel was not found.",
                     ephemeral=True,
                 )
                 return
+
+            balance_before = await get_user_balance(user_id)
 
             await remove_item_token(user_id, item)
 
@@ -964,17 +973,31 @@ class Economy(commands.Cog):
                 description=f"A ticket has been created in {ch.mention}.\nPlease provide the following details to redeem your **{item_info['display']}**:\n{instructions}",
                 color=discord.Color.green(),
             )
-            await interaction.response.send_message(embed=embed)
+            await interaction.followup.send(embed=embed)
+            item_price = item_info["price"]
+            balance_after = balance_before
+            balance_display_before = balance_before + item_price
             ticket_embed = discord.Embed(
                 title=f"🎫 **{item.title()} Redemption Ticket**",
                 description=f"{interaction.user.mention}, please provide the following details in this ticket channel:\n\n{instructions}",
                 color=discord.Color.blue(),
             )
+            ticket_embed.add_field(
+                name="Item Price", value=f"{item_price:,} R7 tokens", inline=True
+            )
+            ticket_embed.add_field(
+                name="Balance Before",
+                value=f"{balance_display_before:,} R7 tokens",
+                inline=True,
+            )
+            ticket_embed.add_field(
+                name="Balance After", value=f"{balance_after:,} R7 tokens", inline=True
+            )
             await ch.send(embed=ticket_embed)
 
         except Exception as e:
             await add_item_token(user_id, item, quantity=1)
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 f"❌ **Error** Failed to create ticket: {e}", ephemeral=True
             )
 
@@ -1324,7 +1347,7 @@ class Economy(commands.Cog):
             "*Requires 5 messages sent since your last `/daily` claim.*\n"
             f"🪂 **Supply Drops:** Random crates appear in {general_ch}! Click the button to claim.\n"
             f"🏆 **Events:** Earn massive token rewards in {event_ch}.\n"
-            "🚀 **Booster Bonus:** Server Boosters receive a **2% increase** in coins on average."
+            "🚀 **Booster Bonus:** Server Boosters receive a **5% increase** in coins on average."
         )
         earn_embed.add_field(name="📈 Earning Methods", value=earn_text, inline=False)
         earn_embed.set_thumbnail(url=self.bot.user.display_avatar.url)

@@ -2,6 +2,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 from datetime import timedelta, datetime
+from math import ceil
 import asyncio
 
 from database.mongo import add_hacked_user, get_hacked_users, remove_hacked_user
@@ -26,9 +27,7 @@ class Security(commands.Cog):
         return False
 
     # --- CORE LOGIC: The shared hacked/purge process ---
-    async def _execute_hacked_action(
-        self, guild, target_user, moderator, days_to_clean=7
-    ):
+    async def _execute_hacked_action(self, guild, target_user, moderator):
         """
         Shared logic that performs the timeout, DB update, and message purge.
         """
@@ -68,7 +67,7 @@ class Security(commands.Cog):
             print(f"Failed to DM hacked user {target_user.id}: {e}")
 
         # 5. Global Message Purge
-        cutoff_date = datetime.utcnow() - timedelta(days=days_to_clean)
+        cutoff_date = datetime.utcnow() - timedelta(hours=12)
         total_deleted = 0
         channels_checked = 0
 
@@ -107,7 +106,7 @@ class Security(commands.Cog):
         embed.add_field(name="Status", value=timeout_status, inline=False)
         embed.add_field(
             name="Cleanup Stats",
-            value=f"🗑️ Deleted **{total_deleted} messages** across **{channels_checked} channels** (Past {days_to_clean} days).",
+            value=f"🗑️ Deleted **{total_deleted} messages** across **{channels_checked} channels** (Past 12 hours).",
             inline=False,
         )
         embed.add_field(
@@ -130,14 +129,11 @@ class Security(commands.Cog):
         name="hacked",
         description="MOD/ADMIN: Flag user as hacked, timeout them, and delete messages.",
     )
-    @app_commands.describe(
-        user="The hacked user", days_to_clean="Days of messages to delete (default 7)"
-    )
+    @app_commands.describe(user="The hacked user")
     async def hacked_slash(
         self,
         interaction: discord.Interaction,
         user: discord.Member,
-        days_to_clean: int = 7,
     ):
         if not await self.has_security_permission(interaction):
             await interaction.response.send_message(
@@ -147,7 +143,7 @@ class Security(commands.Cog):
 
         await interaction.response.defer()
         result_embed = await self._execute_hacked_action(
-            interaction.guild, user, interaction.user, days_to_clean
+            interaction.guild, user, interaction.user
         )
         await interaction.followup.send(embed=result_embed)
 
@@ -161,6 +157,9 @@ class Security(commands.Cog):
         Usage: Reply to a suspicious message with !hacked
         """
         if not await self.has_security_permission(ctx):
+            return
+
+        if ctx.message.content.strip() != "!hacked":
             return
 
         if not ctx.message.reference:
@@ -229,24 +228,71 @@ class Security(commands.Cog):
             )
             return
 
-        embed = discord.Embed(
-            title="🚨 Hacked Users List", color=discord.Color.dark_red()
+        view = HackedListView(users, interaction.user)
+        await interaction.followup.send(embed=view.create_embed(), view=view)
+
+
+class HackedListView(discord.ui.View):
+    def __init__(self, users: list, author: discord.User):
+        super().__init__(timeout=300)
+        self.users = sorted(
+            users, key=lambda u: u.get("timestamp", datetime.min), reverse=True
         )
-        description_lines = []
-        for u in users:
+        self.author = author
+        self.per_page = 10
+        self.current_page = 0
+        self.total_pages = ceil(len(users) / self.per_page)
+        self.update_buttons()
+
+    def create_embed(self) -> discord.Embed:
+        start = self.current_page * self.per_page
+        end = start + self.per_page
+        page_users = self.users[start:end]
+
+        entries = []
+        for u in page_users:
             user_id = u["_id"]
             reason = u.get("reason", "No reason provided")
             time_str = u.get("timestamp", datetime.utcnow()).strftime("%Y-%m-%d")
-            description_lines.append(
-                f"• <@{user_id}> (`{user_id}`)\n   Reason: *{reason}* ({time_str})"
+            entries.append(
+                f"<@{user_id}> (`{user_id}`)\nReason: *{reason}* ({time_str})"
             )
 
-        full_text = "\n".join(description_lines)
-        if len(full_text) > 4000:
-            full_text = full_text[:3900] + "..."
+        embed = discord.Embed(
+            title="🚨 Hacked Users List",
+            description="\n\n".join(entries),
+            color=discord.Color.dark_red(),
+        )
+        embed.set_footer(text=f"Page {self.current_page + 1}/{self.total_pages}")
+        return embed
 
-        embed.description = full_text
-        await interaction.followup.send(embed=embed)
+    def update_buttons(self):
+        self.prev_button.disabled = self.current_page == 0
+        self.next_button.disabled = self.current_page == self.total_pages - 1
+
+    @discord.ui.button(
+        label="◀ Previous", style=discord.ButtonStyle.blurple, disabled=True
+    )
+    async def prev_button(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ):
+        if interaction.user.id != self.author.id:
+            await interaction.response.defer()
+            return
+        self.current_page -= 1
+        self.update_buttons()
+        await interaction.response.edit_message(embed=self.create_embed(), view=self)
+
+    @discord.ui.button(label="Next ▶", style=discord.ButtonStyle.blurple)
+    async def next_button(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ):
+        if interaction.user.id != self.author.id:
+            await interaction.response.defer()
+            return
+        self.current_page += 1
+        self.update_buttons()
+        await interaction.response.edit_message(embed=self.create_embed(), view=self)
 
 
 async def setup(bot):
