@@ -34,7 +34,7 @@ from features.config import (
     MODERATOR_ROLE_ID,
     REDEMPTION_TICKET_CATEGORY_ID,
     TRIAL_MODERATOR_ROLE_ID,
-    DAILY_MSG_EXCLUDED_CHANNEL_IDS,
+    PASSIVE_REWARD_EXCLUDED_CHANNEL_IDS,
 )
 
 shop_choices = [
@@ -645,13 +645,17 @@ class Economy(commands.Cog):
         if message.channel.category and message.channel.category.id == BOTS_CATEGORY_ID:
             return
 
+        # Skip token/XP rewards for bot command channels
+        if message.channel.id in PASSIVE_REWARD_EXCLUDED_CHANNEL_IDS:
+            return
+
         user_id = str(message.author.id)
         current_timestamp = time.time()
         datetime.utcnow().strftime("%Y-%m-%d")
 
         # --- TRACK DAILY MESSAGE COUNT (tied to /daily cooldown window) ---
         # Format: "LAST_DAILY_TIMESTAMP:COUNT" — resets when user claims /daily
-        if message.channel.id not in DAILY_MSG_EXCLUDED_CHANNEL_IDS:
+        if message.channel.id not in PASSIVE_REWARD_EXCLUDED_CHANNEL_IDS:
             last_daily_str = await get_setting(f"daily_{user_id}")
             window_key = last_daily_str if last_daily_str else "0"
 
