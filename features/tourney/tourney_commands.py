@@ -1316,6 +1316,12 @@ def setup_tourney_commands(bot: commands.Bot):
             await ctx.reply("You don't have permission to start the tourney.")
             return
 
+        if ctx.channel.id != TOURNEY_ADMIN_CHANNEL_ID:
+            await ctx.reply(
+                f"This command can only be used in <#{TOURNEY_ADMIN_CHANNEL_ID}>."
+            )
+            return
+
         guild = ctx.guild
         if not guild:
             return
@@ -1547,6 +1553,12 @@ def setup_tourney_commands(bot: commands.Bot):
         """
         if not isinstance(ctx.author, discord.Member) or not is_staff(ctx.author):
             await ctx.reply("You don't have permission to end the tourney.")
+            return
+
+        if ctx.channel.id != TOURNEY_ADMIN_CHANNEL_ID:
+            await ctx.reply(
+                f"This command can only be used in <#{TOURNEY_ADMIN_CHANNEL_ID}>."
+            )
             return
 
         guild = ctx.guild
