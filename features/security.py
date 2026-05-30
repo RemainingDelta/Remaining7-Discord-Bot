@@ -1,7 +1,7 @@
 import discord
 from discord import app_commands
 from discord.ext import commands
-from datetime import timedelta, datetime
+from datetime import timedelta, datetime, timezone
 from math import ceil
 import asyncio
 
@@ -70,6 +70,7 @@ class Security(commands.Cog):
         cutoff_date = datetime.utcnow() - timedelta(hours=12)
         total_deleted = 0
         channels_checked = 0
+        earliest_message_time = None
 
         # COMBINE LISTS: Convert all to list() first to avoid SequenceProxy errors
         all_channels = (
@@ -91,13 +92,29 @@ class Security(commands.Cog):
                 )
                 if len(deleted) > 0:
                     total_deleted += len(deleted)
+                    channel_earliest = min(msg.created_at for msg in deleted)
+                    if (
+                        earliest_message_time is None
+                        or channel_earliest < earliest_message_time
+                    ):
+                        earliest_message_time = channel_earliest
             except Exception:
                 pass
 
             channels_checked += 1
             await asyncio.sleep(0.1)
 
-        # 6. Build Result Embed
+        # 6. Calculate response time
+        if earliest_message_time is not None:
+            response_delta = datetime.now(timezone.utc) - earliest_message_time
+            total_seconds = int(response_delta.total_seconds())
+            hours, remainder = divmod(total_seconds, 3600)
+            minutes = remainder // 60
+            response_time_str = f"{hours:02d}:{minutes:02d}"
+        else:
+            response_time_str = "N/A (no messages found)"
+
+        # 7. Build Result Embed
         embed = discord.Embed(
             title="🚨 User Flagged as Hacked",
             description=f"**Target:** {target_user.mention} (`{target_user.id}`)\n**Action:** 7-Day Timeout & Message Purge",
@@ -107,6 +124,11 @@ class Security(commands.Cog):
         embed.add_field(
             name="Cleanup Stats",
             value=f"🗑️ Deleted **{total_deleted} messages** across **{channels_checked} channels** (Past 12 hours).",
+            inline=False,
+        )
+        embed.add_field(
+            name="Response Time",
+            value=f"⏱️ {response_time_str}",
             inline=False,
         )
         embed.add_field(
