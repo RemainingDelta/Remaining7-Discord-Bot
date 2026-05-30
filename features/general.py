@@ -194,6 +194,14 @@ class General(commands.Cog):
         "BRT": "America/Sao_Paulo",
     }
 
+    @app_commands.command(name="version", description="View the bot's current version.")
+    async def version(self, interaction: discord.Interaction):
+        embed = discord.Embed(
+            description=f"🤖 R7 Bot is running\n# {BOT_VERSION}",
+            color=discord.Color.blurple(),
+        )
+        await interaction.response.send_message(embed=embed)
+
     @app_commands.command(
         name="convert-time",
         description="Convert a date and time to all Discord timestamp formats.",
