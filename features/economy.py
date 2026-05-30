@@ -2,7 +2,7 @@ import time
 import discord
 from discord import app_commands
 from discord.ext import commands, tasks
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import random
 from typing import Optional
 import asyncio
@@ -1175,11 +1175,19 @@ class Economy(commands.Cog):
         int(await get_setting("nitro_redeemed_count", "0"))
         int(await get_setting("pin_redeemed_count", "0"))
 
+        now = datetime.now(timezone.utc)
+        if now.month == 12:
+            reset_date = datetime(now.year + 1, 1, 1, tzinfo=timezone.utc)
+        else:
+            reset_date = datetime(now.year, now.month + 1, 1, tzinfo=timezone.utc)
+        reset_timestamp = int(reset_date.timestamp())
+
         embed = discord.Embed(title="💰 **Budget Status**", color=discord.Color.blue())
         embed.description = (
             f"**Total Monthly Budget:** ${total_budget:.2f}\n"
             f"**Total Spent on Redemptions:** ${total_spent:.2f}\n"
-            f"**Remaining Budget:** ${remaining:.2f}"
+            f"**Remaining Budget:** ${remaining:.2f}\n"
+            f"**Budget Resets:** <t:{reset_timestamp}:R> (<t:{reset_timestamp}:F>)"
         )
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
