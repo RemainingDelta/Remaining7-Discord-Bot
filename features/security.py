@@ -117,7 +117,11 @@ class Security(commands.Cog):
         # 7. Build Result Embed
         embed = discord.Embed(
             title="🚨 User Flagged as Hacked",
-            description=f"**Target:** {target_user.mention} (`{target_user.id}`)\n**Action:** 7-Day Timeout & Message Purge",
+            description=(
+                f"**Target:** {target_user.mention} (`{target_user.id}`)\n"
+                f"**Moderator:** {moderator.mention}\n"
+                f"**Action:** 7-Day Timeout & Message Purge"
+            ),
             color=discord.Color.dark_red(),
         )
         embed.add_field(name="Status", value=timeout_status, inline=False)
