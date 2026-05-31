@@ -63,7 +63,8 @@ class General(commands.Cog):
         embed.add_field(name="🌐 Translation", value=translation_text, inline=False)
 
         utility_text = (
-            "`/convert-time` - Convert a date and time to Discord timestamp formats"
+            "`/convert-time` - Convert a date and time to Discord timestamp formats\n"
+            "`/version` - View the bot's current version"
         )
         embed.add_field(name="🔧 Utility", value=utility_text, inline=False)
 
