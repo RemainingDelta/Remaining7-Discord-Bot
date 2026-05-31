@@ -2414,6 +2414,8 @@ def setup_tourney_commands(bot: commands.Bot):
         session_text = (
             "`!starttourney [region]` - Wipes old tickets, locks general support, and posts the live panel. Use `!starttourney SA` for South America mode.\n"
             "`!endtourney` - Closes all active tickets, generates staff stats, posts the Pre-Tourney panel, and unlocks general support.\n"
+            "`/tourney-panel` - Post the live tourney support button.\n"
+            "`/pre-tourney-panel` - Post the pre-tourney support button.\n"
             "`!lock` / `!unlock` - Manually close or open the general server support channel.\n"
             "`/tourney-test-mode` - Toggle 100-ticket limit and 0.1s cooldown for testing."
         )
