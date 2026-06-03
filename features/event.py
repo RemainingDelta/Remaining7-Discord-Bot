@@ -4,7 +4,13 @@ from discord.ext import commands, tasks
 from datetime import datetime, time
 import zoneinfo
 import re
-from database.mongo import get_user_balance, update_user_balance
+from database.mongo import (
+    get_user_balance,
+    increment_user_balance,
+    is_poll_reward_processed,
+    mark_poll_reward_processed,
+    update_user_balance,
+)
 
 from features.config import (
     ADMIN_ROLE_ID,
@@ -13,6 +19,7 @@ from features.config import (
     BLUE_EVENT_CHANNEL_ID,
     GREEN_EVENT_CHANNEL_ID,
     EVENT_STAFF_CHANNEL_ID,
+    POLLS_CHANNEL_ID,
     EVENT_ANNOUNCEMENTS_CHANNEL_ID,
     BOT_VERSION,
 )
@@ -192,6 +199,97 @@ class PayoutConfirmView(discord.ui.View):
         for child in self.children:
             child.disabled = True
 
+        await interaction.response.edit_message(embed=embed, view=self)
+
+
+class PollPayoutConfirmView(discord.ui.View):
+    def __init__(self, original_msg, voters, amount, answer_text, interaction_user):
+        super().__init__(timeout=60)
+        self.original_msg = original_msg
+        self.voters = voters
+        self.amount = amount
+        self.answer_text = answer_text
+        self.interaction_user = interaction_user
+        self.processed = False
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.interaction_user.id:
+            await interaction.response.send_message(
+                "❌ This is not your command.", ephemeral=True
+            )
+            return False
+        return True
+
+    @discord.ui.button(
+        label="Confirm Payout", style=discord.ButtonStyle.green, emoji="✅"
+    )
+    async def confirm(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ):
+        if self.processed:
+            return
+        self.processed = True
+        await interaction.response.defer()
+
+        # Double-check idempotency before distributing
+        if await is_poll_reward_processed(str(self.original_msg.id)):
+            embed = interaction.message.embeds[0]
+            embed.title = "❌ Already Processed"
+            embed.color = discord.Color.red()
+            embed.description = "This poll has already been processed."
+            embed.clear_fields()
+            for child in self.children:
+                child.disabled = True
+            await interaction.edit_original_response(embed=embed, view=self)
+            return
+
+        # Distribute tokens atomically
+        for voter in self.voters:
+            await increment_user_balance(str(voter.id), self.amount)
+
+        # Record in DB
+        await mark_poll_reward_processed(
+            message_id=str(self.original_msg.id),
+            admin_id=str(interaction.user.id),
+            answer_text=self.answer_text,
+            amount=self.amount,
+            voter_count=len(self.voters),
+        )
+
+        # Mark original poll message with checkmark
+        try:
+            await self.original_msg.add_reaction("✅")
+        except Exception:
+            pass
+
+        # Update confirmation embed
+        total = self.amount * len(self.voters)
+        embed = interaction.message.embeds[0]
+        embed.title = "✅ Poll Rewards Complete"
+        embed.color = discord.Color.green()
+        embed.clear_fields()
+        embed.add_field(
+            name="Summary",
+            value=(
+                f"Distributed **{total}** tokens to **{len(self.voters)}** voters.\n"
+                f"(**{self.amount}** tokens each for option: *{self.answer_text}*)"
+            ),
+            inline=False,
+        )
+        for child in self.children:
+            child.disabled = True
+        await interaction.edit_original_response(embed=embed, view=self)
+
+    @discord.ui.button(label="Cancel", style=discord.ButtonStyle.red, emoji="✖️")
+    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.processed = True
+        embed = interaction.message.embeds[0]
+        embed.title = "❌ Poll Rewards Cancelled"
+        embed.color = discord.Color.red()
+        embed.description = "No tokens were distributed."
+        embed.clear_fields()
+        for child in self.children:
+            child.disabled = True
         await interaction.response.edit_message(embed=embed, view=self)
 
 
@@ -406,6 +504,130 @@ class Events(commands.Cog):
         await interaction.followup.send(embed=embed, view=view)
 
     @app_commands.command(
+        name="poll-rewards",
+        description="ADMIN ONLY: Distribute tokens to voters of a poll option.",
+    )
+    @app_commands.describe(
+        message_id="The ID of the poll message in #polls",
+        answer="The poll option text to reward (case-insensitive match)",
+        amount="Flat token amount to give each voter",
+    )
+    async def poll_rewards(
+        self,
+        interaction: discord.Interaction,
+        message_id: str,
+        answer: str,
+        amount: int,
+    ):
+        # 1. Permission Check - Admin only
+        if not interaction.user.get_role(ADMIN_ROLE_ID):
+            await interaction.response.send_message(
+                "❌ Permission Denied: Only Admins can process poll rewards.",
+                ephemeral=True,
+            )
+            return
+
+        # 2. Channel Check
+        if interaction.channel_id != EVENT_STAFF_CHANNEL_ID:
+            await interaction.response.send_message(
+                f"❌ Please use this command in <#{EVENT_STAFF_CHANNEL_ID}>.",
+                ephemeral=True,
+            )
+            return
+
+        # 3. Validate amount
+        if amount <= 0:
+            await interaction.response.send_message(
+                "❌ Amount must be a positive number.", ephemeral=True
+            )
+            return
+
+        await interaction.response.defer()
+
+        # 4. Check idempotency (DB-backed)
+        if await is_poll_reward_processed(message_id):
+            await interaction.followup.send(
+                "⚠️ This poll message has already been processed for rewards."
+            )
+            return
+
+        # 5. Fetch message from polls channel
+        polls_channel = self.bot.get_channel(POLLS_CHANNEL_ID)
+        if not polls_channel:
+            await interaction.followup.send("❌ Config Error: Polls channel not found.")
+            return
+
+        try:
+            target_message = await polls_channel.fetch_message(int(message_id))
+        except Exception:
+            await interaction.followup.send(
+                "❌ Could not find that message ID in the polls channel."
+            )
+            return
+
+        # 6. Validate poll exists
+        if not target_message.poll:
+            await interaction.followup.send("❌ That message does not contain a poll.")
+            return
+
+        poll = target_message.poll
+
+        # 7. Check poll is finalized
+        if not poll.is_finalized():
+            await interaction.followup.send(
+                "⚠️ This poll has not ended yet. Please wait for it to close."
+            )
+            return
+
+        # 8. Match answer text (case-insensitive)
+        matched_answer = None
+        for poll_answer in poll.answers:
+            if poll_answer.text and poll_answer.text.lower() == answer.lower():
+                matched_answer = poll_answer
+                break
+
+        if not matched_answer:
+            available = ", ".join(f'"{a.text}"' for a in poll.answers if a.text)
+            await interaction.followup.send(
+                f'❌ No poll option matches "{answer}".\nAvailable options: {available}'
+            )
+            return
+
+        # 9. Fetch all voters via async iterator
+        voters = []
+        async for voter in matched_answer.voters(limit=None):
+            voters.append(voter)
+
+        if not voters:
+            await interaction.followup.send(
+                f'⚠️ No voters found for option "{matched_answer.text}".'
+            )
+            return
+
+        # 10. Build confirmation embed
+        total = amount * len(voters)
+        embed = discord.Embed(
+            title="⚠️ Confirm Poll Rewards?",
+            description=(
+                f"**Poll Option:** {matched_answer.text}\n"
+                f"**Voters:** {len(voters)}\n"
+                f"**Amount Per Voter:** {amount} tokens\n"
+                f"**Total Payout:** {total} tokens"
+            ),
+            color=discord.Color.orange(),
+        )
+
+        voter_preview = ", ".join(f"<@{v.id}>" for v in voters[:20])
+        if len(voters) > 20:
+            voter_preview += f"\n... and {len(voters) - 20} more"
+        embed.add_field(name="Voters", value=voter_preview, inline=False)
+
+        view = PollPayoutConfirmView(
+            target_message, voters, amount, matched_answer.text, interaction.user
+        )
+        await interaction.followup.send(embed=embed, view=view)
+
+    @app_commands.command(
         name="event-staff-help",
         description="STAFF ONLY: Guide for managing event channels.",
     )
@@ -436,7 +658,9 @@ class Events(commands.Cog):
         # --- Reward Distribution ---
         reward_text = (
             "`/event-rewards <message_id>` - Process token distribution from an announcement message.\n"
-            "*(Message must use `@User 500` format. Admin only.)*"
+            "*(Message must use `@User 500` format. Admin only.)*\n\n"
+            "`/poll-rewards <message_id> <answer> <amount>` - Distribute tokens to all voters of a poll option.\n"
+            "*(Poll must be finalized. Case-insensitive option match. Admin only.)*"
         )
         embed.add_field(name="🏆 Reward Distribution", value=reward_text, inline=False)
 
