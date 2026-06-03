@@ -79,6 +79,49 @@ async def update_user_balance(user_id: str, amount: int):
     )
 
 
+async def increment_user_balance(user_id: str, amount: int):
+    """Atomically increments a user's balance using $inc."""
+    if db is None:
+        return
+    await db.users.update_one(
+        {"_id": str(user_id)}, {"$inc": {"balance": amount}}, upsert=True
+    )
+
+
+# --- POLL REWARD HELPERS ---
+
+
+async def is_poll_reward_processed(message_id: str) -> bool:
+    """Checks if a poll reward has already been distributed for this message."""
+    if db is None:
+        return False
+    doc = await db.processed_poll_rewards.find_one({"_id": str(message_id)})
+    return doc is not None
+
+
+async def mark_poll_reward_processed(
+    message_id: str,
+    admin_id: str,
+    answer_text: str,
+    amount: int,
+    voter_count: int,
+):
+    """Records that poll rewards were distributed for this message."""
+    if db is None:
+        return
+    await db.processed_poll_rewards.insert_one(
+        {
+            "_id": str(message_id),
+            "admin_id": str(admin_id),
+            "answer_text": answer_text,
+            "amount_per_user": amount,
+            "voter_count": voter_count,
+            "total_distributed": amount * voter_count,
+            "processed_at": datetime.utcnow(),
+        }
+    )
+
+
 # --- LEVELING HELPERS ---
 
 
