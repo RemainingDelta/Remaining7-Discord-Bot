@@ -31,22 +31,26 @@ class Security(commands.Cog):
         """
         Shared logic that performs the timeout, DB update, and message purge.
         """
-        # 1. Prevent targetting admins/mods or self
-        if target_user.top_role >= moderator.top_role:
-            return discord.Embed(
-                description="❌ You cannot target someone with equal or higher roles.",
-                color=discord.Color.red(),
-            )
+        # 1. Prevent targetting admins/mods or self (only possible if user is still in server)
+        if isinstance(target_user, discord.Member):
+            if target_user.top_role >= moderator.top_role:
+                return discord.Embed(
+                    description="❌ You cannot target someone with equal or higher roles.",
+                    color=discord.Color.red(),
+                )
 
         # 2. Timeout the User (7 Days)
-        try:
-            duration = timedelta(days=7)
-            await target_user.timeout(
-                duration, reason="Security: User Compromised/Hacked"
-            )
-            timeout_status = "✅ User Timed Out (7 Days)"
-        except Exception as e:
-            timeout_status = f"⚠️ Failed to Timeout: {e}"
+        if isinstance(target_user, discord.Member):
+            try:
+                duration = timedelta(days=7)
+                await target_user.timeout(
+                    duration, reason="Security: User Compromised/Hacked"
+                )
+                timeout_status = "✅ User Timed Out (7 Days)"
+            except Exception as e:
+                timeout_status = f"⚠️ Failed to Timeout: {e}"
+        else:
+            timeout_status = "⚠️ User Not in Server — Timeout Skipped"
 
         # 3. Add to Database
         await add_hacked_user(str(target_user.id))
@@ -201,8 +205,7 @@ class Security(commands.Cog):
             try:
                 target_user = await ctx.guild.fetch_member(target_user.id)
             except Exception:
-                await ctx.send("❌ User is no longer in the server.")
-                return
+                pass  # User left — proceed with discord.User to still purge messages and tag DB
 
         status_msg = await ctx.send("⏳ Processing Hacked Protocol...")
         result_embed = await self._execute_hacked_action(
