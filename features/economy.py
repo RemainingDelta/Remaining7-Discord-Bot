@@ -999,7 +999,7 @@ class Economy(commands.Cog):
                 value=f"{int(round(balance_after)):,} R7 tokens",
                 inline=True,
             )
-            await ch.send(embed=ticket_embed)
+            await ch.send(content=interaction.user.mention, embed=ticket_embed)
 
         except Exception as e:
             await add_item_token(user_id, item, quantity=1)
