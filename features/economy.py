@@ -991,11 +991,13 @@ class Economy(commands.Cog):
             )
             ticket_embed.add_field(
                 name="Balance Before",
-                value=f"{balance_display_before:,} R7 tokens",
+                value=f"{int(round(balance_display_before)):,} R7 tokens",
                 inline=True,
             )
             ticket_embed.add_field(
-                name="Balance After", value=f"{balance_after:,} R7 tokens", inline=True
+                name="Balance After",
+                value=f"{int(round(balance_after)):,} R7 tokens",
+                inline=True,
             )
             await ch.send(embed=ticket_embed)
 
