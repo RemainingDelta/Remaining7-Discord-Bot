@@ -998,4 +998,45 @@ async def get_next_support_ticket_number(counter_key: str) -> int:
         return int(doc.get("value", 1))
     except Exception as e:
         print(f"⚠️ DB Error (Support Counter): {e}")
-        return 1
+
+
+# --- STICKY MESSAGES ---
+
+
+async def get_sticky(channel_id: int):
+    if db is None:
+        return None
+    return await db.sticky_messages.find_one({"_id": str(channel_id)})
+
+
+async def set_sticky(
+    channel_id: int, content: str, attachments: list, bot_message_id: int
+):
+    if db is None:
+        return
+    await db.sticky_messages.update_one(
+        {"_id": str(channel_id)},
+        {
+            "$set": {
+                "content": content,
+                "attachments": attachments,
+                "bot_message_id": bot_message_id,
+            }
+        },
+        upsert=True,
+    )
+
+
+async def update_sticky_message_id(channel_id: int, bot_message_id: int):
+    if db is None:
+        return
+    await db.sticky_messages.update_one(
+        {"_id": str(channel_id)},
+        {"$set": {"bot_message_id": bot_message_id}},
+    )
+
+
+async def delete_sticky(channel_id: int):
+    if db is None:
+        return
+    await db.sticky_messages.delete_one({"_id": str(channel_id)})
