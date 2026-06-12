@@ -257,8 +257,8 @@ Uses MongoDB database `r7_bot_db` with the following collections:
 
 | Task | Schedule | Description |
 |---|---|---|
-| Message listener | On every message | Passive token + XP generation (20s cooldown) |
-| Quest tracker | On every message | Track quest progress, auto-complete and reward |
+| Message listener | On every message | XP generation; passive token earning restricted to general chat (20s cooldown) |
+| Quest tracker | On every message in general chat | Track quest progress, auto-complete and reward |
 | Event cleanup | Daily at 12:00 AM ET | Scan event channels for stale messages |
 | Queue dashboard | Every 15 seconds | Update tourney queue embed during live tournaments |
 | Supply drop | Every 6 hours | Random token drop in general chat |

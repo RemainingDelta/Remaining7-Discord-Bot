@@ -3,7 +3,11 @@ from discord import app_commands
 from discord.ext import commands
 
 # Import Config
-from features.config import BOTS_CATEGORY_ID, PASSIVE_REWARD_EXCLUDED_CHANNEL_IDS
+from features.config import (
+    BOTS_CATEGORY_ID,
+    GENERAL_CHANNEL_ID,
+    PASSIVE_REWARD_EXCLUDED_CHANNEL_IDS,
+)
 
 # Import Database Helpers
 from database.mongo import (
@@ -119,10 +123,12 @@ class Quests(commands.Cog):
         if message.author.bot:
             return
 
-        # Skip quest progress in restricted channels (same rules as token earning)
+        # Skip quest progress outside general chat and restricted channels
         if message.channel.category and message.channel.category.id == BOTS_CATEGORY_ID:
             return
         if message.channel.id in PASSIVE_REWARD_EXCLUDED_CHANNEL_IDS:
+            return
+        if message.channel.id != GENERAL_CHANNEL_ID:
             return
 
         # Trigger message quest updates

@@ -653,9 +653,9 @@ class Economy(commands.Cog):
         current_timestamp = time.time()
         datetime.utcnow().strftime("%Y-%m-%d")
 
-        # --- TRACK DAILY MESSAGE COUNT (tied to /daily cooldown window) ---
-        # Format: "LAST_DAILY_TIMESTAMP:COUNT" — resets when user claims /daily
-        if message.channel.id not in PASSIVE_REWARD_EXCLUDED_CHANNEL_IDS:
+        if message.channel.id == GENERAL_CHANNEL_ID:
+            # --- TRACK DAILY MESSAGE COUNT (tied to /daily cooldown window) ---
+            # Format: "LAST_DAILY_TIMESTAMP:COUNT" — resets when user claims /daily
             last_daily_str = await get_setting(f"daily_{user_id}")
             window_key = last_daily_str if last_daily_str else "0"
 
@@ -671,37 +671,37 @@ class Economy(commands.Cog):
 
             await set_setting(f"daily_msg_count_{user_id}", f"{window_key}:{new_count}")
 
-        # --- PART 1: TOKENS (ON 1 MINUTE COOLDOWN) ---
-        last_message_str = await get_setting(f"last_message_{user_id}")
-        should_award_tokens = False
+            # --- PART 1: TOKENS (ON 20s COOLDOWN) ---
+            last_message_str = await get_setting(f"last_message_{user_id}")
+            should_award_tokens = False
 
-        if last_message_str:
-            try:
-                last_message_ts = float(last_message_str)
-                time_diff = current_timestamp - last_message_ts
+            if last_message_str:
+                try:
+                    last_message_ts = float(last_message_str)
+                    time_diff = current_timestamp - last_message_ts
 
-                # Check for 20s cooldown OR bugged negative timestamps
-                if time_diff >= 20 or time_diff < -3600:
+                    # Check for 20s cooldown OR bugged negative timestamps
+                    if time_diff >= 20 or time_diff < -3600:
+                        should_award_tokens = True
+                except ValueError:
                     should_award_tokens = True
-            except ValueError:
+            else:
                 should_award_tokens = True
-        else:
-            should_award_tokens = True
 
-        if should_award_tokens:
-            earned_tokens = random.randint(2, 5)
+            if should_award_tokens:
+                earned_tokens = random.randint(2, 5)
 
-            # Booster Bonus: 17.5% Chance (Avg 5% increase)
-            SERVER_BOOSTER_ROLE_ID = 647685778255642626
-            if message.guild:
-                booster_role = message.guild.get_role(SERVER_BOOSTER_ROLE_ID)
-                if booster_role and booster_role in message.author.roles:
-                    if random.random() < 0.175:
-                        earned_tokens += 1
+                # Booster Bonus: 17.5% Chance (Avg 5% increase)
+                SERVER_BOOSTER_ROLE_ID = 647685778255642626
+                if message.guild:
+                    booster_role = message.guild.get_role(SERVER_BOOSTER_ROLE_ID)
+                    if booster_role and booster_role in message.author.roles:
+                        if random.random() < 0.175:
+                            earned_tokens += 1
 
-            current_balance = await get_user_balance(user_id)
-            await update_user_balance(user_id, current_balance + earned_tokens)
-            await set_setting(f"last_message_{user_id}", str(current_timestamp))
+                current_balance = await get_user_balance(user_id)
+                await update_user_balance(user_id, current_balance + earned_tokens)
+                await set_setting(f"last_message_{user_id}", str(current_timestamp))
 
         # --- PART 2: XP & LEVELING (EVERY MESSAGE) ---
         EXP_PER_MESSAGE = 10
@@ -1354,9 +1354,9 @@ class Economy(commands.Cog):
             color=discord.Color.gold(),
         )
         earn_text = (
-            f"💬 **Chatting:** Earn **2-5 Tokens** every message in **any channel** across the server! (20s cooldown)\n"
+            f"💬 **Chatting:** Earn **2-5 Tokens** every message in {general_ch}! (20s cooldown)\n"
             "📅 **Daily Rewards:** Use `/daily` to claim tokens every 24h. "
-            "*Requires 5 messages sent since your last `/daily` claim.*\n"
+            f"*Requires 5 messages sent in {general_ch} since your last `/daily` claim.*\n"
             f"🪂 **Supply Drops:** Random crates appear in {general_ch}! Click the button to claim.\n"
             f"🏆 **Events:** Earn massive token rewards in {event_ch}.\n"
             "🚀 **Booster Bonus:** Server Boosters receive a **5% increase** in coins on average."
