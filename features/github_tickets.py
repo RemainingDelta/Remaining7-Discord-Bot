@@ -269,21 +269,42 @@ class ConfirmView(discord.ui.View):
             content="Creating GitHub issue...", view=None
         )
 
-        ticket = await call_gemini(self.raw_text)
+        try:
+            ticket = await call_gemini(self.raw_text)
 
-        label_map = {"bug": "Bug", "enhancement": "Enhancement", "feature": "Feature"}
-        label = label_map[ticket["type"]]
+            label_map = {
+                "bug": "Bug",
+                "enhancement": "Enhancement",
+                "feature": "Feature",
+            }
+            label = label_map[ticket["type"]]
 
-        issue = await create_github_issue(ticket["title"], ticket["body"], label)
+            issue = await create_github_issue(ticket["title"], ticket["body"], label)
 
-        branch = f"{issue['number']}-{label}"
-        updated_body = ticket["body"].replace(f"-{label}", branch)
-        await update_github_issue(issue["number"], updated_body)
+            branch = f"{issue['number']}-{label}"
+            updated_body = ticket["body"].replace(f"-{label}", branch)
+            await update_github_issue(issue["number"], updated_body)
 
-        await interaction.edit_original_response(
-            content=f"Created issue #{issue['number']}: <{issue['html_url']}>\nBranch: `{branch}`",
-            view=None,
-        )
+            await interaction.edit_original_response(
+                content=f"Created issue #{issue['number']}: <{issue['html_url']}>\nBranch: `{branch}`",
+            )
+        except Exception as e:
+            error_str = str(e)
+            if "503" in error_str or "UNAVAILABLE" in error_str:
+                user_msg = "The AI service is currently experiencing high demand. Please try again later."
+            elif "429" in error_str:
+                user_msg = "The AI service rate limit has been reached. Please try again later."
+            elif "Gemini" in error_str:
+                user_msg = (
+                    "The AI service returned an unexpected response. Please try again."
+                )
+            elif "GitHub" in error_str:
+                user_msg = "Failed to create the GitHub issue via GitHub API. Please try again."
+            else:
+                user_msg = "An unexpected error occurred. Please try again."
+            await interaction.edit_original_response(
+                content=f"Failed to create GitHub issue: {user_msg}",
+            )
 
     @discord.ui.button(label="No", style=discord.ButtonStyle.red)
     async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
