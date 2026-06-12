@@ -70,6 +70,9 @@ async def on_ready():
         await bot.load_extension("features.github_tickets")
         print("✅ Loaded Feature: GitHub Tickets")
 
+        await bot.load_extension("features.sticky")
+        print("✅ Loaded Feature: Sticky Messages")
+
     except Exception as e:
         print(f"❌ Error loading features: {e}")
 
