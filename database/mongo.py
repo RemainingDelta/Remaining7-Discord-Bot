@@ -179,6 +179,36 @@ async def set_setting(key: str, value: str):
     await db.settings.update_one({"_id": key}, {"$set": {"value": value}}, upsert=True)
 
 
+# --- COUNTING HELPERS ---
+
+
+async def get_counting_state() -> dict:
+    if db is None:
+        return {"current_count": 0, "last_user_id": None}
+    doc = await db.counting.find_one({"_id": "state"})
+    if not doc:
+        return {"current_count": 0, "last_user_id": None}
+    return {
+        "current_count": doc.get("current_count", 0),
+        "last_user_id": doc.get("last_user_id"),
+    }
+
+
+async def update_counting_state(current_count: int, last_user_id: int | None):
+    if db is None:
+        return
+    await db.counting.update_one(
+        {"_id": "state"},
+        {
+            "$set": {
+                "current_count": current_count,
+                "last_user_id": last_user_id,
+            }
+        },
+        upsert=True,
+    )
+
+
 # --- LEADERBOARD HELPERS ---
 
 
