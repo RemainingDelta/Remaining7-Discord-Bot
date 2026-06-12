@@ -2898,6 +2898,57 @@ def setup_tourney_commands(bot: commands.Bot):
         embed.set_footer(text=f"Matcherino ID: {m_id} | Staff: {interaction.user.name}")
         await interaction.followup.send(embed=embed)
 
+    @app_commands.command(
+        name="active-matches",
+        description="Show all currently active match scores grouped by round.",
+    )
+    async def active_matches(interaction: discord.Interaction):
+        if not is_staff(interaction.user):
+            await interaction.response.send_message(
+                "❌ Permission denied.", ephemeral=True
+            )
+            return
+
+        await interaction.response.defer()
+        session = await get_active_tourney_session()
+        if not session or not session.get("matcherino_id"):
+            await interaction.followup.send("❌ No active session found.")
+            return
+
+        m_id = session["matcherino_id"]
+        bracket_url = f"https://matcherino.com/tournaments/{m_id}/bracket"
+
+        from .matcherino import fetch_bracket_progress
+
+        data = fetch_bracket_progress(bracket_url)
+        if data.get("status") != "success":
+            await interaction.followup.send(f"❌ **Error:** {data.get('error')}")
+            return
+
+        matches = data.get("active_matches", [])
+        if not matches:
+            await interaction.followup.send("✅ No active matches right now.")
+            return
+
+        rounds: dict[int, list] = {}
+        for m in matches:
+            rounds.setdefault(m["round"], []).append(m)
+
+        embed = discord.Embed(
+            title="⚔️ Active Matches",
+            description=f"`{len(matches)}` matches currently active",
+            color=discord.Color.blue(),
+        )
+
+        for round_num in sorted(rounds):
+            lines = ""
+            for m in sorted(rounds[round_num], key=lambda x: x["id"]):
+                lines += f"**#{m['id']}** | {m['team_a']} vs {m['team_b']} ({m['score_a']}-{m['score_b']})\n"
+            embed.add_field(name=f"Round {round_num}", value=lines, inline=False)
+
+        embed.set_footer(text=f"Matcherino ID: {m_id} | Staff: {interaction.user.name}")
+        await interaction.followup.send(embed=embed)
+
     # --- Start the Dashboard Task ---
     if bot.get_cog("QueueDashboard") is None:
         asyncio.create_task(bot.add_cog(QueueDashboard(bot)))
@@ -2922,6 +2973,7 @@ def setup_tourney_commands(bot: commands.Bot):
     bot.tree.add_command(match_history)
     bot.tree.add_command(set_ticket_match)
     bot.tree.add_command(tourney_progress)
+    bot.tree.add_command(active_matches)
     bot.tree.add_command(BlacklistGroup(bot))
 
     async def background_stats_update():
