@@ -291,6 +291,50 @@ def fetch_ticket_context(
             m["visualNum"] = i
             visual_match_map[i] = m
 
+        raw_to_visual = {
+            m.get("matchNum"): v_num for v_num, m in visual_match_map.items()
+        }
+
+        def resolve_name(entrant_dict, source_entry, depth=0):
+            name = get_team_info(entrant_dict)["name"]
+            if name not in ("TBD", "BYE"):
+                return name
+            if not source_entry or depth > 1:
+                return "TBD"
+            raw_src = source_entry.get("matchNum")
+            v_src = raw_to_visual.get(raw_src, raw_src)
+            src = visual_match_map.get(v_src)
+            if not src:
+                return f"Waiting on Match #{v_src}"
+            srcs = src.get("entrantSources") or []
+            a = resolve_name(src.get("entrantA"), srcs[0] if srcs else None, depth + 1)
+            b = resolve_name(
+                src.get("entrantB"), srcs[1] if len(srcs) > 1 else None, depth + 1
+            )
+            return f"Waiting on Match #{v_src} ({a} vs {b})"
+
+        def build_tbd_chain(source_entry):
+            if not source_entry:
+                return ["→ No source match information available"]
+            raw_src = source_entry.get("matchNum")
+            v_src = raw_to_visual.get(raw_src, raw_src)
+            src_match = visual_match_map.get(v_src)
+            if not src_match:
+                return [f"→ Waiting on Match #{v_src}"]
+            srcs = src_match.get("entrantSources") or []
+            a_name = resolve_name(
+                src_match.get("entrantA"), srcs[0] if srcs else None, depth=1
+            )
+            b_name = resolve_name(
+                src_match.get("entrantB"), srcs[1] if len(srcs) > 1 else None, depth=1
+            )
+            if "Waiting on" not in a_name and "Waiting on" not in b_name:
+                return [f"→ Match #{v_src}: {a_name} vs {b_name}"]
+            return [
+                f"→ Match #{v_src} [A]: {a_name}",
+                f"→ Match #{v_src} [B]: {b_name}",
+            ]
+
         current_match = visual_match_map.get(int(target_match_number))
 
         if not current_match:
@@ -300,6 +344,22 @@ def fetch_ticket_context(
 
         team_a = get_team_info(current_match.get("entrantA"))
         team_b = get_team_info(current_match.get("entrantB"))
+
+        sources = current_match.get("entrantSources") or []
+        team_a_is_tbd = team_a["name"] in ("TBD", "BYE")
+        team_b_is_tbd = team_b["name"] in ("TBD", "BYE")
+
+        if team_a_is_tbd:
+            src_a = sources[0] if sources else None
+            if src_a:
+                raw = src_a.get("matchNum")
+                team_a["name"] = f"Waiting on Match #{raw_to_visual.get(raw, raw)}"
+
+        if team_b_is_tbd:
+            src_b = sources[1] if len(sources) > 1 else None
+            if src_b:
+                raw = src_b.get("matchNum")
+                team_b["name"] = f"Waiting on Match #{raw_to_visual.get(raw, raw)}"
 
         match_status = current_match.get("status", "unknown")
 
@@ -335,8 +395,14 @@ def fetch_ticket_context(
             except Exception:
                 pass
 
-        team_a_history = []
-        team_b_history = []
+        team_a_history = (
+            build_tbd_chain(sources[0] if sources else None) if team_a_is_tbd else []
+        )
+        team_b_history = (
+            build_tbd_chain(sources[1] if len(sources) > 1 else None)
+            if team_b_is_tbd
+            else []
+        )
 
         for v_num, match in visual_match_map.items():
             if str(v_num) == str(target_match_number):
@@ -353,7 +419,18 @@ def fetch_ticket_context(
                 is_pos_a = t_a_past["name"] == team_a["name"]
                 opp_name = t_b_past["name"] if is_pos_a else t_a_past["name"]
 
-                if opp_name.upper() not in ["BYE", "TBD"]:
+                if opp_name.upper() == "TBD":
+                    h_srcs = match.get("entrantSources") or []
+                    opp_idx = 1 if is_pos_a else 0
+                    opp_src = h_srcs[opp_idx] if len(h_srcs) > opp_idx else None
+                    opp_dict = (
+                        match.get("entrantB") if is_pos_a else match.get("entrantA")
+                    )
+                    opp_label = resolve_name(opp_dict, opp_src)
+                    team_a_history.append(
+                        f"Match {v_num}: {team_a['name']} vs {opp_label}"
+                    )
+                elif opp_name.upper() != "BYE":
                     t_score = t_a_past["score"] if is_pos_a else t_b_past["score"]
                     o_score = t_b_past["score"] if is_pos_a else t_a_past["score"]
                     team_a_history.append(
@@ -368,7 +445,18 @@ def fetch_ticket_context(
                 is_pos_a = t_a_past["name"] == team_b["name"]
                 opp_name = t_b_past["name"] if is_pos_a else t_a_past["name"]
 
-                if opp_name.upper() not in ["BYE", "TBD"]:
+                if opp_name.upper() == "TBD":
+                    h_srcs = match.get("entrantSources") or []
+                    opp_idx = 1 if is_pos_a else 0
+                    opp_src = h_srcs[opp_idx] if len(h_srcs) > opp_idx else None
+                    opp_dict = (
+                        match.get("entrantB") if is_pos_a else match.get("entrantA")
+                    )
+                    opp_label = resolve_name(opp_dict, opp_src)
+                    team_b_history.append(
+                        f"Match {v_num}: {team_b['name']} vs {opp_label}"
+                    )
+                elif opp_name.upper() != "BYE":
                     t_score = t_a_past["score"] if is_pos_a else t_b_past["score"]
                     o_score = t_b_past["score"] if is_pos_a else t_a_past["score"]
                     team_b_history.append(
