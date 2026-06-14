@@ -555,6 +555,16 @@ def fetch_bracket_progress(url: str) -> dict:
         m["resolved_round"] = m.get("round") or m.get("roundNum") or 1
         real_matches.append(m)
 
+    # Normalize round numbers so the first real round is always Round 1.
+    # When participant count is <= half the bracket size, Matcherino gives every
+    # team a first-round BYE. After filtering those out, resolved_round starts
+    # at 2+, shifting every displayed round label up by one.
+    if real_matches:
+        min_round = min(m["resolved_round"] for m in real_matches)
+        if min_round > 1:
+            for m in real_matches:
+                m["resolved_round"] -= min_round - 1
+
     # Build visual numbering map (the numbers staff see on the bracket UI).
     # We keep this consistent with fetch_ticket_context: sort visible matches by API matchNum
     # and assign sequential visual numbers.
