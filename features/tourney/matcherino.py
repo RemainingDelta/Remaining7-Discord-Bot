@@ -295,6 +295,20 @@ def fetch_ticket_context(
             m.get("matchNum"): v_num for v_num, m in visual_match_map.items()
         }
 
+        def find_src(my_entrant, other_entrant, srcs, fallback_idx=0):
+            """Return the entrantSources entry for my_entrant by matching entrantId."""
+            my_id = (my_entrant or {}).get("entrantId", 0)
+            other_id = (other_entrant or {}).get("entrantId", 0)
+            if my_id != 0:
+                found = next((s for s in srcs if s.get("entrantId") == my_id), None)
+                if found:
+                    return found
+            if other_id != 0:
+                found = next((s for s in srcs if s.get("entrantId") != other_id), None)
+                if found:
+                    return found
+            return srcs[fallback_idx] if len(srcs) > fallback_idx else None
+
         def resolve_name(entrant_dict, source_entry, depth=0):
             name = get_team_info(entrant_dict)["name"]
             if name not in ("TBD", "BYE"):
@@ -307,10 +321,10 @@ def fetch_ticket_context(
             if not src:
                 return f"Waiting on Match #{v_src}"
             srcs = src.get("entrantSources") or []
-            a = resolve_name(src.get("entrantA"), srcs[0] if srcs else None, depth + 1)
-            b = resolve_name(
-                src.get("entrantB"), srcs[1] if len(srcs) > 1 else None, depth + 1
-            )
+            src_ea = find_src(src.get("entrantA"), src.get("entrantB"), srcs, 0)
+            src_eb = find_src(src.get("entrantB"), src.get("entrantA"), srcs, 1)
+            a = resolve_name(src.get("entrantA"), src_ea, depth + 1)
+            b = resolve_name(src.get("entrantB"), src_eb, depth + 1)
             return f"Waiting on Match #{v_src} ({a} vs {b})"
 
         def build_tbd_chain(source_entry):
@@ -322,12 +336,14 @@ def fetch_ticket_context(
             if not src_match:
                 return [f"→ Waiting on Match #{v_src}"]
             srcs = src_match.get("entrantSources") or []
-            a_name = resolve_name(
-                src_match.get("entrantA"), srcs[0] if srcs else None, depth=1
+            src_ea = find_src(
+                src_match.get("entrantA"), src_match.get("entrantB"), srcs, 0
             )
-            b_name = resolve_name(
-                src_match.get("entrantB"), srcs[1] if len(srcs) > 1 else None, depth=1
+            src_eb = find_src(
+                src_match.get("entrantB"), src_match.get("entrantA"), srcs, 1
             )
+            a_name = resolve_name(src_match.get("entrantA"), src_ea, depth=1)
+            b_name = resolve_name(src_match.get("entrantB"), src_eb, depth=1)
             if "Waiting on" not in a_name and "Waiting on" not in b_name:
                 return [f"→ Match #{v_src}: {a_name} vs {b_name}"]
             return [
@@ -350,13 +366,17 @@ def fetch_ticket_context(
         team_b_is_tbd = team_b["name"] in ("TBD", "BYE")
 
         if team_a_is_tbd:
-            src_a = sources[0] if sources else None
+            src_a = find_src(
+                current_match.get("entrantA"), current_match.get("entrantB"), sources, 0
+            )
             if src_a:
                 raw = src_a.get("matchNum")
                 team_a["name"] = f"Waiting on Match #{raw_to_visual.get(raw, raw)}"
 
         if team_b_is_tbd:
-            src_b = sources[1] if len(sources) > 1 else None
+            src_b = find_src(
+                current_match.get("entrantB"), current_match.get("entrantA"), sources, 1
+            )
             if src_b:
                 raw = src_b.get("matchNum")
                 team_b["name"] = f"Waiting on Match #{raw_to_visual.get(raw, raw)}"
@@ -396,10 +416,26 @@ def fetch_ticket_context(
                 pass
 
         team_a_history = (
-            build_tbd_chain(sources[0] if sources else None) if team_a_is_tbd else []
+            build_tbd_chain(
+                find_src(
+                    current_match.get("entrantA"),
+                    current_match.get("entrantB"),
+                    sources,
+                    0,
+                )
+            )
+            if team_a_is_tbd
+            else []
         )
         team_b_history = (
-            build_tbd_chain(sources[1] if len(sources) > 1 else None)
+            build_tbd_chain(
+                find_src(
+                    current_match.get("entrantB"),
+                    current_match.get("entrantA"),
+                    sources,
+                    1,
+                )
+            )
             if team_b_is_tbd
             else []
         )
@@ -421,11 +457,13 @@ def fetch_ticket_context(
 
                 if opp_name.upper() == "TBD":
                     h_srcs = match.get("entrantSources") or []
-                    opp_idx = 1 if is_pos_a else 0
-                    opp_src = h_srcs[opp_idx] if len(h_srcs) > opp_idx else None
                     opp_dict = (
                         match.get("entrantB") if is_pos_a else match.get("entrantA")
                     )
+                    my_dict = (
+                        match.get("entrantA") if is_pos_a else match.get("entrantB")
+                    )
+                    opp_src = find_src(opp_dict, my_dict, h_srcs)
                     opp_label = resolve_name(opp_dict, opp_src)
                     team_a_history.append(
                         f"Match {v_num}: {team_a['name']} vs {opp_label}"
@@ -447,11 +485,13 @@ def fetch_ticket_context(
 
                 if opp_name.upper() == "TBD":
                     h_srcs = match.get("entrantSources") or []
-                    opp_idx = 1 if is_pos_a else 0
-                    opp_src = h_srcs[opp_idx] if len(h_srcs) > opp_idx else None
                     opp_dict = (
                         match.get("entrantB") if is_pos_a else match.get("entrantA")
                     )
+                    my_dict = (
+                        match.get("entrantA") if is_pos_a else match.get("entrantB")
+                    )
+                    opp_src = find_src(opp_dict, my_dict, h_srcs)
                     opp_label = resolve_name(opp_dict, opp_src)
                     team_b_history.append(
                         f"Match {v_num}: {team_b['name']} vs {opp_label}"
