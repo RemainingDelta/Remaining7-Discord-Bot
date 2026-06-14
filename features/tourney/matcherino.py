@@ -272,7 +272,7 @@ def fetch_ticket_context(
             if not entrant_dict:
                 return {"name": "TBD", "score": 0, "players": []}
             e_id = entrant_dict.get("entrantId", 0)
-            score = entrant_dict.get("score", 0)
+            score = entrant_dict.get("score") or 0
             info = entrant_map.get(e_id, {"name": "TBD", "players": []})
             return {"name": info["name"], "score": score, "players": info["players"]}
 
@@ -325,6 +325,10 @@ def fetch_ticket_context(
             src_eb = find_src(src.get("entrantB"), src.get("entrantA"), srcs, 1)
             a = resolve_name(src.get("entrantA"), src_ea, depth + 1)
             b = resolve_name(src.get("entrantB"), src_eb, depth + 1)
+            if "Waiting on" not in a and "Waiting on" not in b:
+                a_score = src.get("entrantA", {}).get("score") or 0
+                b_score = src.get("entrantB", {}).get("score") or 0
+                return f"Waiting on Match #{v_src} ({a} {a_score} - {b_score} {b})"
             return f"Waiting on Match #{v_src} ({a} vs {b})"
 
         def build_tbd_chain(source_entry):
@@ -345,7 +349,9 @@ def fetch_ticket_context(
             a_name = resolve_name(src_match.get("entrantA"), src_ea, depth=1)
             b_name = resolve_name(src_match.get("entrantB"), src_eb, depth=1)
             if "Waiting on" not in a_name and "Waiting on" not in b_name:
-                return [f"→ Match #{v_src}: {a_name} vs {b_name}"]
+                a_score = src_match.get("entrantA", {}).get("score") or 0
+                b_score = src_match.get("entrantB", {}).get("score") or 0
+                return [f"→ Match #{v_src}: {a_name} {a_score} - {b_score} {b_name}"]
             return [
                 f"→ Match #{v_src} [A]: {a_name}",
                 f"→ Match #{v_src} [B]: {b_name}",
@@ -365,21 +371,36 @@ def fetch_ticket_context(
         team_a_is_tbd = team_a["name"] in ("TBD", "BYE")
         team_b_is_tbd = team_b["name"] in ("TBD", "BYE")
 
+        def tbd_label(src_entry):
+            if not src_entry:
+                return "TBD"
+            raw = src_entry.get("matchNum")
+            v = raw_to_visual.get(raw, raw)
+            src_m = visual_match_map.get(v)
+            if not src_m:
+                return f"Waiting on Match #{v}"
+            srcs_m = src_m.get("entrantSources") or []
+            src_mea = find_src(src_m.get("entrantA"), src_m.get("entrantB"), srcs_m, 0)
+            src_meb = find_src(src_m.get("entrantB"), src_m.get("entrantA"), srcs_m, 1)
+            a_name = resolve_name(src_m.get("entrantA"), src_mea)
+            b_name = resolve_name(src_m.get("entrantB"), src_meb)
+            a_sc = src_m.get("entrantA", {}).get("score") or 0
+            b_sc = src_m.get("entrantB", {}).get("score") or 0
+            return f"Waiting on Match #{v} [{a_name} {a_sc} - {b_sc} {b_name}]"
+
         if team_a_is_tbd:
             src_a = find_src(
                 current_match.get("entrantA"), current_match.get("entrantB"), sources, 0
             )
-            if src_a:
-                raw = src_a.get("matchNum")
-                team_a["name"] = f"Waiting on Match #{raw_to_visual.get(raw, raw)}"
+            team_a["name"] = tbd_label(src_a)
+            team_a["score"] = None
 
         if team_b_is_tbd:
             src_b = find_src(
                 current_match.get("entrantB"), current_match.get("entrantA"), sources, 1
             )
-            if src_b:
-                raw = src_b.get("matchNum")
-                team_b["name"] = f"Waiting on Match #{raw_to_visual.get(raw, raw)}"
+            team_b["name"] = tbd_label(src_b)
+            team_b["score"] = None
 
         match_status = current_match.get("status", "unknown")
 
