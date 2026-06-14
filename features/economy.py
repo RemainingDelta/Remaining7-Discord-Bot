@@ -1,3 +1,4 @@
+import io
 import time
 import discord
 from discord import app_commands
@@ -33,6 +34,7 @@ from features.config import (
     SHOP_DATA,
     MODERATOR_ROLE_ID,
     REDEMPTION_TICKET_CATEGORY_ID,
+    REDEMPTION_TRANSCRIPT_CHANNEL_ID,
     TRIAL_MODERATOR_ROLE_ID,
     PASSIVE_REWARD_EXCLUDED_CHANNEL_IDS,
 )
@@ -247,6 +249,81 @@ async def handle_redemption_delete_attempt(ctx: commands.Context) -> None:
     )
 
 
+async def _build_redemption_transcript_text(
+    channel: discord.TextChannel,
+    item: str,
+    token_cost: int,
+    balance_before: int,
+    balance_after: int,
+) -> str:
+    opener_raw = _extract_topic_value(channel.topic, "redemption-opener")
+    lines: list[str] = [
+        f"Channel: {channel.name}",
+        f"Opener ID: {opener_raw or 'Unknown'}",
+        f"Item: {item}",
+        f"Token Cost: {token_cost}",
+        f"Balance Before: {balance_before}",
+        f"Balance After: {balance_after}",
+        "",
+    ]
+    async for msg in channel.history(limit=None, oldest_first=True):
+        ts = msg.created_at.strftime("%Y-%m-%d %H:%M")
+        author = f"{msg.author} ({msg.author.id})"
+        content = msg.content or ""
+        if msg.attachments:
+            attachment_list = ", ".join(a.url for a in msg.attachments)
+            if content:
+                content += " "
+            content += f"[Attachments: {attachment_list}]"
+        lines.append(f"[{ts}] {author}: {content}")
+    if len(lines) <= 7:
+        lines.append("No messages in this ticket.")
+    return "\n".join(lines)
+
+
+async def _save_redemption_transcript(
+    channel: discord.TextChannel,
+    actor: discord.Member,
+    item: str,
+    token_cost: int,
+    balance_before: int,
+    balance_after: int,
+    outcome: str,
+) -> None:
+    transcript_text = await _build_redemption_transcript_text(
+        channel, item, token_cost, balance_before, balance_after
+    )
+    transcript_bytes = transcript_text.encode("utf-8")
+    filename = f"{channel.name}_transcript.txt"
+
+    opener_raw = _extract_topic_value(channel.topic, "redemption-opener")
+    opener_display = f"<@{opener_raw}>" if opener_raw else "unknown"
+    item_display = SHOP_DATA.get(item, {}).get("display", item).replace("**", "")
+
+    if outcome == "refunded":
+        balance_original = balance_before + token_cost
+        outcome_line = f"🔄 **Refunded** | **Balance:** {balance_original:,} → {balance_before:,} → {balance_after:,} R7 tokens"
+    else:
+        outcome_line = f"✅ **Fulfilled** | **Balance:** {balance_before:,} → {balance_after:,} R7 tokens"
+
+    log_channel = (
+        channel.guild.get_channel(REDEMPTION_TRANSCRIPT_CHANNEL_ID)
+        if isinstance(REDEMPTION_TRANSCRIPT_CHANNEL_ID, int)
+        else None
+    )
+    if isinstance(log_channel, discord.TextChannel):
+        log_file = discord.File(io.BytesIO(transcript_bytes), filename=filename)
+        await log_channel.send(
+            content=(
+                f"📝 Transcript for redemption ticket **#{channel.name}** "
+                f"deleted by **{actor.name}** (opener: {opener_display}).\n"
+                f"**Item:** {item_display} | **Cost:** {token_cost:,} R7 tokens\n"
+                f"{outcome_line}"
+            ),
+            file=log_file,
+        )
+
+
 class RedemptionClosedOptionsView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
@@ -314,13 +391,26 @@ class RedemptionClosedOptionsView(discord.ui.View):
         opener_raw = _extract_topic_value(
             interaction.channel.topic, "redemption-opener"
         )
-        item = _extract_topic_value(interaction.channel.topic, "item")
+        item = _extract_topic_value(interaction.channel.topic, "item") or ""
+        token_cost = _token_price_for_item(item) if item else 0
+        balance_before = 0
+        balance_after = 0
         if opener_raw and opener_raw.isdigit() and item:
             refund_amount = _token_price_for_item(item)
             if refund_amount > 0:
-                current_balance = await get_user_balance(opener_raw)
-                await update_user_balance(opener_raw, current_balance + refund_amount)
+                balance_before = await get_user_balance(opener_raw)
+                balance_after = balance_before + refund_amount
+                await update_user_balance(opener_raw, balance_after)
 
+        await _save_redemption_transcript(
+            interaction.channel,
+            interaction.user,
+            item,
+            token_cost,
+            balance_before,
+            balance_after,
+            outcome="refunded",
+        )
         await interaction.channel.delete(
             reason=f"Redemption ticket refunded and deleted by {interaction.user}"
         )
@@ -365,6 +455,23 @@ class RedemptionClosedOptionsView(discord.ui.View):
         except ValueError:
             cost = _budget_cost_for_item(item)
 
+        opener_raw = _extract_topic_value(
+            interaction.channel.topic, "redemption-opener"
+        )
+        token_cost = _token_price_for_item(item) if item else 0
+        current_balance = 0
+        if opener_raw and opener_raw.isdigit():
+            current_balance = await get_user_balance(opener_raw)
+
+        await _save_redemption_transcript(
+            interaction.channel,
+            interaction.user,
+            item,
+            token_cost,
+            current_balance + token_cost,
+            current_balance,
+            outcome="fulfilled",
+        )
         await add_budget_spent(cost)
         await interaction.channel.delete(
             reason=f"Redemption fulfilled and deleted by {interaction.user}"
