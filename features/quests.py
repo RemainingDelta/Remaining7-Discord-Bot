@@ -25,20 +25,20 @@ from database.mongo import (
 DEFAULT_QUESTS = [
     # Daily Quests
     # Name | Desc | Tokens | XP | Target | Type
-    ("Daily Chatter", "Send 80 messages today.", 50, 200, 80, "daily"),
-    ("Quick Convo", "Send 160 messages today.", 75, 250, 160, "daily"),
-    ("Engaged Today", "Send 240 messages today.", 100, 300, 240, "daily"),
+    ("Daily Chatter", "Send 80 messages today.", 50, 100, 80, "daily"),
+    ("Quick Convo", "Send 160 messages today.", 115, 200, 160, "daily"),
+    ("Engaged Today", "Send 240 messages today.", 250, 300, 240, "daily"),
     # Weekly Quests
-    ("Weekly Regular", "Send 500 messages this week.", 250, 1000, 500, "weekly"),
+    ("Weekly Regular", "Send 500 messages this week.", 225, 1000, 500, "weekly"),
     (
         "Consistent Contributor",
         "Send 750 messages this week.",
         400,
-        2500,
+        2000,
         750,
         "weekly",
     ),
-    ("Server Pillar", "Send 1000 messages this week.", 600, 3000, 1000, "weekly"),
+    ("Server Pillar", "Send 1000 messages this week.", 640, 3000, 1000, "weekly"),
 ]
 
 
