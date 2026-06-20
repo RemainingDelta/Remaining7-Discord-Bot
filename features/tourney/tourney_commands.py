@@ -60,6 +60,8 @@ from features.config import (
     HALL_OF_FAME_CHANNEL_ID,
     BOT_VERSION,
     TOURNEY_ADMIN_ROLE_ID,
+    TOURNEY_REPORT_CHANNEL_ID,
+    TOURNEY_SCHEDULE_CHANNEL_ID,
 )
 from .tourney_utils import (
     close_ticket_via_command,
@@ -1340,6 +1342,61 @@ def setup_tourney_commands(bot: commands.Bot):
         else:
             await reset_tourney_session_start_time(existing_session["_id"])
 
+        # Auto-detect Matcherino ID from #tourney-schedule (±1 day of today)
+        auto_matcherino_id = None
+        auto_detect_error = None
+        schedule_channel = ctx.bot.get_channel(TOURNEY_SCHEDULE_CHANNEL_ID)
+        if not schedule_channel:
+            auto_detect_error = "⚠️ Auto-detect: `TOURNEY_SCHEDULE_CHANNEL_ID` not found — check `config.py`."
+        else:
+            today = datetime.datetime.now(datetime.timezone.utc).date()
+            msgs_checked = 0
+            closest_date_seen = None
+            try:
+                async for msg in schedule_channel.history(limit=100):
+                    content = msg.content or ""
+                    date_match = re.search(
+                        r"•\s*\**\s*Date:\**\s*(.+)", content, re.IGNORECASE
+                    )
+                    if not date_match:
+                        continue
+                    msgs_checked += 1
+                    date_str = date_match.group(1).strip()
+                    try:
+                        parsed_date = datetime.datetime.strptime(
+                            date_str, "%B %d, %Y"
+                        ).date()
+                    except ValueError:
+                        auto_detect_error = f"⚠️ Auto-detect: Found a date but couldn't parse it: `{date_str}` — expected format `June 19, 2026`."
+                        continue
+                    closest_date_seen = parsed_date
+                    if abs((parsed_date - today).days) <= 1:
+                        url_match = re.search(
+                            r"matcherino\.com/supercell/tournaments/(\d+)", content
+                        )
+                        if url_match:
+                            auto_matcherino_id = url_match.group(1)
+                            break
+                        else:
+                            auto_detect_error = f"⚠️ Auto-detect: Found the schedule post for `{date_str}` but no Matcherino URL in the message."
+                            break
+
+                if not auto_matcherino_id and not auto_detect_error:
+                    if msgs_checked == 0:
+                        auto_detect_error = f"⚠️ Auto-detect: No messages with a `• Date:` field found in <#{TOURNEY_SCHEDULE_CHANNEL_ID}>."
+                    else:
+                        auto_detect_error = (
+                            f"⚠️ Auto-detect: No schedule post within ±1 day of today ({today.strftime('%B %d, %Y')}). "
+                            f"Closest date found: `{closest_date_seen.strftime('%B %d, %Y') if closest_date_seen else 'none'}`."
+                        )
+            except Exception as e:
+                auto_detect_error = f"⚠️ Auto-detect error: `{e}`"
+
+        if auto_matcherino_id:
+            active_session = await get_active_tourney_session()
+            if active_session:
+                await update_matcherino_id(active_session["_id"], auto_matcherino_id)
+
         await lock_command(ctx)
 
         # --- SA REGION LOGIC ---
@@ -1479,8 +1536,16 @@ def setup_tourney_commands(bot: commands.Bot):
                         except Exception as e:
                             print(f"Failed to delete pre-tourney ticket {ch.name}: {e}")
 
+        if auto_matcherino_id:
+            matcherino_notice = f"🔗 Matcherino ID auto-set to `{auto_matcherino_id}` from the schedule. If wrong, use `/set-matcherino` to fix it."
+        else:
+            matcherino_notice = (
+                auto_detect_error
+                or "⚠️ Could not auto-detect Matcherino ID. Set it manually with `/set-matcherino`."
+            )
+
         await ctx.send(
-            f"✅ Tourney Started! Channels updated and {deleted_count} pre-tourney tickets deleted.\n⚠️ Don't forget to set the new Matcherino ID with `/set-matcherino` and enable ML data collection if needed."
+            f"✅ Tourney Started! Channels updated and {deleted_count} pre-tourney tickets deleted.\n{matcherino_notice}"
         )
 
         # Grant Tourney Admin the Timeout Members permission for the duration of the tourney.
@@ -1529,8 +1594,6 @@ def setup_tourney_commands(bot: commands.Bot):
                     "hype_message_id": None,
                 },
             }
-            await dashboard_cog.start_dashboard()
-
         # Apply 60s slow mode to general channel during tourney.
         general_channel = guild.get_channel(GENERAL_CHANNEL_ID)
         if isinstance(general_channel, discord.TextChannel):
@@ -1541,6 +1604,11 @@ def setup_tourney_commands(bot: commands.Bot):
                 )
             except Exception as e:
                 print(f"Failed to set slow mode on general channel: {e}")
+
+        # Start dashboard last so it's the final message in #tourney-admin,
+        # preventing an immediate delete+repost flash on the first 5-minute tick.
+        if dashboard_cog:
+            await dashboard_cog.start_dashboard()
 
     @bot.command(name="endtourney")
     async def end_tourney_command(ctx: commands.Context):
@@ -1587,13 +1655,6 @@ def setup_tourney_commands(bot: commands.Bot):
                     )
             except Exception as e:
                 print(f"!endtourney announcement sync error: {e}")
-
-        # Do a final progress dashboard refresh before stopping so it shows Tournament Over.
-        if dashboard_cog:
-            try:
-                await dashboard_cog.update_progress_dashboard()
-            except Exception as e:
-                print(f"!endtourney final progress update error: {e}")
 
         winner_was_posted = (
             dashboard_cog is not None
@@ -1684,16 +1745,55 @@ def setup_tourney_commands(bot: commands.Bot):
                     icon = f"**{i + 1}.**"  # e.g. "4.", "5.", "6."
 
                 staff_msg += (
-                    f"{icon} **{s['username']}**: {s['tickets_closed']} tickets\n"
+                    f"{icon} <@{s['user_id']}>: {s['tickets_closed']} tickets\n"
                 )
 
             if not staff_msg:
                 staff_msg = "No tickets closed."
 
-            # 3. Send Embed
-            stat_embed = discord.Embed(
-                title="📊 Tournament Report", color=discord.Color.gold()
-            )
+            # 3. Look up tournament name (Matcherino API) and canonical date (#tourney-schedule)
+            tourney_date_str = None
+            tourney_name = None
+            matcherino_id = session.get("matcherino_id")
+            if matcherino_id:
+                try:
+                    payout_data = fetch_payout_report(str(matcherino_id))
+                    if "error" not in payout_data:
+                        tourney_name = payout_data.get("tourney_name")
+                except Exception as e:
+                    print(f"⚠️ Could not fetch tourney name from Matcherino: {e}")
+
+                ann_channel = ctx.bot.get_channel(TOURNEY_SCHEDULE_CHANNEL_ID)
+                if ann_channel:
+                    try:
+                        async for msg in ann_channel.history(limit=500):
+                            if str(matcherino_id) in (msg.content or ""):
+                                m = re.search(
+                                    r"•\s*\**\s*Date:\**\s*(.+)",
+                                    msg.content,
+                                    re.IGNORECASE,
+                                )
+                                if m:
+                                    tourney_date_str = m.group(1).strip()
+                                break
+                    except Exception as e:
+                        print(f"⚠️ Could not look up tourney date from schedule: {e}")
+
+            # 4. Build Embed
+            if tourney_name and matcherino_id:
+                matcherino_url = (
+                    f"https://matcherino.com/supercell/tournaments/{matcherino_id}"
+                )
+                stat_embed = discord.Embed(
+                    title=f"📊 Tournament Report ({tourney_name})",
+                    url=matcherino_url,
+                    color=discord.Color.gold(),
+                )
+            else:
+                stat_embed = discord.Embed(
+                    title="📊 Tournament Report",
+                    color=discord.Color.gold(),
+                )
             stat_embed.add_field(
                 name="⏱️ Duration", value=f"`{hours}h {minutes}m`", inline=True
             )
@@ -1715,15 +1815,20 @@ def setup_tourney_commands(bot: commands.Bot):
             stat_embed.add_field(
                 name="🏆 Top Tourney Admins", value=staff_msg, inline=False
             )
+            if tourney_date_str:
+                stat_embed.add_field(
+                    name="📅 Tournament Date", value=tourney_date_str, inline=False
+                )
+            if matcherino_id:
+                stat_embed.set_footer(text=f"Matcherino ID: {matcherino_id}")
 
-            report_msg = await ctx.send(embed=stat_embed)
+            # 5. Send to command channel (no pin) and archive to #tourney-reports
+            await ctx.send(embed=stat_embed)
+            report_channel = ctx.bot.get_channel(TOURNEY_REPORT_CHANNEL_ID)
+            if report_channel:
+                await report_channel.send(embed=stat_embed)
 
-            try:
-                await report_msg.pin()
-            except Exception as e:
-                print(f"⚠️ Could not pin report: {e}")
-
-            # 4. Close Session in DB
+            # 6. Close Session in DB
             await end_tourney_session(session["_id"])
             await set_tourney_collect_data(session["_id"], False)
             clear_bracket_teams_cache()

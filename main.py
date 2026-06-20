@@ -76,6 +76,9 @@ async def on_ready():
         await bot.load_extension("features.counting")
         print("✅ Loaded Feature: Counting")
 
+        await bot.load_extension("features.tourney.tourney_reports")
+        print("✅ Loaded Feature: Tourney Reports")
+
     except Exception as e:
         print(f"❌ Error loading features: {e}")
 
