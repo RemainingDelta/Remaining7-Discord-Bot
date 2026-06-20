@@ -1172,6 +1172,9 @@ class BlacklistGroup(app_commands.Group):
 def setup_tourney_commands(bot: commands.Bot):
     sticky_redirect_state = {"enabled": False, "region": None}
     admin_role_original_name: list[str | None] = [None]  # mutable container for closure
+    slowmode_auto_disable_task: list[asyncio.Task | None] = [
+        None
+    ]  # mutable container for closure
 
     @bot.command(name="close", aliases=["c"])
     async def close_command(ctx: commands.Context):
@@ -1610,8 +1613,34 @@ def setup_tourney_commands(bot: commands.Bot):
                 await ctx.send(
                     f"🐢 Slow mode (60s) has been enabled in {general_channel.mention}."
                 )
+                await general_channel.send(
+                    "🐢 Slow mode has been enabled for the duration of the tournament. It will be automatically removed after 1 hour."
+                )
             except Exception as e:
                 print(f"Failed to set slow mode on general channel: {e}")
+
+        # Cancel any existing auto-disable timer before starting a new one.
+        if slowmode_auto_disable_task[0] and not slowmode_auto_disable_task[0].done():
+            slowmode_auto_disable_task[0].cancel()
+
+        async def auto_disable_slowmode():
+            try:
+                await asyncio.sleep(3600)  # 1 hour
+            except asyncio.CancelledError:
+                return  # Cancelled by !endtourney or a subsequent !starttourney
+
+            channel = bot.get_channel(GENERAL_CHANNEL_ID)
+            if isinstance(channel, discord.TextChannel):
+                try:
+                    await channel.edit(slowmode_delay=0)
+                    await channel.send(
+                        "🐇 Slow mode has been automatically removed. You can now chat freely!"
+                    )
+                    print(f"✅ Slow mode auto-disabled on #{channel.name}")
+                except Exception as e:
+                    print(f"Failed to auto-disable slow mode: {e}")
+
+        slowmode_auto_disable_task[0] = asyncio.create_task(auto_disable_slowmode())
 
         # Start dashboard last so it's the final message in #tourney-admin,
         # preventing an immediate delete+repost flash on the first 5-minute tick.
@@ -1856,6 +1885,11 @@ def setup_tourney_commands(bot: commands.Bot):
             except Exception as e:
                 print(f"Failed to restore Admin role name: {e}")
 
+        # Cancel the auto-disable timer since we're removing slow mode now.
+        if slowmode_auto_disable_task[0] and not slowmode_auto_disable_task[0].done():
+            slowmode_auto_disable_task[0].cancel()
+        slowmode_auto_disable_task[0] = None
+
         # Remove slow mode from general channel now that tourney is over.
         general_channel = guild.get_channel(GENERAL_CHANNEL_ID)
         if isinstance(general_channel, discord.TextChannel):
@@ -1863,6 +1897,9 @@ def setup_tourney_commands(bot: commands.Bot):
                 await general_channel.edit(slowmode_delay=0)
                 await ctx.send(
                     f"🐇 Slow mode has been removed from {general_channel.mention}."
+                )
+                await general_channel.send(
+                    "🐇 The tournament has ended — slow mode has been removed. Chat freely!"
                 )
             except Exception as e:
                 print(f"Failed to remove slow mode on general channel: {e}")
