@@ -594,8 +594,16 @@ class QueueDashboard(commands.Cog):
 
             if data["bottlenecks"]:
                 bn_text = ""
-                for bn in data["bottlenecks"][:5]:
-                    bn_text += f"**#{bn['id']}** (Round {bn['round']}) | {bn['team_a']} vs {bn['team_b']} ({bn['score_a']}-{bn['score_b']})\n"
+                shown = 0
+                total_bn = len(data["bottlenecks"])
+                for bn in data["bottlenecks"]:
+                    line = f"**#{bn['id']}** (Round {bn['round']}) | {bn['team_a']} vs {bn['team_b']} ({bn['score_a']}-{bn['score_b']})\n"
+                    if len(bn_text) + len(line) > 1000:
+                        break
+                    bn_text += line
+                    shown += 1
+                if shown < total_bn:
+                    bn_text += f"*+{total_bn - shown} more...*"
                 embed.add_field(
                     name="⚠️ Bottleneck Matches", value=bn_text, inline=False
                 )
@@ -2990,8 +2998,16 @@ def setup_tourney_commands(bot: commands.Bot):
         # Bottlenecks (Laggards behind dominant round)
         if data["bottlenecks"]:
             bn_text = ""
-            for bn in data["bottlenecks"][:5]:
-                bn_text += f"**#{bn['id']}** (Round {bn['round']}) | {bn['team_a']} vs {bn['team_b']} ({bn['score_a']}-{bn['score_b']})\n"
+            shown = 0
+            total_bn = len(data["bottlenecks"])
+            for bn in data["bottlenecks"]:
+                line = f"**#{bn['id']}** (Round {bn['round']}) | {bn['team_a']} vs {bn['team_b']} ({bn['score_a']}-{bn['score_b']})\n"
+                if len(bn_text) + len(line) > 1000:
+                    break
+                bn_text += line
+                shown += 1
+            if shown < total_bn:
+                bn_text += f"*+{total_bn - shown} more...*"
             embed.add_field(name="⚠️ Bottleneck Matches", value=bn_text, inline=False)
         else:
             embed.add_field(
