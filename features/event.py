@@ -296,6 +296,7 @@ class PollPayoutConfirmView(discord.ui.View):
 class Events(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
+        self._warning_msg_ids: dict[int, int] = {}  # channel_id → warning message_id
         self.cleanup_check_task.start()
 
     def cog_unload(self):
@@ -415,8 +416,17 @@ class Events(commands.Cog):
                             inline=False,
                         )
 
+                        old_msg_id = self._warning_msg_ids.get(channel_id)
+                        if old_msg_id:
+                            try:
+                                old_msg = await staff_channel.fetch_message(old_msg_id)
+                                await old_msg.delete()
+                            except (discord.NotFound, discord.HTTPException):
+                                pass
+
                         view = ClearChannelView(channel_id)
-                        await staff_channel.send(embed=embed, view=view)
+                        new_msg = await staff_channel.send(embed=embed, view=view)
+                        self._warning_msg_ids[channel_id] = new_msg.id
                         print(f"⚠️ Sent cleanup alert for #{name}-event")
 
                     break
