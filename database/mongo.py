@@ -675,25 +675,25 @@ async def add_hypercharge_to_user(user_id: str, brawler_id: str, hc_name: str):
 
 
 async def init_default_quests(default_quests_list):
-    """Ensures default quests exist in the DB (Run once)."""
+    """Upserts default quests into the DB, syncing rewards to code on every startup."""
     if db is None:
         return
-    # Check if quests already exist to avoid duplicates
-    if await db.quests.count_documents({}) == 0:
-        for q in default_quests_list:
-            # Matches your screenshot structure
-            await db.quests.insert_one(
-                {
-                    "name": q[0],
+    for q in default_quests_list:
+        await db.quests.update_one(
+            {"name": q[0]},
+            {
+                "$set": {
                     "description": q[1],
                     "reward_tokens": q[2],
                     "reward_exp": q[3],
-                    "target_count": q[4],  # Matches screenshot
-                    "quest_type": q[5],  # Matches screenshot
+                    "target_count": q[4],
+                    "quest_type": q[5],
                     "is_active": True,
                 }
-            )
-        print("✅ Default Quests Initialized in MongoDB")
+            },
+            upsert=True,
+        )
+    print("✅ Default Quests synced to MongoDB")
 
 
 async def get_active_quest(user_id: str, q_type: str):
