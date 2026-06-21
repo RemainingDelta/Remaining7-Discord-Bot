@@ -2585,6 +2585,7 @@ def setup_tourney_commands(bot: commands.Bot):
             "`/set-matcherino` - Set the active Matcherino bracket ID for the session.\n"
             "`/match-info` - Show live rosters, scores, and match status for a match number.\n"
             "`/match-history` - Show a team's previous rounds for a given match.\n"
+            "`/active-matches` - Display all active match scores grouped by round.\n"
             "`/set-ticket-match` - Correct this ticket's match number or team name.\n"
             "`/tourney-progress` - Real-time bracket health check with stage announcements."
         )
