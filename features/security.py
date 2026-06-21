@@ -1,7 +1,7 @@
 import discord
 from discord import app_commands
 from discord.ext import commands
-from datetime import timedelta, datetime
+from datetime import timedelta, datetime, timezone
 from math import ceil
 import asyncio
 
@@ -31,22 +31,26 @@ class Security(commands.Cog):
         """
         Shared logic that performs the timeout, DB update, and message purge.
         """
-        # 1. Prevent targetting admins/mods or self
-        if target_user.top_role >= moderator.top_role:
-            return discord.Embed(
-                description="❌ You cannot target someone with equal or higher roles.",
-                color=discord.Color.red(),
-            )
+        # 1. Prevent targetting admins/mods or self (only possible if user is still in server)
+        if isinstance(target_user, discord.Member):
+            if target_user.top_role >= moderator.top_role:
+                return discord.Embed(
+                    description="❌ You cannot target someone with equal or higher roles.",
+                    color=discord.Color.red(),
+                )
 
         # 2. Timeout the User (7 Days)
-        try:
-            duration = timedelta(days=7)
-            await target_user.timeout(
-                duration, reason="Security: User Compromised/Hacked"
-            )
-            timeout_status = "✅ User Timed Out (7 Days)"
-        except Exception as e:
-            timeout_status = f"⚠️ Failed to Timeout: {e}"
+        if isinstance(target_user, discord.Member):
+            try:
+                duration = timedelta(days=7)
+                await target_user.timeout(
+                    duration, reason="Security: User Compromised/Hacked"
+                )
+                timeout_status = "✅ User Timed Out (7 Days)"
+            except Exception as e:
+                timeout_status = f"⚠️ Failed to Timeout: {e}"
+        else:
+            timeout_status = "⚠️ User Not in Server — Timeout Skipped"
 
         # 3. Add to Database
         await add_hacked_user(str(target_user.id))
@@ -70,6 +74,7 @@ class Security(commands.Cog):
         cutoff_date = datetime.utcnow() - timedelta(hours=12)
         total_deleted = 0
         channels_checked = 0
+        earliest_message_time = None
 
         # COMBINE LISTS: Convert all to list() first to avoid SequenceProxy errors
         all_channels = (
@@ -91,22 +96,47 @@ class Security(commands.Cog):
                 )
                 if len(deleted) > 0:
                     total_deleted += len(deleted)
+                    channel_earliest = min(msg.created_at for msg in deleted)
+                    if (
+                        earliest_message_time is None
+                        or channel_earliest < earliest_message_time
+                    ):
+                        earliest_message_time = channel_earliest
             except Exception:
                 pass
 
             channels_checked += 1
             await asyncio.sleep(0.1)
 
-        # 6. Build Result Embed
+        # 6. Calculate response time
+        if earliest_message_time is not None:
+            response_delta = datetime.now(timezone.utc) - earliest_message_time
+            total_seconds = int(response_delta.total_seconds())
+            hours, remainder = divmod(total_seconds, 3600)
+            minutes = remainder // 60
+            response_time_str = f"{hours:02d}:{minutes:02d}"
+        else:
+            response_time_str = "N/A (no messages found)"
+
+        # 7. Build Result Embed
         embed = discord.Embed(
             title="🚨 User Flagged as Hacked",
-            description=f"**Target:** {target_user.mention} (`{target_user.id}`)\n**Action:** 7-Day Timeout & Message Purge",
+            description=(
+                f"**Target:** {target_user.mention} (`{target_user.id}`)\n"
+                f"**Moderator:** {moderator.mention}\n"
+                f"**Action:** 7-Day Timeout & Message Purge"
+            ),
             color=discord.Color.dark_red(),
         )
         embed.add_field(name="Status", value=timeout_status, inline=False)
         embed.add_field(
             name="Cleanup Stats",
             value=f"🗑️ Deleted **{total_deleted} messages** across **{channels_checked} channels** (Past 12 hours).",
+            inline=False,
+        )
+        embed.add_field(
+            name="Response Time",
+            value=f"⏱️ {response_time_str}",
             inline=False,
         )
         embed.add_field(
@@ -175,8 +205,7 @@ class Security(commands.Cog):
             try:
                 target_user = await ctx.guild.fetch_member(target_user.id)
             except Exception:
-                await ctx.send("❌ User is no longer in the server.")
-                return
+                pass  # User left — proceed with discord.User to still purge messages and tag DB
 
         status_msg = await ctx.send("⏳ Processing Hacked Protocol...")
         result_embed = await self._execute_hacked_action(

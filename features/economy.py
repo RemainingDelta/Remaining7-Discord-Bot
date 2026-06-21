@@ -1,8 +1,9 @@
+import io
 import time
 import discord
 from discord import app_commands
 from discord.ext import commands, tasks
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import random
 from typing import Optional
 import asyncio
@@ -33,6 +34,7 @@ from features.config import (
     SHOP_DATA,
     MODERATOR_ROLE_ID,
     REDEMPTION_TICKET_CATEGORY_ID,
+    REDEMPTION_TRANSCRIPT_CHANNEL_ID,
     TRIAL_MODERATOR_ROLE_ID,
     PASSIVE_REWARD_EXCLUDED_CHANNEL_IDS,
 )
@@ -247,6 +249,81 @@ async def handle_redemption_delete_attempt(ctx: commands.Context) -> None:
     )
 
 
+async def _build_redemption_transcript_text(
+    channel: discord.TextChannel,
+    item: str,
+    token_cost: int,
+    balance_before: int,
+    balance_after: int,
+) -> str:
+    opener_raw = _extract_topic_value(channel.topic, "redemption-opener")
+    lines: list[str] = [
+        f"Channel: {channel.name}",
+        f"Opener ID: {opener_raw or 'Unknown'}",
+        f"Item: {item}",
+        f"Token Cost: {token_cost}",
+        f"Balance Before: {balance_before}",
+        f"Balance After: {balance_after}",
+        "",
+    ]
+    async for msg in channel.history(limit=None, oldest_first=True):
+        ts = msg.created_at.strftime("%Y-%m-%d %H:%M")
+        author = f"{msg.author} ({msg.author.id})"
+        content = msg.content or ""
+        if msg.attachments:
+            attachment_list = ", ".join(a.url for a in msg.attachments)
+            if content:
+                content += " "
+            content += f"[Attachments: {attachment_list}]"
+        lines.append(f"[{ts}] {author}: {content}")
+    if len(lines) <= 7:
+        lines.append("No messages in this ticket.")
+    return "\n".join(lines)
+
+
+async def _save_redemption_transcript(
+    channel: discord.TextChannel,
+    actor: discord.Member,
+    item: str,
+    token_cost: int,
+    balance_before: int,
+    balance_after: int,
+    outcome: str,
+) -> None:
+    transcript_text = await _build_redemption_transcript_text(
+        channel, item, token_cost, balance_before, balance_after
+    )
+    transcript_bytes = transcript_text.encode("utf-8")
+    filename = f"{channel.name}_transcript.txt"
+
+    opener_raw = _extract_topic_value(channel.topic, "redemption-opener")
+    opener_display = f"<@{opener_raw}>" if opener_raw else "unknown"
+    item_display = SHOP_DATA.get(item, {}).get("display", item).replace("**", "")
+
+    if outcome == "refunded":
+        balance_original = balance_before + token_cost
+        outcome_line = f"🔄 **Refunded** | **Balance:** {balance_original:,} → {balance_before:,} → {balance_after:,} R7 tokens"
+    else:
+        outcome_line = f"✅ **Fulfilled** | **Balance:** {balance_before:,} → {balance_after:,} R7 tokens"
+
+    log_channel = (
+        channel.guild.get_channel(REDEMPTION_TRANSCRIPT_CHANNEL_ID)
+        if isinstance(REDEMPTION_TRANSCRIPT_CHANNEL_ID, int)
+        else None
+    )
+    if isinstance(log_channel, discord.TextChannel):
+        log_file = discord.File(io.BytesIO(transcript_bytes), filename=filename)
+        await log_channel.send(
+            content=(
+                f"📝 Transcript for redemption ticket **#{channel.name}** "
+                f"deleted by **{actor.name}** (opener: {opener_display}).\n"
+                f"**Item:** {item_display} | **Cost:** {token_cost:,} R7 tokens\n"
+                f"{outcome_line}"
+            ),
+            file=log_file,
+        )
+
+
 class RedemptionClosedOptionsView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
@@ -314,13 +391,26 @@ class RedemptionClosedOptionsView(discord.ui.View):
         opener_raw = _extract_topic_value(
             interaction.channel.topic, "redemption-opener"
         )
-        item = _extract_topic_value(interaction.channel.topic, "item")
+        item = _extract_topic_value(interaction.channel.topic, "item") or ""
+        token_cost = _token_price_for_item(item) if item else 0
+        balance_before = 0
+        balance_after = 0
         if opener_raw and opener_raw.isdigit() and item:
             refund_amount = _token_price_for_item(item)
             if refund_amount > 0:
-                current_balance = await get_user_balance(opener_raw)
-                await update_user_balance(opener_raw, current_balance + refund_amount)
+                balance_before = await get_user_balance(opener_raw)
+                balance_after = balance_before + refund_amount
+                await update_user_balance(opener_raw, balance_after)
 
+        await _save_redemption_transcript(
+            interaction.channel,
+            interaction.user,
+            item,
+            token_cost,
+            balance_before,
+            balance_after,
+            outcome="refunded",
+        )
         await interaction.channel.delete(
             reason=f"Redemption ticket refunded and deleted by {interaction.user}"
         )
@@ -365,6 +455,23 @@ class RedemptionClosedOptionsView(discord.ui.View):
         except ValueError:
             cost = _budget_cost_for_item(item)
 
+        opener_raw = _extract_topic_value(
+            interaction.channel.topic, "redemption-opener"
+        )
+        token_cost = _token_price_for_item(item) if item else 0
+        current_balance = 0
+        if opener_raw and opener_raw.isdigit():
+            current_balance = await get_user_balance(opener_raw)
+
+        await _save_redemption_transcript(
+            interaction.channel,
+            interaction.user,
+            item,
+            token_cost,
+            current_balance + token_cost,
+            current_balance,
+            outcome="fulfilled",
+        )
         await add_budget_spent(cost)
         await interaction.channel.delete(
             reason=f"Redemption fulfilled and deleted by {interaction.user}"
@@ -653,9 +760,9 @@ class Economy(commands.Cog):
         current_timestamp = time.time()
         datetime.utcnow().strftime("%Y-%m-%d")
 
-        # --- TRACK DAILY MESSAGE COUNT (tied to /daily cooldown window) ---
-        # Format: "LAST_DAILY_TIMESTAMP:COUNT" — resets when user claims /daily
-        if message.channel.id not in PASSIVE_REWARD_EXCLUDED_CHANNEL_IDS:
+        if message.channel.id == GENERAL_CHANNEL_ID:
+            # --- TRACK DAILY MESSAGE COUNT (tied to /daily cooldown window) ---
+            # Format: "LAST_DAILY_TIMESTAMP:COUNT" — resets when user claims /daily
             last_daily_str = await get_setting(f"daily_{user_id}")
             window_key = last_daily_str if last_daily_str else "0"
 
@@ -671,37 +778,37 @@ class Economy(commands.Cog):
 
             await set_setting(f"daily_msg_count_{user_id}", f"{window_key}:{new_count}")
 
-        # --- PART 1: TOKENS (ON 1 MINUTE COOLDOWN) ---
-        last_message_str = await get_setting(f"last_message_{user_id}")
-        should_award_tokens = False
+            # --- PART 1: TOKENS (ON 20s COOLDOWN) ---
+            last_message_str = await get_setting(f"last_message_{user_id}")
+            should_award_tokens = False
 
-        if last_message_str:
-            try:
-                last_message_ts = float(last_message_str)
-                time_diff = current_timestamp - last_message_ts
+            if last_message_str:
+                try:
+                    last_message_ts = float(last_message_str)
+                    time_diff = current_timestamp - last_message_ts
 
-                # Check for 20s cooldown OR bugged negative timestamps
-                if time_diff >= 20 or time_diff < -3600:
+                    # Check for 20s cooldown OR bugged negative timestamps
+                    if time_diff >= 20 or time_diff < -3600:
+                        should_award_tokens = True
+                except ValueError:
                     should_award_tokens = True
-            except ValueError:
+            else:
                 should_award_tokens = True
-        else:
-            should_award_tokens = True
 
-        if should_award_tokens:
-            earned_tokens = random.randint(2, 5)
+            if should_award_tokens:
+                earned_tokens = random.randint(2, 5)
 
-            # Booster Bonus: 17.5% Chance (Avg 5% increase)
-            SERVER_BOOSTER_ROLE_ID = 647685778255642626
-            if message.guild:
-                booster_role = message.guild.get_role(SERVER_BOOSTER_ROLE_ID)
-                if booster_role and booster_role in message.author.roles:
-                    if random.random() < 0.175:
-                        earned_tokens += 1
+                # Booster Bonus: 17.5% Chance (Avg 5% increase)
+                SERVER_BOOSTER_ROLE_ID = 647685778255642626
+                if message.guild:
+                    booster_role = message.guild.get_role(SERVER_BOOSTER_ROLE_ID)
+                    if booster_role and booster_role in message.author.roles:
+                        if random.random() < 0.175:
+                            earned_tokens += 1
 
-            current_balance = await get_user_balance(user_id)
-            await update_user_balance(user_id, current_balance + earned_tokens)
-            await set_setting(f"last_message_{user_id}", str(current_timestamp))
+                current_balance = await get_user_balance(user_id)
+                await update_user_balance(user_id, current_balance + earned_tokens)
+                await set_setting(f"last_message_{user_id}", str(current_timestamp))
 
         # --- PART 2: XP & LEVELING (EVERY MESSAGE) ---
         EXP_PER_MESSAGE = 10
@@ -991,13 +1098,15 @@ class Economy(commands.Cog):
             )
             ticket_embed.add_field(
                 name="Balance Before",
-                value=f"{balance_display_before:,} R7 tokens",
+                value=f"{int(round(balance_display_before)):,} R7 tokens",
                 inline=True,
             )
             ticket_embed.add_field(
-                name="Balance After", value=f"{balance_after:,} R7 tokens", inline=True
+                name="Balance After",
+                value=f"{int(round(balance_after)):,} R7 tokens",
+                inline=True,
             )
-            await ch.send(embed=ticket_embed)
+            await ch.send(content=interaction.user.mention, embed=ticket_embed)
 
         except Exception as e:
             await add_item_token(user_id, item, quantity=1)
@@ -1175,11 +1284,19 @@ class Economy(commands.Cog):
         int(await get_setting("nitro_redeemed_count", "0"))
         int(await get_setting("pin_redeemed_count", "0"))
 
+        now = datetime.now(timezone.utc)
+        if now.month == 12:
+            reset_date = datetime(now.year + 1, 1, 1, tzinfo=timezone.utc)
+        else:
+            reset_date = datetime(now.year, now.month + 1, 1, tzinfo=timezone.utc)
+        reset_timestamp = int(reset_date.timestamp())
+
         embed = discord.Embed(title="💰 **Budget Status**", color=discord.Color.blue())
         embed.description = (
             f"**Total Monthly Budget:** ${total_budget:.2f}\n"
             f"**Total Spent on Redemptions:** ${total_spent:.2f}\n"
-            f"**Remaining Budget:** ${remaining:.2f}"
+            f"**Remaining Budget:** ${remaining:.2f}\n"
+            f"**Budget Resets:** <t:{reset_timestamp}:R> (<t:{reset_timestamp}:F>)"
         )
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
@@ -1346,9 +1463,9 @@ class Economy(commands.Cog):
             color=discord.Color.gold(),
         )
         earn_text = (
-            f"💬 **Chatting:** Earn **2-5 Tokens** every message in **any channel** across the server! (20s cooldown)\n"
+            f"💬 **Chatting:** Earn **2-5 Tokens** every message in {general_ch}! (20s cooldown)\n"
             "📅 **Daily Rewards:** Use `/daily` to claim tokens every 24h. "
-            "*Requires 5 messages sent since your last `/daily` claim.*\n"
+            f"*Requires 5 messages sent in {general_ch} since your last `/daily` claim.*\n"
             f"🪂 **Supply Drops:** Random crates appear in {general_ch}! Click the button to claim.\n"
             f"🏆 **Events:** Earn massive token rewards in {event_ch}.\n"
             "🚀 **Booster Bonus:** Server Boosters receive a **5% increase** in coins on average."

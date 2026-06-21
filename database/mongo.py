@@ -79,6 +79,49 @@ async def update_user_balance(user_id: str, amount: int):
     )
 
 
+async def increment_user_balance(user_id: str, amount: int):
+    """Atomically increments a user's balance using $inc."""
+    if db is None:
+        return
+    await db.users.update_one(
+        {"_id": str(user_id)}, {"$inc": {"balance": amount}}, upsert=True
+    )
+
+
+# --- POLL REWARD HELPERS ---
+
+
+async def is_poll_reward_processed(message_id: str) -> bool:
+    """Checks if a poll reward has already been distributed for this message."""
+    if db is None:
+        return False
+    doc = await db.processed_poll_rewards.find_one({"_id": str(message_id)})
+    return doc is not None
+
+
+async def mark_poll_reward_processed(
+    message_id: str,
+    admin_id: str,
+    answer_text: str,
+    amount: int,
+    voter_count: int,
+):
+    """Records that poll rewards were distributed for this message."""
+    if db is None:
+        return
+    await db.processed_poll_rewards.insert_one(
+        {
+            "_id": str(message_id),
+            "admin_id": str(admin_id),
+            "answer_text": answer_text,
+            "amount_per_user": amount,
+            "voter_count": voter_count,
+            "total_distributed": amount * voter_count,
+            "processed_at": datetime.utcnow(),
+        }
+    )
+
+
 # --- LEVELING HELPERS ---
 
 
@@ -134,6 +177,36 @@ async def set_setting(key: str, value: str):
     if db is None:
         return
     await db.settings.update_one({"_id": key}, {"$set": {"value": value}}, upsert=True)
+
+
+# --- COUNTING HELPERS ---
+
+
+async def get_counting_state() -> dict:
+    if db is None:
+        return {"current_count": 0, "last_user_id": None}
+    doc = await db.counting.find_one({"_id": "state"})
+    if not doc:
+        return {"current_count": 0, "last_user_id": None}
+    return {
+        "current_count": doc.get("current_count", 0),
+        "last_user_id": doc.get("last_user_id"),
+    }
+
+
+async def update_counting_state(current_count: int, last_user_id: int | None):
+    if db is None:
+        return
+    await db.counting.update_one(
+        {"_id": "state"},
+        {
+            "$set": {
+                "current_count": current_count,
+                "last_user_id": last_user_id,
+            }
+        },
+        upsert=True,
+    )
 
 
 # --- LEADERBOARD HELPERS ---
@@ -602,29 +675,33 @@ async def add_hypercharge_to_user(user_id: str, brawler_id: str, hc_name: str):
 
 
 async def init_default_quests(default_quests_list):
-    """Ensures default quests exist in the DB (Run once)."""
+    """Upserts default quests into the DB, syncing rewards to code on every startup."""
     if db is None:
         return
-    # Check if quests already exist to avoid duplicates
-    if await db.quests.count_documents({}) == 0:
-        for q in default_quests_list:
-            # Matches your screenshot structure
-            await db.quests.insert_one(
-                {
-                    "name": q[0],
+    for q in default_quests_list:
+        await db.quests.update_one(
+            {"name": q[0]},
+            {
+                "$set": {
                     "description": q[1],
                     "reward_tokens": q[2],
                     "reward_exp": q[3],
-                    "target_count": q[4],  # Matches screenshot
-                    "quest_type": q[5],  # Matches screenshot
+                    "target_count": q[4],
+                    "quest_type": q[5],
+                    "quest_category": q[6],
                     "is_active": True,
                 }
-            )
-        print("✅ Default Quests Initialized in MongoDB")
+            },
+            upsert=True,
+        )
+    print("✅ Default Quests synced to MongoDB")
 
 
-async def get_active_quest(user_id: str, q_type: str):
-    """Retrieves the user's current active quest status."""
+async def get_active_quest(user_id: str, q_key: str):
+    """Retrieves the user's current active quest status.
+
+    q_key is one of: daily_message, weekly_message, daily_megabox, weekly_megabox
+    """
     if db is None:
         return None
 
@@ -632,76 +709,63 @@ async def get_active_quest(user_id: str, q_type: str):
     if not user_q:
         return None
 
-    quest_entry = user_q.get(q_type)
+    quest_entry = user_q.get(q_key)
     if not quest_entry:
         return None
 
-    # Check expiration (Daily vs Weekly)
+    period = q_key.split("_")[0]  # "daily" or "weekly"
     now = datetime.utcnow()
     stored_date = quest_entry.get("date_assigned")
 
-    # Safety check if date is missing
     if not stored_date:
         return None
 
     is_expired = False
-    if q_type == "daily":
-        # Expired if the stored date is NOT today
+    if period == "daily":
         if stored_date.date() != now.date():
             is_expired = True
-    elif q_type == "weekly":
-        # Expired if the stored week number is NOT this week
+    elif period == "weekly":
         if stored_date.isocalendar()[1] != now.isocalendar()[1]:
             is_expired = True
 
     if is_expired:
-        return None  # Time for a new one!
+        return None
 
-    # FIX: Return the quest even if it's completed, so we don't assign a new one today.
     return quest_entry
 
 
-async def assign_random_quest(user_id: str, q_type: str):
-    """Picks a random active quest from the DB and assigns it to the user."""
+async def assign_random_quest(user_id: str, q_key: str):
+    """Picks a random active quest from the DB and assigns it to the user.
+
+    q_key is one of: daily_message, weekly_message, daily_megabox, weekly_megabox
+    """
     if db is None:
         return None
 
-    # 1. Simplified Query: Just look for the type (ignores is_active type mismatch)
-    # We also fetch EVERYTHING to see what's actually in there.
+    period, category = q_key.split("_", 1)  # e.g. "daily", "message"
+
     cursor = db.quests.find({})
     all_quests = await cursor.to_list(length=None)
 
-    # Filter in Python to be safe (handles "daily" vs "Daily" and 1 vs True)
-    matching_quests = []
-    for q in all_quests:
-        # Check 'quest_type' (or 'type' if legacy)
-        db_type = q.get("quest_type", q.get("type", "unknown"))
+    matching_quests = [
+        q
+        for q in all_quests
+        if str(q.get("quest_type", "")).lower() == period
+        and str(q.get("quest_category", "")).lower() == category
+    ]
 
-        if str(db_type).lower() == q_type.lower():
-            matching_quests.append(q)
-
-    # 2. Debugging Output if empty
     if not matching_quests:
-        print(f"⚠️ No matching '{q_type}' quests found!")
-        print(f"   └─ Total Quests in DB: {len(all_quests)}")
-        if all_quests:
-            print(f"   └─ Example Quest Keys: {list(all_quests[0].keys())}")
-            print(
-                f"   └─ Example Quest Type: {all_quests[0].get('quest_type', 'MISSING')}"
-            )
+        print(f"⚠️ No matching quests found for key '{q_key}'")
         return None
 
-    # 3. Pick one randomly
     import random
 
     quest = random.choice(matching_quests)
 
-    # 4. Create the new user entry
     new_entry = {
         "quest_id": quest["_id"],
         "name": quest["name"],
         "description": quest["description"],
-        # Handle 'target' vs 'target_count' mismatch safely
         "target_count": quest.get("target_count", quest.get("target", 100)),
         "reward_tokens": quest.get("reward_tokens", 0),
         "reward_exp": quest.get("reward_exp", 0),
@@ -710,24 +774,33 @@ async def assign_random_quest(user_id: str, q_type: str):
         "date_assigned": datetime.utcnow(),
     }
 
-    # 5. Save to user_quests
     await db.user_quests.update_one(
-        {"_id": user_id}, {"$set": {q_type: new_entry}}, upsert=True
+        {"_id": user_id}, {"$set": {q_key: new_entry}}, upsert=True
     )
 
     return new_entry
 
 
-async def update_quest_progress(user_id: str, q_type: str, amount: int = 1):
-    """Increments progress and checks for completion."""
+async def reset_user_quests(user_id: str):
+    """Deletes a user's quest assignments so they get freshly assigned on next /quests."""
+    if db is None:
+        return
+    await db.user_quests.delete_one({"_id": user_id})
+
+
+async def update_quest_progress(user_id: str, q_key: str, amount: int = 1):
+    """Increments progress and checks for completion.
+
+    q_key is one of: daily_message, weekly_message, daily_megabox, weekly_megabox
+    """
     if db is None:
         return False, None
 
     user_q = await db.user_quests.find_one({"_id": user_id})
-    if not user_q or q_type not in user_q:
+    if not user_q or q_key not in user_q:
         return False, None
 
-    quest = user_q[q_type]
+    quest = user_q[q_key]
     if quest["completed"]:
         return False, None
 
@@ -735,16 +808,14 @@ async def update_quest_progress(user_id: str, q_type: str, amount: int = 1):
     target = quest["target_count"]
 
     if new_progress >= target:
-        # Complete!
         await db.user_quests.update_one(
             {"_id": user_id},
-            {"$set": {f"{q_type}.progress": target, f"{q_type}.completed": True}},
+            {"$set": {f"{q_key}.progress": target, f"{q_key}.completed": True}},
         )
         return True, quest
     else:
-        # Update
         await db.user_quests.update_one(
-            {"_id": user_id}, {"$inc": {f"{q_type}.progress": amount}}
+            {"_id": user_id}, {"$inc": {f"{q_key}.progress": amount}}
         )
         return False, None
 
@@ -955,4 +1026,45 @@ async def get_next_support_ticket_number(counter_key: str) -> int:
         return int(doc.get("value", 1))
     except Exception as e:
         print(f"⚠️ DB Error (Support Counter): {e}")
-        return 1
+
+
+# --- STICKY MESSAGES ---
+
+
+async def get_sticky(channel_id: int):
+    if db is None:
+        return None
+    return await db.sticky_messages.find_one({"_id": str(channel_id)})
+
+
+async def set_sticky(
+    channel_id: int, content: str, attachments: list, bot_message_id: int
+):
+    if db is None:
+        return
+    await db.sticky_messages.update_one(
+        {"_id": str(channel_id)},
+        {
+            "$set": {
+                "content": content,
+                "attachments": attachments,
+                "bot_message_id": bot_message_id,
+            }
+        },
+        upsert=True,
+    )
+
+
+async def update_sticky_message_id(channel_id: int, bot_message_id: int):
+    if db is None:
+        return
+    await db.sticky_messages.update_one(
+        {"_id": str(channel_id)},
+        {"$set": {"bot_message_id": bot_message_id}},
+    )
+
+
+async def delete_sticky(channel_id: int):
+    if db is None:
+        return
+    await db.sticky_messages.delete_one({"_id": str(channel_id)})

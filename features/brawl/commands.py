@@ -701,6 +701,12 @@ class BrawlCommands(commands.Cog):
         embed.set_footer(text=SUPERCELL_DISCLAIMER)
         await interaction.followup.send(embed=embed)
 
+        quests_cog = self.bot.get_cog("Quests")
+        if quests_cog:
+            await quests_cog.process_quest_update(
+                user_id, interaction.channel, "megabox"
+            )
+
     @app_commands.command(name="starrdrop", description="Open a random Starr Drop!")
     async def starrdrop(self, interaction: discord.Interaction):
         await interaction.response.defer()
@@ -728,6 +734,12 @@ class BrawlCommands(commands.Cog):
         )
         embed.set_footer(text=SUPERCELL_DISCLAIMER)
         await interaction.followup.send(embed=embed)
+
+        quests_cog = self.bot.get_cog("Quests")
+        if quests_cog:
+            await quests_cog.process_quest_update(
+                user_id, interaction.channel, "megabox"
+            )
 
     @app_commands.command(
         name="brawlers", description="View your collection with levels"

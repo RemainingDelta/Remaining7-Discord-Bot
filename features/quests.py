@@ -2,12 +2,20 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+# Import Config
+from features.config import (
+    BOTS_CATEGORY_ID,
+    GENERAL_CHANNEL_ID,
+    PASSIVE_REWARD_EXCLUDED_CHANNEL_IDS,
+)
+
 # Import Database Helpers
 from database.mongo import (
     init_default_quests,
     get_active_quest,
     assign_random_quest,
     update_quest_progress,
+    reset_user_quests,
     get_user_balance,
     update_user_balance,
     get_leveling_data,
@@ -16,22 +24,59 @@ from database.mongo import (
 
 # --- DEFAULT QUESTS CONFIGURATION ---
 DEFAULT_QUESTS = [
-    # Daily Quests
-    # Name | Desc | Tokens | XP | Target | Type
-    ("Daily Chatter", "Send 80 messages today.", 50, 200, 80, "daily"),
-    ("Quick Convo", "Send 160 messages today.", 75, 250, 160, "daily"),
-    ("Engaged Today", "Send 240 messages today.", 100, 300, 240, "daily"),
-    # Weekly Quests
-    ("Weekly Regular", "Send 500 messages this week.", 250, 1000, 500, "weekly"),
+    # Name | Desc | Tokens | XP | Target | Type | Category
+    # Daily Message Quests
+    ("Daily Chatter", "Send 80 messages today.", 50, 100, 80, "daily", "message"),
+    ("Quick Convo", "Send 160 messages today.", 115, 200, 160, "daily", "message"),
+    ("Engaged Today", "Send 240 messages today.", 250, 300, 240, "daily", "message"),
+    # Daily Megabox Quests
+    (
+        "Mega Box Maniac",
+        "Open 100 Mega Boxes or Starr Drops today.",
+        50,
+        100,
+        100,
+        "daily",
+        "megabox",
+    ),
+    # Weekly Message Quests
+    (
+        "Weekly Regular",
+        "Send 500 messages this week.",
+        225,
+        1000,
+        500,
+        "weekly",
+        "message",
+    ),
     (
         "Consistent Contributor",
         "Send 750 messages this week.",
         400,
-        2500,
+        2000,
         750,
         "weekly",
+        "message",
     ),
-    ("Server Pillar", "Send 1000 messages this week.", 600, 3000, 1000, "weekly"),
+    (
+        "Server Pillar",
+        "Send 1000 messages this week.",
+        640,
+        3000,
+        1000,
+        "weekly",
+        "message",
+    ),
+    # Weekly Megabox Quests
+    (
+        "Mega Box Grinder",
+        "Open 500 Mega Boxes or Starr Drops this week.",
+        250,
+        500,
+        500,
+        "weekly",
+        "megabox",
+    ),
 ]
 
 
@@ -60,26 +105,24 @@ class Quests(commands.Cog):
 
     async def process_quest_update(self, user_id, channel, action_type="message"):
         """Checks daily/weekly quests for progress."""
-        for q_type in ["daily", "weekly"]:
+        if action_type == "message":
+            q_keys = ["daily_message", "weekly_message"]
+        elif action_type == "megabox":
+            q_keys = ["daily_megabox", "weekly_megabox"]
+        else:
+            return
+
+        for q_key in q_keys:
             # 1. Get or Assign Quest
-            quest = await get_active_quest(user_id, q_type)
+            quest = await get_active_quest(user_id, q_key)
             if not quest:
-                quest = await assign_random_quest(user_id, q_type)
+                quest = await assign_random_quest(user_id, q_key)
 
             if not quest:
                 continue
 
-            # 2. Filter: Only process message updates since invite quests are gone
-            if (
-                action_type == "message"
-                and "message" not in quest["description"].lower()
-            ):
-                continue
-            if action_type == "invite":
-                continue  # Explicitly ignore invites
-
-            # 3. Update Progress
-            completed, q_data = await update_quest_progress(user_id, q_type)
+            # 2. Update Progress
+            completed, q_data = await update_quest_progress(user_id, q_key)
 
             # 4. Handle Completion
             if completed and q_data:
@@ -115,6 +158,15 @@ class Quests(commands.Cog):
     async def on_message(self, message: discord.Message):
         if message.author.bot:
             return
+
+        # Skip quest progress outside general chat and restricted channels
+        if message.channel.category and message.channel.category.id == BOTS_CATEGORY_ID:
+            return
+        if message.channel.id in PASSIVE_REWARD_EXCLUDED_CHANNEL_IDS:
+            return
+        if message.channel.id != GENERAL_CHANNEL_ID:
+            return
+
         # Trigger message quest updates
         await self.process_quest_update(
             str(message.author.id), message.channel, "message"
@@ -156,12 +208,18 @@ class Quests(commands.Cog):
             color=discord.Color.blue(),
         )
 
-        for q_type in ["daily", "weekly"]:
-            quest = await get_active_quest(user_id, q_type)
-            if not quest:
-                quest = await assign_random_quest(user_id, q_type)
+        quest_slots = [
+            ("daily_message", "Daily Message Quest"),
+            ("weekly_message", "Weekly Message Quest"),
+            ("daily_megabox", "Daily Megabox Quest"),
+            ("weekly_megabox", "Weekly Megabox Quest"),
+        ]
 
-            title = f"{q_type.capitalize()} Quest"
+        for q_key, title in quest_slots:
+            quest = await get_active_quest(user_id, q_key)
+            if not quest:
+                quest = await assign_random_quest(user_id, q_key)
+
             if quest:
                 # Progress Bar Logic
                 prog = quest.get("progress", 0)
@@ -189,6 +247,18 @@ class Quests(commands.Cog):
                 )
 
         await interaction.response.send_message(embed=embed)
+
+    @app_commands.command(
+        name="reset-quests", description="[STAFF] Reset a user's quest assignments."
+    )
+    @app_commands.default_permissions(administrator=True)
+    @app_commands.describe(user="The user whose quests to reset.")
+    async def resetquests(self, interaction: discord.Interaction, user: discord.Member):
+        await reset_user_quests(str(user.id))
+        await interaction.response.send_message(
+            f"✅ Quest assignments reset for {user.mention}. They'll get new quests on next `/quests`.",
+            ephemeral=True,
+        )
 
 
 async def setup(bot):

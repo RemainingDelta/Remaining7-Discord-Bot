@@ -2,7 +2,7 @@
 
 ## Overview
 **Name:** Remaining7 Discord Bot
-**Version:** v1.7.5
+**Version:** v1.10.0
 **Contributors:** remainingdelta, nightwarrior5
 **Objective:** A feature-rich Discord bot for the Remaining7 community server (16k+ members). Handles an R7 Token economy, leveling, quests, a Brawl Stars collection minigame, tournament management with Matcherino integration, support tickets, event operations, a security protocol, and multi-language translation.
 **Server Link:** https://discord.gg/6MzrjS2X8k
@@ -15,6 +15,7 @@
 - **Database:** MongoDB Atlas via `motor` (async)
 - **Translation:** `deep-translator` + `langdetect`
 - **External API:** Matcherino (tournament brackets, payouts)
+- **AI Integration:** Gemini API (GitHub issue generation)
 - **Linting:** Ruff (`ruff check .` / `ruff format .`)
 
 ---
@@ -23,7 +24,10 @@
 ```
 Remaining7-Discord-Bot/
 ├── main.py                          # Entry point — loads cogs, syncs commands
+├── pyproject.toml                   # Project metadata and version
 ├── requirements.txt
+├── Makefile
+├── LICENSE
 ├── .env.example
 ├── .gitignore
 ├── CLAUDE.md
@@ -36,9 +40,12 @@ Remaining7-Discord-Bot/
 │   ├── quests.py                    # Daily & weekly quest system
 │   ├── security.py                  # Hacked protocol (timeout, purge, flag)
 │   ├── event.py                     # Event channel cleanup & reward payouts
-│   ├── general.py                   # /help, /mod-help, /admin-help, /convert-time
+│   ├── general.py                   # /help, /mod-help, /admin-help, /version, /convert-time
 │   ├── translation.py               # !t prefix & /translate slash command (55 languages)
+│   ├── counting.py                  # Sequential counting game with /set-count
+│   ├── sticky.py                    # !sticky / !unsticky persistent channel messages
 │   ├── support_tickets.py           # General support tickets (issues, support, apps, partnership)
+│   ├── github_tickets.py           # AI-powered GitHub issue creation from tickets (Gemini)
 │   ├── ticket_command_router.py     # Shared routing for tourney & support ticket commands
 │   ├── brawl/
 │   │   ├── brawlers.json            # Brawler data (name, rarity, gadgets, star powers, hypercharges)
@@ -64,7 +71,7 @@ Remaining7-Discord-Bot/
 ## Core Features
 
 ### R7 Token Economy
-- **Passive Income:** Users earn 2–5 R7 Tokens per message (20-second cooldown). Server Boosters get a 2% average bonus.
+- **Passive Income:** Users earn 2–5 R7 Tokens per message (20-second cooldown). Server Boosters get a 5% increase in tokens on average.
 - **Daily Rewards:** `/daily` grants 80–160 tokens (scaled by level). Requires 5 messages sent since last claim and a 24-hour cooldown.
 - **Supply Drop:** `/drop <amount>` (Admin) to force a token drop in general chat.
 - **Balance & Ranking:** `/balance [user]`, `/leaderboard [page]`.
@@ -86,10 +93,14 @@ Remaining7-Discord-Bot/
 - `/levels-leaderboard [page]` — server-wide level rankings (paginated).
 
 ### Quest System
-- **Daily Quests:** 80 / 160 / 240 messages → 50–100 tokens + 200–300 XP.
-- **Weekly Quests:** 500 / 750 / 1000 messages → 250–600 tokens + 1000–3000 XP.
-- `/quests` — interactive progress bars for active quests.
-- Quests auto-assign randomly; completion rewards are granted instantly.
+Every user always has **4 active quests** — one daily and one weekly per category:
+- **Daily Message Quests:** 80 / 160 / 240 messages → 50 / 115 / 250 tokens + 100 / 200 / 300 XP.
+- **Weekly Message Quests:** 500 / 750 / 1000 messages → 225 / 400 / 640 tokens + 1000 / 2000 / 3000 XP.
+- **Daily Megabox Quest:** Open 100 Mega Boxes or Starr Drops → 50 tokens + 100 XP.
+- **Weekly Megabox Quest:** Open 500 Mega Boxes or Starr Drops → 250 tokens + 500 XP.
+- `/quests` — interactive progress bars for all 4 active quests.
+- `/reset-quests <user>` (Admin) — force-reset a user's quest assignments.
+- Quests auto-assign randomly per slot; completion rewards are granted instantly.
 
 ### Brawl Stars Collection Minigame
 - **Gacha Drops:**
@@ -130,6 +141,9 @@ Remaining7-Discord-Bot/
 - **Rate Limits:** Max 3 open tickets per user, 180s cooldown. Auto-reopen after 6-hour lock.
 - **Auto-translation:** Ticket messages auto-translated via `deep-translator` + `langdetect`.
 - **Test Mode:** `/tourney-test-mode` — toggle 100-ticket limit and 0.1s cooldown for testing.
+- **Active Matches:** `/active-matches` — display all active match scores grouped by round.
+- **Monthly Reports:** Auto-generated monthly tournament reports posted to a dedicated archive channel. Matcherino ID is auto-detected on `!starttourney`.
+- **Slow Mode:** `!starttourney` enables 60s slow mode in general chat with a public notice; auto-removed after 1 hour (or immediately on `!endtourney`).
 - **Staff Guide:** `/tourney-admin-help`.
 - **SA Mode:** South America region variant with separate ticket categories and region-specific workflow.
 
@@ -150,11 +164,17 @@ Remaining7-Discord-Bot/
 - Staff can close, reopen, and delete tickets with transcript generation.
 - Transcripts DM'd to the opener and archived in a log channel.
 
+### GitHub Ticket Integration
+- AI-powered GitHub issue creation from support tickets using Gemini.
+- Automatically generates structured bug reports, feature requests, and enhancement issues from ticket conversations.
+- Requires `GEMINI_TOKEN` and `GITHUB_TOKEN` environment variables.
+
 ### Event Management
 - **Automated Monitoring:** Daily background task at 12:00 AM ET scans event channels.
-- **Smart Alerts:** Alert sent when messages are 7+ days old (prevents exceeding Discord's 14-day bulk-delete limit).
+- **Smart Alerts:** Alert sent when messages are 7+ days old (prevents exceeding Discord's 14-day bulk-delete limit). Previous day's alert is replaced instead of stacking.
 - **Manual Cleanup:** `/clear-red`, `/clear-blue`, `/clear-green` for instant channel wipes.
 - **Reward Payouts:** `/event-rewards <message_id>` parses `@User 500` format to batch-distribute tokens with confirmation.
+- **Poll Rewards:** `/poll-rewards <message_id>` distributes tokens to all users who voted on a poll.
 - **Staff Guide:** `/event-staff-help`.
 
 ### Security Protocol
@@ -168,8 +188,17 @@ Remaining7-Discord-Bot/
 - `/translate <language> <phrase>` — translate English text into any of 55 supported languages.
 - Auto-detects source language. Google Translate backend.
 
+### Counting Game
+- Sequential counting game in a designated channel — users must send the next number in sequence.
+- `/set-count <number>` (Staff) — manually set the current count.
+
+### Sticky Messages
+- `!sticky <message>` — pin a message that reposts automatically when other messages are sent.
+- `!unsticky` — remove the active sticky message from a channel.
+
 ### Utility
 - `/convert-time <date> <time> <timezone>` — convert a date and time to all Discord timestamp formats. Supports 20+ timezone aliases (EST, PT, GMT, etc.) and IANA names.
+- `/version` — view the bot's current version.
 
 ### Help Commands
 - `/help` — user command directory.
@@ -206,10 +235,12 @@ This bot requires **Python 3.10+** and a **MongoDB Atlas** database.
     PROD_TOKEN=             # Production bot token (used when BOT_MODE=PROD)
     DEV_TOKEN=              # Dev/test bot token (used when BOT_MODE=DEV)
     MONGO_URI=              # MongoDB Atlas connection string
+    GEMINI_TOKEN=           # Gemini API key for AI-powered GitHub issue creation
+    GITHUB_TOKEN=           # GitHub PAT with 'repo' scope for issue creation
     ```
 
 4. **Update Configuration**
-    Verify and update IDs in `features/config.py` (channels, roles, categories, emojis) for your server. Both `REAL` and `TEST` branches must be maintained.
+    Verify and update IDs in `features/config.py` (channels, roles, categories, emojis) for your server. Both `PROD` and `DEV` branches must be maintained.
 
 5. **Run the Bot**
     ```bash
@@ -244,8 +275,8 @@ Uses MongoDB database `r7_bot_db` with the following collections:
 
 | Task | Schedule | Description |
 |---|---|---|
-| Message listener | On every message | Passive token + XP generation (20s cooldown) |
-| Quest tracker | On every message | Track quest progress, auto-complete and reward |
+| Message listener | On every message | XP generation; passive token earning restricted to general chat (20s cooldown) |
+| Quest tracker | On every message / megabox open | Track message & megabox quest progress, auto-complete and reward |
 | Event cleanup | Daily at 12:00 AM ET | Scan event channels for stale messages |
 | Queue dashboard | Every 15 seconds | Update tourney queue embed during live tournaments |
 | Supply drop | Every 6 hours | Random token drop in general chat |

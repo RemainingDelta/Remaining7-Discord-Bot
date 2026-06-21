@@ -62,8 +62,15 @@ class General(commands.Cog):
         )
         embed.add_field(name="🌐 Translation", value=translation_text, inline=False)
 
+        counting_text = (
+            "Type the next number in sequence in the counting channel!\n"
+            "*(Stay on track — any wrong number resets the count)*"
+        )
+        embed.add_field(name="🔢 Counting Game", value=counting_text, inline=False)
+
         utility_text = (
-            "`/convert-time` - Convert a date and time to Discord timestamp formats"
+            "`/convert-time` - Convert a date and time to Discord timestamp formats\n"
+            "`/version` - View the bot's current version"
         )
         embed.add_field(name="🔧 Utility", value=utility_text, inline=False)
 
@@ -107,6 +114,14 @@ class General(commands.Cog):
         )
         embed.add_field(name="🚨 Security Protocol", value=security_text, inline=False)
 
+        # Server Tools
+        tools_text = (
+            "`/set-count <number>` - Manually set the current count in the counting channel.\n"
+            "`!sticky <message>` - Pin a message that reposts whenever others send in that channel.\n"
+            "`!unsticky` - Remove the active sticky message from a channel."
+        )
+        embed.add_field(name="🔧 Server Tools", value=tools_text, inline=False)
+
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
     @app_commands.command(
@@ -140,7 +155,8 @@ class General(commands.Cog):
         # --- Event Operations ---
         event_text = (
             "`/event-rewards <msg_id>` - Process token distribution from an announcement message.\n"
-            "*(Requires formatting: @User 500)*"
+            "`/poll-rewards <msg_id>` - Distribute tokens to all users who voted on a poll.\n"
+            "*(Requires formatting: @User 500 for event-rewards)*"
         )
         embed.add_field(name="🏆 Event Operations", value=event_text, inline=False)
 
@@ -165,6 +181,10 @@ class General(commands.Cog):
         embed.add_field(
             name="⚔️ Tournament & Financials", value=tourney_text, inline=False
         )
+
+        # --- Quest Management ---
+        quest_text = "`/reset-quests <user>` - Force-reset a user's quest assignments."
+        embed.add_field(name="📜 Quest Management", value=quest_text, inline=False)
 
         # Ephemeral = True ensures only the Admin sees this menu
         await interaction.response.send_message(embed=embed, ephemeral=True)
@@ -193,6 +213,14 @@ class General(commands.Cog):
         "AEDT": "Australia/Sydney",
         "BRT": "America/Sao_Paulo",
     }
+
+    @app_commands.command(name="version", description="View the bot's current version.")
+    async def version(self, interaction: discord.Interaction):
+        embed = discord.Embed(
+            description=f"🤖 R7 Bot is running\n# {BOT_VERSION}",
+            color=discord.Color.blurple(),
+        )
+        await interaction.response.send_message(embed=embed)
 
     @app_commands.command(
         name="convert-time",

@@ -60,6 +60,8 @@ from features.config import (
     HALL_OF_FAME_CHANNEL_ID,
     BOT_VERSION,
     TOURNEY_ADMIN_ROLE_ID,
+    TOURNEY_REPORT_CHANNEL_ID,
+    TOURNEY_SCHEDULE_CHANNEL_ID,
 )
 from .tourney_utils import (
     close_ticket_via_command,
@@ -592,8 +594,16 @@ class QueueDashboard(commands.Cog):
 
             if data["bottlenecks"]:
                 bn_text = ""
-                for bn in data["bottlenecks"][:5]:
-                    bn_text += f"**#{bn['id']}** (Round {bn['round']}) | {bn['team_a']} vs {bn['team_b']} ({bn['score_a']}-{bn['score_b']})\n"
+                shown = 0
+                total_bn = len(data["bottlenecks"])
+                for bn in data["bottlenecks"]:
+                    line = f"**#{bn['id']}** (Round {bn['round']}) | {bn['team_a']} vs {bn['team_b']} ({bn['score_a']}-{bn['score_b']})\n"
+                    if len(bn_text) + len(line) > 1000:
+                        break
+                    bn_text += line
+                    shown += 1
+                if shown < total_bn:
+                    bn_text += f"*+{total_bn - shown} more...*"
                 embed.add_field(
                     name="⚠️ Bottleneck Matches", value=bn_text, inline=False
                 )
@@ -1162,6 +1172,9 @@ class BlacklistGroup(app_commands.Group):
 def setup_tourney_commands(bot: commands.Bot):
     sticky_redirect_state = {"enabled": False, "region": None}
     admin_role_original_name: list[str | None] = [None]  # mutable container for closure
+    slowmode_auto_disable_task: list[asyncio.Task | None] = [
+        None
+    ]  # mutable container for closure
 
     @bot.command(name="close", aliases=["c"])
     async def close_command(ctx: commands.Context):
@@ -1316,6 +1329,12 @@ def setup_tourney_commands(bot: commands.Bot):
             await ctx.reply("You don't have permission to start the tourney.")
             return
 
+        if ctx.channel.id != TOURNEY_ADMIN_CHANNEL_ID:
+            await ctx.reply(
+                f"This command can only be used in <#{TOURNEY_ADMIN_CHANNEL_ID}>."
+            )
+            return
+
         guild = ctx.guild
         if not guild:
             return
@@ -1333,6 +1352,61 @@ def setup_tourney_commands(bot: commands.Bot):
             await create_tourney_session()
         else:
             await reset_tourney_session_start_time(existing_session["_id"])
+
+        # Auto-detect Matcherino ID from #tourney-schedule (±1 day of today)
+        auto_matcherino_id = None
+        auto_detect_error = None
+        schedule_channel = ctx.bot.get_channel(TOURNEY_SCHEDULE_CHANNEL_ID)
+        if not schedule_channel:
+            auto_detect_error = "⚠️ Auto-detect: `TOURNEY_SCHEDULE_CHANNEL_ID` not found — check `config.py`."
+        else:
+            today = datetime.datetime.now(datetime.timezone.utc).date()
+            msgs_checked = 0
+            closest_date_seen = None
+            try:
+                async for msg in schedule_channel.history(limit=100):
+                    content = msg.content or ""
+                    date_match = re.search(
+                        r"•\s*\**\s*Date:\**\s*(.+)", content, re.IGNORECASE
+                    )
+                    if not date_match:
+                        continue
+                    msgs_checked += 1
+                    date_str = date_match.group(1).strip()
+                    try:
+                        parsed_date = datetime.datetime.strptime(
+                            date_str, "%B %d, %Y"
+                        ).date()
+                    except ValueError:
+                        auto_detect_error = f"⚠️ Auto-detect: Found a date but couldn't parse it: `{date_str}` — expected format `June 19, 2026`."
+                        continue
+                    closest_date_seen = parsed_date
+                    if abs((parsed_date - today).days) <= 1:
+                        url_match = re.search(
+                            r"matcherino\.com/supercell/tournaments/(\d+)", content
+                        )
+                        if url_match:
+                            auto_matcherino_id = url_match.group(1)
+                            break
+                        else:
+                            auto_detect_error = f"⚠️ Auto-detect: Found the schedule post for `{date_str}` but no Matcherino URL in the message."
+                            break
+
+                if not auto_matcherino_id and not auto_detect_error:
+                    if msgs_checked == 0:
+                        auto_detect_error = f"⚠️ Auto-detect: No messages with a `• Date:` field found in <#{TOURNEY_SCHEDULE_CHANNEL_ID}>."
+                    else:
+                        auto_detect_error = (
+                            f"⚠️ Auto-detect: No schedule post within ±1 day of today ({today.strftime('%B %d, %Y')}). "
+                            f"Closest date found: `{closest_date_seen.strftime('%B %d, %Y') if closest_date_seen else 'none'}`."
+                        )
+            except Exception as e:
+                auto_detect_error = f"⚠️ Auto-detect error: `{e}`"
+
+        if auto_matcherino_id:
+            active_session = await get_active_tourney_session()
+            if active_session:
+                await update_matcherino_id(active_session["_id"], auto_matcherino_id)
 
         await lock_command(ctx)
 
@@ -1473,8 +1547,16 @@ def setup_tourney_commands(bot: commands.Bot):
                         except Exception as e:
                             print(f"Failed to delete pre-tourney ticket {ch.name}: {e}")
 
+        if auto_matcherino_id:
+            matcherino_notice = f"🔗 Matcherino ID auto-set to `{auto_matcherino_id}` from the schedule. If wrong, use `/set-matcherino` to fix it."
+        else:
+            matcherino_notice = (
+                auto_detect_error
+                or "⚠️ Could not auto-detect Matcherino ID. Set it manually with `/set-matcherino`."
+            )
+
         await ctx.send(
-            f"✅ Tourney Started! Channels updated and {deleted_count} pre-tourney tickets deleted.\n⚠️ Don't forget to set the new Matcherino ID with `/set-matcherino` and enable ML data collection if needed."
+            f"✅ Tourney Started! Channels updated and {deleted_count} pre-tourney tickets deleted.\n{matcherino_notice}"
         )
 
         # Grant Tourney Admin the Timeout Members permission for the duration of the tourney.
@@ -1523,8 +1605,6 @@ def setup_tourney_commands(bot: commands.Bot):
                     "hype_message_id": None,
                 },
             }
-            await dashboard_cog.start_dashboard()
-
         # Apply 60s slow mode to general channel during tourney.
         general_channel = guild.get_channel(GENERAL_CHANNEL_ID)
         if isinstance(general_channel, discord.TextChannel):
@@ -1533,8 +1613,39 @@ def setup_tourney_commands(bot: commands.Bot):
                 await ctx.send(
                     f"🐢 Slow mode (60s) has been enabled in {general_channel.mention}."
                 )
+                await general_channel.send(
+                    "🐢 Slow mode has been enabled for the duration of the tournament. It will be automatically removed after 1 hour."
+                )
             except Exception as e:
                 print(f"Failed to set slow mode on general channel: {e}")
+
+        # Cancel any existing auto-disable timer before starting a new one.
+        if slowmode_auto_disable_task[0] and not slowmode_auto_disable_task[0].done():
+            slowmode_auto_disable_task[0].cancel()
+
+        async def auto_disable_slowmode():
+            try:
+                await asyncio.sleep(3600)  # 1 hour
+            except asyncio.CancelledError:
+                return  # Cancelled by !endtourney or a subsequent !starttourney
+
+            channel = bot.get_channel(GENERAL_CHANNEL_ID)
+            if isinstance(channel, discord.TextChannel):
+                try:
+                    await channel.edit(slowmode_delay=0)
+                    await channel.send(
+                        "🐇 Slow mode has been automatically removed. You can now chat freely!"
+                    )
+                    print(f"✅ Slow mode auto-disabled on #{channel.name}")
+                except Exception as e:
+                    print(f"Failed to auto-disable slow mode: {e}")
+
+        slowmode_auto_disable_task[0] = asyncio.create_task(auto_disable_slowmode())
+
+        # Start dashboard last so it's the final message in #tourney-admin,
+        # preventing an immediate delete+repost flash on the first 5-minute tick.
+        if dashboard_cog:
+            await dashboard_cog.start_dashboard()
 
     @bot.command(name="endtourney")
     async def end_tourney_command(ctx: commands.Context):
@@ -1547,6 +1658,12 @@ def setup_tourney_commands(bot: commands.Bot):
         """
         if not isinstance(ctx.author, discord.Member) or not is_staff(ctx.author):
             await ctx.reply("You don't have permission to end the tourney.")
+            return
+
+        if ctx.channel.id != TOURNEY_ADMIN_CHANNEL_ID:
+            await ctx.reply(
+                f"This command can only be used in <#{TOURNEY_ADMIN_CHANNEL_ID}>."
+            )
             return
 
         guild = ctx.guild
@@ -1575,13 +1692,6 @@ def setup_tourney_commands(bot: commands.Bot):
                     )
             except Exception as e:
                 print(f"!endtourney announcement sync error: {e}")
-
-        # Do a final progress dashboard refresh before stopping so it shows Tournament Over.
-        if dashboard_cog:
-            try:
-                await dashboard_cog.update_progress_dashboard()
-            except Exception as e:
-                print(f"!endtourney final progress update error: {e}")
 
         winner_was_posted = (
             dashboard_cog is not None
@@ -1672,16 +1782,55 @@ def setup_tourney_commands(bot: commands.Bot):
                     icon = f"**{i + 1}.**"  # e.g. "4.", "5.", "6."
 
                 staff_msg += (
-                    f"{icon} **{s['username']}**: {s['tickets_closed']} tickets\n"
+                    f"{icon} <@{s['user_id']}>: {s['tickets_closed']} tickets\n"
                 )
 
             if not staff_msg:
                 staff_msg = "No tickets closed."
 
-            # 3. Send Embed
-            stat_embed = discord.Embed(
-                title="📊 Tournament Report", color=discord.Color.gold()
-            )
+            # 3. Look up tournament name (Matcherino API) and canonical date (#tourney-schedule)
+            tourney_date_str = None
+            tourney_name = None
+            matcherino_id = session.get("matcherino_id")
+            if matcherino_id:
+                try:
+                    payout_data = fetch_payout_report(str(matcherino_id))
+                    if "error" not in payout_data:
+                        tourney_name = payout_data.get("tourney_name")
+                except Exception as e:
+                    print(f"⚠️ Could not fetch tourney name from Matcherino: {e}")
+
+                ann_channel = ctx.bot.get_channel(TOURNEY_SCHEDULE_CHANNEL_ID)
+                if ann_channel:
+                    try:
+                        async for msg in ann_channel.history(limit=500):
+                            if str(matcherino_id) in (msg.content or ""):
+                                m = re.search(
+                                    r"•\s*\**\s*Date:\**\s*(.+)",
+                                    msg.content,
+                                    re.IGNORECASE,
+                                )
+                                if m:
+                                    tourney_date_str = m.group(1).strip()
+                                break
+                    except Exception as e:
+                        print(f"⚠️ Could not look up tourney date from schedule: {e}")
+
+            # 4. Build Embed
+            if tourney_name and matcherino_id:
+                matcherino_url = (
+                    f"https://matcherino.com/supercell/tournaments/{matcherino_id}"
+                )
+                stat_embed = discord.Embed(
+                    title=f"📊 Tournament Report ({tourney_name})",
+                    url=matcherino_url,
+                    color=discord.Color.gold(),
+                )
+            else:
+                stat_embed = discord.Embed(
+                    title="📊 Tournament Report",
+                    color=discord.Color.gold(),
+                )
             stat_embed.add_field(
                 name="⏱️ Duration", value=f"`{hours}h {minutes}m`", inline=True
             )
@@ -1703,15 +1852,20 @@ def setup_tourney_commands(bot: commands.Bot):
             stat_embed.add_field(
                 name="🏆 Top Tourney Admins", value=staff_msg, inline=False
             )
+            if tourney_date_str:
+                stat_embed.add_field(
+                    name="📅 Tournament Date", value=tourney_date_str, inline=False
+                )
+            if matcherino_id:
+                stat_embed.set_footer(text=f"Matcherino ID: {matcherino_id}")
 
-            report_msg = await ctx.send(embed=stat_embed)
+            # 5. Send to command channel (no pin) and archive to #tourney-reports
+            await ctx.send(embed=stat_embed)
+            report_channel = ctx.bot.get_channel(TOURNEY_REPORT_CHANNEL_ID)
+            if report_channel:
+                await report_channel.send(embed=stat_embed)
 
-            try:
-                await report_msg.pin()
-            except Exception as e:
-                print(f"⚠️ Could not pin report: {e}")
-
-            # 4. Close Session in DB
+            # 6. Close Session in DB
             await end_tourney_session(session["_id"])
             await set_tourney_collect_data(session["_id"], False)
             clear_bracket_teams_cache()
@@ -1731,6 +1885,11 @@ def setup_tourney_commands(bot: commands.Bot):
             except Exception as e:
                 print(f"Failed to restore Admin role name: {e}")
 
+        # Cancel the auto-disable timer since we're removing slow mode now.
+        if slowmode_auto_disable_task[0] and not slowmode_auto_disable_task[0].done():
+            slowmode_auto_disable_task[0].cancel()
+        slowmode_auto_disable_task[0] = None
+
         # Remove slow mode from general channel now that tourney is over.
         general_channel = guild.get_channel(GENERAL_CHANNEL_ID)
         if isinstance(general_channel, discord.TextChannel):
@@ -1738,6 +1897,9 @@ def setup_tourney_commands(bot: commands.Bot):
                 await general_channel.edit(slowmode_delay=0)
                 await ctx.send(
                     f"🐇 Slow mode has been removed from {general_channel.mention}."
+                )
+                await general_channel.send(
+                    "🐇 The tournament has ended — slow mode has been removed. Chat freely!"
                 )
             except Exception as e:
                 print(f"Failed to remove slow mode on general channel: {e}")
@@ -2402,6 +2564,8 @@ def setup_tourney_commands(bot: commands.Bot):
         session_text = (
             "`!starttourney [region]` - Wipes old tickets, locks general support, and posts the live panel. Use `!starttourney SA` for South America mode.\n"
             "`!endtourney` - Closes all active tickets, generates staff stats, posts the Pre-Tourney panel, and unlocks general support.\n"
+            "`/tourney-panel` - Post the live tourney support button.\n"
+            "`/pre-tourney-panel` - Post the pre-tourney support button.\n"
             "`!lock` / `!unlock` - Manually close or open the general server support channel.\n"
             "`/tourney-test-mode` - Toggle 100-ticket limit and 0.1s cooldown for testing."
         )
@@ -2421,6 +2585,7 @@ def setup_tourney_commands(bot: commands.Bot):
             "`/set-matcherino` - Set the active Matcherino bracket ID for the session.\n"
             "`/match-info` - Show live rosters, scores, and match status for a match number.\n"
             "`/match-history` - Show a team's previous rounds for a given match.\n"
+            "`/active-matches` - Display all active match scores grouped by round.\n"
             "`/set-ticket-match` - Correct this ticket's match number or team name.\n"
             "`/tourney-progress` - Real-time bracket health check with stage announcements."
         )
@@ -2871,8 +3036,16 @@ def setup_tourney_commands(bot: commands.Bot):
         # Bottlenecks (Laggards behind dominant round)
         if data["bottlenecks"]:
             bn_text = ""
-            for bn in data["bottlenecks"][:5]:
-                bn_text += f"**#{bn['id']}** (Round {bn['round']}) | {bn['team_a']} vs {bn['team_b']} ({bn['score_a']}-{bn['score_b']})\n"
+            shown = 0
+            total_bn = len(data["bottlenecks"])
+            for bn in data["bottlenecks"]:
+                line = f"**#{bn['id']}** (Round {bn['round']}) | {bn['team_a']} vs {bn['team_b']} ({bn['score_a']}-{bn['score_b']})\n"
+                if len(bn_text) + len(line) > 1000:
+                    break
+                bn_text += line
+                shown += 1
+            if shown < total_bn:
+                bn_text += f"*+{total_bn - shown} more...*"
             embed.add_field(name="⚠️ Bottleneck Matches", value=bn_text, inline=False)
         else:
             embed.add_field(
@@ -2880,6 +3053,57 @@ def setup_tourney_commands(bot: commands.Bot):
                 value="✅ All playable matches are current with the dominant round.",
                 inline=False,
             )
+
+        embed.set_footer(text=f"Matcherino ID: {m_id} | Staff: {interaction.user.name}")
+        await interaction.followup.send(embed=embed)
+
+    @app_commands.command(
+        name="active-matches",
+        description="Show all currently active match scores grouped by round.",
+    )
+    async def active_matches(interaction: discord.Interaction):
+        if not is_staff(interaction.user):
+            await interaction.response.send_message(
+                "❌ Permission denied.", ephemeral=True
+            )
+            return
+
+        await interaction.response.defer()
+        session = await get_active_tourney_session()
+        if not session or not session.get("matcherino_id"):
+            await interaction.followup.send("❌ No active session found.")
+            return
+
+        m_id = session["matcherino_id"]
+        bracket_url = f"https://matcherino.com/tournaments/{m_id}/bracket"
+
+        from .matcherino import fetch_bracket_progress
+
+        data = fetch_bracket_progress(bracket_url)
+        if data.get("status") != "success":
+            await interaction.followup.send(f"❌ **Error:** {data.get('error')}")
+            return
+
+        matches = data.get("active_matches", [])
+        if not matches:
+            await interaction.followup.send("✅ No active matches right now.")
+            return
+
+        rounds: dict[int, list] = {}
+        for m in matches:
+            rounds.setdefault(m["round"], []).append(m)
+
+        embed = discord.Embed(
+            title="⚔️ Active Matches",
+            description=f"`{len(matches)}` matches currently active",
+            color=discord.Color.blue(),
+        )
+
+        for round_num in sorted(rounds):
+            lines = ""
+            for m in sorted(rounds[round_num], key=lambda x: x["id"]):
+                lines += f"**#{m['id']}** | {m['team_a']} vs {m['team_b']} ({m['score_a']}-{m['score_b']})\n"
+            embed.add_field(name=f"Round {round_num}", value=lines, inline=False)
 
         embed.set_footer(text=f"Matcherino ID: {m_id} | Staff: {interaction.user.name}")
         await interaction.followup.send(embed=embed)
@@ -2908,6 +3132,7 @@ def setup_tourney_commands(bot: commands.Bot):
     bot.tree.add_command(match_history)
     bot.tree.add_command(set_ticket_match)
     bot.tree.add_command(tourney_progress)
+    bot.tree.add_command(active_matches)
     bot.tree.add_command(BlacklistGroup(bot))
 
     async def background_stats_update():

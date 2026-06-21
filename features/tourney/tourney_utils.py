@@ -492,6 +492,39 @@ async def close_ticket_via_command(ctx: commands.Context):
     )
 
 
+def _extract_translation_lines(
+    embeds: list[discord.Embed], timestamp: str
+) -> list[str]:
+    result = []
+    for embed in embeds:
+        title = embed.title or ""
+        fields = {f.name: f.value for f in embed.fields}
+        if title.startswith("🌐 Translated from"):
+            lang = title.removeprefix("🌐 Translated from ").strip()
+            original = fields.get("Original Message", "").removeprefix("> ").strip()
+            translation = fields.get("English Translation", "").strip("*").strip()
+            if original and translation:
+                result.append(
+                    f'[{timestamp}] R7 Bot#9997 ({lang} >> English): "{original}" >> "{translation}"'
+                )
+        elif title.startswith("🌐 Translated to"):
+            lang = title.removeprefix("🌐 Translated to ").strip()
+            original = fields.get("Original English", "").removeprefix("> ").strip()
+            translated = next(
+                (
+                    v.strip("*").strip()
+                    for k, v in fields.items()
+                    if k != "Original English"
+                ),
+                None,
+            )
+            if original and translated:
+                result.append(
+                    f'[{timestamp}] R7 Bot#9997 (English >> {lang}): "{original}" >> "{translated}"'
+                )
+    return result
+
+
 async def build_transcript_text(channel: discord.TextChannel) -> str:
     """Collect all messages in the channel into a plain-text transcript,
     with header info from the channel topic.
@@ -529,7 +562,12 @@ async def build_transcript_text(channel: discord.TextChannel) -> str:
             if content:
                 content += " "
             content += f"[Attachments: {attachment_list}]"
-        lines.append(f"[{timestamp}] {author}: {content}")
+
+        translation_lines = _extract_translation_lines(msg.embeds, timestamp)
+
+        if content or not translation_lines:
+            lines.append(f"[{timestamp}] {author}: {content}")
+        lines.extend(translation_lines)
 
     if len(lines) <= 4:  # only header, no messages
         lines.append("No messages in this ticket.")
