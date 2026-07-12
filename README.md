@@ -124,7 +124,6 @@ Every user always has **4 active quests** — one daily and one weekly per categ
 - **Ticket Panels:** `/tourney-panel` (live) and `/pre-tourney-panel` (pre-tourney) post interactive open buttons.
 - **Ticket Operations:**
   - `!close` / `!c` — close a ticket.
-  - `!lock` / `!unlock` — lock/unlock a ticket channel.
   - `!delete` / `!del` — delete ticket with transcript.
   - `!reopen` — reopen a closed ticket.
   - `/add <user>` / `/remove <user>` — manage ticket access.

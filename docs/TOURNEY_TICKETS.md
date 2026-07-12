@@ -179,4 +179,4 @@ Both wrap back to 1 after 999. `reset_ticket_counter()` is called during `!start
 ## Source Files
 - `features/tourney/tourney_utils.py` — all ticket lifecycle logic
 - `features/tourney/tourney_views.py` — UI components (buttons, modals)
-- `features/tourney/tourney_commands.py` — `!close`, `!delete`, `!reopen`, `!lock`, `!unlock`
+- `features/tourney/tourney_commands.py` — `!close`, `!delete`, `!reopen`

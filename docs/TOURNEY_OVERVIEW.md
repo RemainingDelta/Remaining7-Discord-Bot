@@ -17,7 +17,7 @@ The tournament system orchestrates the full lifecycle of a Brawl Stars tournamen
    re.search(r"matcherino\.com/supercell/tournaments/(\d+)", content)
    ```
    and saves the ID to the active session. If not found, posts a warning telling staff to set it manually with `/set-matcherino`.
-5. **Locks** `OTHER_TICKET_CHANNEL_ID` from members (6-hour auto-reopen timer starts)
+5. **Locks** `OTHER_TICKET_CHANNEL_ID` from members via the internal `lock_command()` helper (6-hour auto-reopen timer starts)
 6. **SA region mode** (`!starttourney sa`): locks the Spanish support channel (`SPANISH_CHANNEL_ID`) and posts a redirect embed in Spanish pointing members to the main tourney support channel
 7. **Main tourney support channel** (`TOURNEY_SUPPORT_CHANNEL_ID`):
    - Sets permissions: `@everyone` can view but not send; staff roles can send
