@@ -1,0 +1,90 @@
+# Token System
+
+## Overview
+R7 Tokens are the primary server currency. Members earn them passively through chat messages and via `/daily` claims. The passive listener runs on every `on_message` event and enforces a per-user cooldown tracked in an in-memory dict. Server Boosters receive a 5% bonus on passive earnings.
+
+---
+
+## Passive Earning
+
+The `on_message` listener in `features/economy.py` fires on every message:
+
+1. Ignores bots, DMs, and channels in `PASSIVE_REWARD_EXCLUDED_CHANNEL_IDS`
+2. Enforces a **20-second cooldown** per user via `_cooldowns: dict[int, float]` mapping `user_id → last_earn_timestamp`
+3. Awards a random amount of `2–5 tokens` (`random.randint(2, 5)`)
+4. If the member has the **Server Booster** role, adds 5%: `int(amount * 1.05)`
+5. Updates balance in MongoDB via `update_user_balance()`
+6. Fires the quest listener (`process_quest_update()`) for the message action
+
+The cooldown is checked against `time.time()` — no database reads involved, making this path very fast.
+
+---
+
+## Daily Reward (`/daily`)
+
+```
+Tokens = 80 + (level * 5) capped at 160
+```
+
+Requires:
+- 24-hour cooldown since last claim (stored in `users.daily_last_claimed`)
+- At least **5 messages sent** since the last daily (tracked in `users.daily_message_count`)
+
+On claim:
+1. Reads `daily_last_claimed` from MongoDB
+2. Checks `daily_message_count >= 5`
+3. Calculates token reward based on user's current level
+4. Resets `daily_message_count` to 0 and updates `daily_last_claimed` to now
+
+---
+
+## Balance Commands
+
+| Command | Who | Notes |
+|---------|-----|-------|
+| `/balance [user]` | Anyone | Shows token balance; defaults to self |
+| `/give <user> <amount>` | Anyone | Transfers from caller to target; fails if insufficient balance |
+| `/set-balance <user> <amount>` | Admin only | Directly sets balance, no transfer logic |
+| `/leaderboard [page]` | Anyone | Paginated 10-per-page view using `LeaderboardView`; shows your rank in the footer |
+
+The leaderboard paginates using `get_leaderboard_page(offset, per_page)` — a MongoDB `find()` sorted by `balance` descending. The viewer's own rank is fetched separately with `get_user_rank()` and shown in the footer on every page.
+
+---
+
+## Supply Drop (`/drop <amount>`)
+
+Admin command. Distributes tokens to members active in the general channel:
+1. Reads recent messages from `GENERAL_CHANNEL_ID`
+2. Collects unique non-bot member IDs
+3. Divides `amount` among them (or gives `amount` to each — depends on config)
+4. Calls `update_user_balance()` for each recipient
+5. Posts a confirmation embed listing recipients and amount per person
+
+---
+
+## Permission System (`/perm`)
+
+A simple allow-list (`allowed_users: set` in-memory) that gates certain admin-like economy commands (e.g. `/set-balance`) for non-Admin users:
+
+```python
+allowed_users = set()  # module-level set; reset on restart
+
+# Grant access:
+allowed_users.add(user.id)
+
+# Revoke:
+allowed_users.discard(user.id)
+```
+
+This is volatile — resets on bot restart. It's intended for temporary delegation, not permanent grants.
+
+---
+
+## Excluded Channels
+
+`PASSIVE_REWARD_EXCLUDED_CHANNEL_IDS` in `features/config.py` is a list of channel IDs where the passive `on_message` listener skips token/XP earning. This is used for channels like bot-spam or announcement channels where engagement shouldn't be rewarded.
+
+---
+
+## Source File
+`features/economy.py`
