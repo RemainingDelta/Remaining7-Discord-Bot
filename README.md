@@ -39,6 +39,7 @@ Remaining7-Discord-Bot/
 │   ├── economy.py                   # R7 Tokens, shop, daily, leveling, leaderboards
 │   ├── quests.py                    # Daily & weekly quest system
 │   ├── security.py                  # Hacked protocol (timeout, purge, flag)
+│   ├── scam_detection.py            # Scam image detection (MD5/pHash/ORB blacklist)
 │   ├── event.py                     # Event channel cleanup & reward payouts
 │   ├── general.py                   # /help, /mod-help, /admin-help, /version, /convert-time
 │   ├── translation.py               # !t prefix & /translate slash command (55 languages)
@@ -181,6 +182,16 @@ Every user always has **4 active quests** — one daily and one weekly per categ
 - `/unhacked <user>` — remove flag and timeout.
 - `/hacked-list` — view all currently flagged users.
 - Logs to moderator logs channel. Prevents targeting equal/higher role members.
+
+### Scam Image Detection
+- Automatically scans every image attachment against a MongoDB blacklist using three matchers: MD5 (identical files), pHash (re-compressed/resized copies), and ORB (cropped variants).
+- On a match: deletes the message, purges other copies of the image across all channels (30-min lookback), applies a 10-minute precautionary timeout, and sends a mod alert with the image and action buttons.
+- **Confirm Hacked** button — upgrades to a 7-day timeout, flags the user in the hacked DB, and DMs them. **False Positive** button — removes the timeout.
+- `!scam-add` (reply or attach) — add image(s) to the blacklist.
+- `!scam-remove <md5> [md5 ...]` — remove entries by MD5 prefix.
+- `!scam-list` — view all blacklisted images.
+- `!scam-rename <md5> <name>` — give an entry a readable name.
+- `!scam-test` (reply or attach) — dry-run detection with match distances, no action taken.
 
 ### Translation
 - `!t [language]` / `!translate [language]` — reply to a message to translate it to English.
