@@ -53,6 +53,9 @@ async def on_ready():
         await bot.load_extension("features.security")
         print("✅ Loaded Feature: Security (Hacked)")
 
+        await bot.load_extension("features.scam_detection")
+        print("✅ Loaded Feature: Scam Detection")
+
         await bot.load_extension("features.brawl.commands")
         print("✅ Loaded Feature: Brawl (Drops)")
 

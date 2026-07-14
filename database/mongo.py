@@ -1,5 +1,6 @@
 from datetime import datetime
 import os
+import re
 import uuid
 import motor.motor_asyncio
 import certifi
@@ -308,6 +309,65 @@ async def get_hacked_users():
 async def remove_hacked_user(user_id: str):
     """Removes the hacked tag (e.g., after they recover account)."""
     await db.hacked_users.delete_one({"_id": user_id})
+
+
+# --- SCAM IMAGE BLACKLIST ---
+
+
+async def add_scam_image(filename: str, data: bytes, md5: str):
+    # _id is the MD5 hash so two different images with the same filename
+    # are stored as separate documents rather than overwriting each other.
+    await db.scam_images.update_one(
+        {"_id": md5},
+        {"$set": {"filename": filename, "data": data, "md5": md5}},
+        upsert=True,
+    )
+
+
+async def get_scam_images(include_data: bool = True):
+    # scam-list only needs filenames/hashes — skip the binary blobs there.
+    projection = None if include_data else {"data": 0}
+    cursor = db.scam_images.find({}, projection)
+    return await cursor.to_list(length=None)
+
+
+async def remove_scam_image(md5_prefix: str) -> int:
+    result = await db.scam_images.delete_many(
+        {"md5": {"$regex": f"^{re.escape(md5_prefix)}"}}
+    )
+    return result.deleted_count
+
+
+async def rename_scam_image(md5_prefix: str, new_filename: str) -> bool:
+    result = await db.scam_images.update_one(
+        {"md5": {"$regex": f"^{re.escape(md5_prefix)}"}},
+        {"$set": {"filename": new_filename}},
+    )
+    return result.matched_count > 0
+
+
+async def ensure_scam_lock_ttl_index():
+    """TTL index so detection locks auto-expire ~60s after creation.
+    Without this, a user+image lock lives forever and re-posts of the
+    same scam image by the same user would be silently ignored.
+    """
+    await db.scam_detection_locks.create_index("ts", expireAfterSeconds=60)
+
+
+async def acquire_scam_detection_lock(author_id: int, image_md5: str) -> bool:
+    """Atomically claim a detection slot for (author, image).
+    Returns True if this caller claimed it (should proceed).
+    Returns False if another handler already claimed it (should skip).
+    Lock expires after 60 seconds via TTL index on 'ts'.
+    """
+    key = f"{author_id}:{image_md5}"
+    result = await db.scam_detection_locks.find_one_and_update(
+        {"_id": key},
+        {"$setOnInsert": {"_id": key, "ts": datetime.utcnow()}},
+        upsert=True,
+        return_document=False,
+    )
+    return result is None  # None means doc didn't exist before — we claimed it
 
 
 # --- PAYOUT / ADMIN COMPENSATION HELPERS ---

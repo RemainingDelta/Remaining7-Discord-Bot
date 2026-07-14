@@ -114,6 +114,18 @@ class General(commands.Cog):
         )
         embed.add_field(name="🚨 Security Protocol", value=security_text, inline=False)
 
+        # Scam Image Detection
+        scam_text = (
+            "Images are auto-scanned against the scam blacklist — matches are deleted, "
+            "the poster gets a 10-min timeout, and an alert with Confirm/Dismiss buttons is posted in mod-logs.\n"
+            "`!scam-add` - Reply to an image (or attach one) to blacklist it.\n"
+            "`!scam-remove <md5> [md5 ...]` - Remove entries by MD5 prefix.\n"
+            "`!scam-list` - View all blacklisted images.\n"
+            "`!scam-rename <md5> <name>` - Give an entry a readable name.\n"
+            "`!scam-test` - Dry-run detection on an image (no action taken)."
+        )
+        embed.add_field(name="🖼️ Scam Image Detection", value=scam_text, inline=False)
+
         # Server Tools
         tools_text = (
             "`/set-count <number>` - Manually set the current count in the counting channel.\n"
