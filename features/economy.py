@@ -11,6 +11,7 @@ import asyncio
 from database.mongo import (
     get_user_balance,
     update_user_balance,
+    increment_user_balance,
     get_leveling_data,
     update_leveling_data,
     add_item_token,
@@ -23,6 +24,9 @@ from database.mongo import (
     get_user_rank,
     get_levels_page,
     get_user_level_rank,
+    add_redemption_queue_entry,
+    get_redemption_queue,
+    remove_redemption_queue_entry,
 )
 
 # --- CONFIGURATION ---
@@ -108,6 +112,20 @@ async def get_budget_totals() -> tuple[float, float, float]:
     return total_budget, total_spent, remaining
 
 
+async def get_effective_budget(
+    guild: discord.Guild | None,
+) -> tuple[float, float, float, float]:
+    """Budget totals with pending tickets counted.
+
+    Returns (total_budget, spent, pending_usd, available) where
+    available = total_budget - spent - pending_usd.
+    """
+    total_budget, total_spent, _ = await get_budget_totals()
+    pending_usd, _ = _pending_redemptions_total(guild)
+    available = total_budget - total_spent - pending_usd
+    return total_budget, total_spent, pending_usd, available
+
+
 async def add_budget_spent(amount: float) -> float:
     await ensure_monthly_budget_state()
     spent_str = await get_setting("manual_total_spent", "0.00")
@@ -145,6 +163,41 @@ def _extract_topic_value(topic: str | None, key: str) -> str | None:
     return None
 
 
+def _pending_redemptions_total(guild: discord.Guild | None) -> tuple[float, int]:
+    """Sum the budget cost of open redemption tickets. Returns (total_usd, count)."""
+    if guild is None:
+        return 0.0, 0
+    if (
+        not isinstance(REDEMPTION_TICKET_CATEGORY_ID, int)
+        or REDEMPTION_TICKET_CATEGORY_ID <= 0
+    ):
+        return 0.0, 0
+
+    category = guild.get_channel(REDEMPTION_TICKET_CATEGORY_ID)
+    if not isinstance(category, discord.CategoryChannel):
+        return 0.0, 0
+
+    total = 0.0
+    count = 0
+    for channel in category.text_channels:
+        if _extract_topic_value(channel.topic, "redemption-opener") is None:
+            continue
+        item = _extract_topic_value(channel.topic, "item") or ""
+        budget_raw = _extract_topic_value(channel.topic, "budget_usd")
+        try:
+            cost = (
+                float(budget_raw)
+                if budget_raw is not None
+                else _budget_cost_for_item(item)
+            )
+        except ValueError:
+            cost = _budget_cost_for_item(item)
+        if cost > 0:
+            total += cost
+            count += 1
+    return total, count
+
+
 def _is_redemption_staff(member: discord.abc.User | discord.Member) -> bool:
     if not isinstance(member, discord.Member):
         return False
@@ -160,6 +213,101 @@ def _is_redemption_ticket_channel(channel: discord.abc.GuildChannel | None) -> b
     ):
         return False
     return channel.category_id == REDEMPTION_TICKET_CATEGORY_ID
+
+
+def _redemption_instructions(item: str) -> str:
+    if "brawl pass" in item:
+        return "- Provide your in-game ID and a link to add you."
+    if "nitro" in item:
+        return "- Provide the Discord account you'd like the Nitro gifted to."
+    if "paypal" in item:
+        return "- Provide your PayPal email address."
+    if "shoutout" in item:
+        return "- Provide the message you want to be shouted out."
+    return "- Provide necessary details."
+
+
+async def _increment_redeem_counter(item: str) -> None:
+    tracking_keys = {
+        "brawl pass": "brawlpass_redeemed_count",
+        "brawl pass+": "brawlpass+_redeemed_count",
+        "nitro": "nitro_redeemed_count",
+        "paypal": "paypal_redeemed_count",
+        "shoutout": "shoutout_redeemed_count",
+    }
+    if item in tracking_keys:
+        key = tracking_keys[item]
+        current = int(await get_setting(key, "0"))
+        await set_setting(key, str(current + 1))
+
+
+async def create_redemption_ticket(
+    guild: discord.Guild,
+    member: discord.Member,
+    item: str,
+    budget_cost: float,
+) -> discord.TextChannel:
+    """Creates a redemption ticket channel with permissions, topic metadata,
+    and the opening embed. Does not consume item tokens."""
+    if (
+        not isinstance(REDEMPTION_TICKET_CATEGORY_ID, int)
+        or REDEMPTION_TICKET_CATEGORY_ID <= 0
+    ):
+        raise RuntimeError("Redemption category is not configured.")
+
+    category = guild.get_channel(REDEMPTION_TICKET_CATEGORY_ID)
+    if not isinstance(category, discord.CategoryChannel):
+        raise RuntimeError("Configured redemption category channel was not found.")
+
+    ch = await guild.create_text_channel(
+        f"ticket-{member.name}",
+        category=category,
+    )
+    await ch.set_permissions(guild.default_role, read_messages=False)
+    await ch.set_permissions(member, read_messages=True, send_messages=True)
+
+    for staff_role_id in (ADMIN_ROLE_ID, MODERATOR_ROLE_ID):
+        staff_role = guild.get_role(staff_role_id)
+        if staff_role:
+            await ch.set_permissions(
+                staff_role,
+                read_messages=True,
+                send_messages=True,
+                manage_messages=True,
+            )
+
+    await ch.edit(
+        topic=(
+            f"redemption-opener:{member.id}|item:{item}|budget_usd:{budget_cost:.2f}"
+        ),
+        reason="Store redemption ticket metadata",
+    )
+
+    instructions = _redemption_instructions(item)
+    item_price = _token_price_for_item(item)
+    balance_after = await get_user_balance(str(member.id))
+    balance_display_before = balance_after + item_price
+
+    ticket_embed = discord.Embed(
+        title=f"🎫 **{item.title()} Redemption Ticket**",
+        description=f"{member.mention}, please provide the following details in this ticket channel:\n\n{instructions}",
+        color=discord.Color.blue(),
+    )
+    ticket_embed.add_field(
+        name="Item Price", value=f"{item_price:,} R7 tokens", inline=True
+    )
+    ticket_embed.add_field(
+        name="Balance Before",
+        value=f"{int(round(balance_display_before)):,} R7 tokens",
+        inline=True,
+    )
+    ticket_embed.add_field(
+        name="Balance After",
+        value=f"{int(round(balance_after)):,} R7 tokens",
+        inline=True,
+    )
+    await ch.send(content=member.mention, embed=ticket_embed)
+    return ch
 
 
 async def close_redemption_ticket_channel(
@@ -478,6 +626,76 @@ class RedemptionClosedOptionsView(discord.ui.View):
         )
 
 
+class RedemptionQueueConfirmView(discord.ui.View):
+    """Asks the user whether to queue an over-budget redemption for next month."""
+
+    def __init__(self, user_id: str, item: str, budget_cost: float):
+        super().__init__(timeout=120)
+        self.user_id = user_id
+        self.item = item
+        self.budget_cost = budget_cost
+
+    @discord.ui.button(
+        label="Join queue for next month", style=discord.ButtonStyle.success
+    )
+    async def confirm_button(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ):
+        if str(interaction.user.id) != self.user_id:
+            await interaction.response.send_message(
+                "This prompt is not for you.", ephemeral=True
+            )
+            return
+
+        # Re-check ownership so a double /redeem can't queue the same item twice.
+        if await get_item_count(self.user_id, self.item) < 1:
+            await interaction.response.edit_message(
+                embed=discord.Embed(
+                    title="❌ **Queue Failed**",
+                    description="You no longer own this item.",
+                    color=discord.Color.red(),
+                ),
+                view=None,
+            )
+            return
+
+        await remove_item_token(self.user_id, self.item)
+        await add_redemption_queue_entry(self.user_id, self.item, self.budget_cost)
+        position = len(await get_redemption_queue())
+
+        item_display = SHOP_DATA.get(self.item, {}).get("display", self.item)
+        embed = discord.Embed(
+            title="📥 **Queued for Next Month**",
+            description=(
+                f"Your **{item_display}** redemption is queued at position "
+                f"**#{position}**.\nA ticket will open automatically once the "
+                "budget resets and can cover it. Use `/redemption-queue` to "
+                "check your status."
+            ),
+            color=discord.Color.green(),
+        )
+        await interaction.response.edit_message(embed=embed, view=None)
+        self.stop()
+
+    @discord.ui.button(label="Cancel", style=discord.ButtonStyle.secondary)
+    async def cancel_button(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ):
+        if str(interaction.user.id) != self.user_id:
+            await interaction.response.send_message(
+                "This prompt is not for you.", ephemeral=True
+            )
+            return
+
+        embed = discord.Embed(
+            title="🚫 **Redemption Cancelled**",
+            description="You keep your item — nothing was queued.",
+            color=discord.Color.greyple(),
+        )
+        await interaction.response.edit_message(embed=embed, view=None)
+        self.stop()
+
+
 # Helper
 async def shop_item_autocomplete(
     interaction: discord.Interaction, current: str
@@ -734,12 +952,81 @@ class Economy(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.supply_drop_task.start()
+        self.redemption_queue_task.start()
 
     async def cog_load(self):
         self.bot.add_view(RedemptionClosedOptionsView())
 
     def cog_unload(self):
         self.supply_drop_task.cancel()
+        self.redemption_queue_task.cancel()
+
+    # --- REDEMPTION QUEUE PROCESSING ---
+    @tasks.loop(hours=1)
+    async def redemption_queue_task(self):
+        await self.bot.wait_until_ready()
+
+        current_key = _budget_month_key()
+        processed_key = await get_setting("redemption_queue_processed_month")
+        if processed_key == current_key:
+            return
+
+        try:
+            await self.process_redemption_queue()
+        except Exception as e:
+            # Leave the month unstamped so the next hourly tick retries.
+            print(f"❌ Redemption queue processing failed: {e}")
+            return
+
+        await set_setting("redemption_queue_processed_month", current_key)
+
+    async def process_redemption_queue(self):
+        """Fulfills queued redemptions FIFO against the new month's budget.
+
+        Entries that don't fit the available budget stay queued and carry
+        over to the next month.
+        """
+        category = self.bot.get_channel(REDEMPTION_TICKET_CATEGORY_ID)
+        if not isinstance(category, discord.CategoryChannel):
+            raise RuntimeError("Redemption category channel was not found.")
+        guild = category.guild
+
+        for entry in await get_redemption_queue():
+            item = entry["item"]
+            user_id = entry["user_id"]
+            cost = _budget_cost_for_item(item)
+
+            member = guild.get_member(int(user_id))
+            if member is None:
+                # Opener left the server — drop the entry and refund tokens.
+                await remove_redemption_queue_entry(str(entry["_id"]))
+                refund = _token_price_for_item(item)
+                if refund > 0:
+                    await increment_user_balance(user_id, refund)
+                transcript_channel = self.bot.get_channel(
+                    REDEMPTION_TRANSCRIPT_CHANNEL_ID
+                )
+                if transcript_channel:
+                    await transcript_channel.send(
+                        f"📤 Queued **{item}** redemption for <@{user_id}> dropped "
+                        f"(user left the server) — {refund:,} R7 tokens refunded."
+                    )
+                continue
+
+            # Recompute each iteration: tickets created earlier in this run
+            # count as pending and reduce what's available.
+            _, _, _, available = await get_effective_budget(guild)
+            if cost > available:
+                continue
+
+            try:
+                await create_redemption_ticket(guild, member, item, cost)
+                await _increment_redeem_counter(item)
+            except Exception as e:
+                print(f"❌ Failed to open queued redemption for {user_id}: {e}")
+                continue
+
+            await remove_redemption_queue_entry(str(entry["_id"]))
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
@@ -983,130 +1270,64 @@ class Economy(commands.Cog):
             await interaction.response.send_message(embed=embed, ephemeral=True)
             return
 
-        # Budget guard: block redemption when monthly budget cannot cover this item.
+        # Budget guard: block redemption when the effective budget (monthly
+        # budget minus spent and pending tickets) cannot cover this item.
         budget_cost = _budget_cost_for_item(item)
         if budget_cost > 0:
-            _, _, remaining_budget = await get_budget_totals()
-            if budget_cost > remaining_budget:
+            _, spent, pending_usd, available = await get_effective_budget(
+                interaction.guild
+            )
+            if budget_cost > available:
                 embed = discord.Embed(
-                    title="❌ **Budget Limit Reached**",
+                    title="⏳ **Budget Limit Reached**",
                     description=(
                         f"This redemption requires **${budget_cost:.2f}**, but only "
-                        f"**${remaining_budget:.2f}** remains in the monthly budget."
+                        f"**${max(available, 0.0):.2f}** is available in the monthly "
+                        f"budget (${spent:.2f} spent, ${pending_usd:.2f} reserved by "
+                        "open tickets).\n\n"
+                        "You can join the queue for next month instead: your "
+                        f"**{item_info['display']}** will be consumed now, and a "
+                        "ticket will open automatically once the budget resets and "
+                        "can cover it."
                     ),
-                    color=discord.Color.red(),
+                    color=discord.Color.orange(),
                 )
-                await interaction.response.send_message(embed=embed, ephemeral=True)
+                await interaction.response.send_message(
+                    embed=embed,
+                    view=RedemptionQueueConfirmView(user_id, item, budget_cost),
+                    ephemeral=True,
+                )
                 return
 
         await interaction.response.defer()
 
         try:
-            if (
-                not isinstance(REDEMPTION_TICKET_CATEGORY_ID, int)
-                or REDEMPTION_TICKET_CATEGORY_ID <= 0
-            ):
-                await interaction.followup.send(
-                    "❌ Redemption category is not configured.",
-                    ephemeral=True,
-                )
-                return
-
-            category = interaction.guild.get_channel(REDEMPTION_TICKET_CATEGORY_ID)
-            if not isinstance(category, discord.CategoryChannel):
-                await interaction.followup.send(
-                    "❌ Configured redemption category channel was not found.",
-                    ephemeral=True,
-                )
-                return
-
-            balance_before = await get_user_balance(user_id)
+            # Re-check after defer in case a concurrent redemption claimed
+            # the remaining budget.
+            if budget_cost > 0:
+                _, _, _, available = await get_effective_budget(interaction.guild)
+                if budget_cost > available:
+                    await interaction.followup.send(
+                        "❌ The remaining budget was claimed by another redemption "
+                        "just now. Please run `/redeem` again.",
+                        ephemeral=True,
+                    )
+                    return
 
             await remove_item_token(user_id, item)
+            await _increment_redeem_counter(item)
 
-            tracking_keys = {
-                "brawl pass": "brawlpass_redeemed_count",
-                "brawl pass+": "brawlpass+_redeemed_count",
-                "nitro": "nitro_redeemed_count",
-                "paypal": "paypal_redeemed_count",
-                "shoutout": "shoutout_redeemed_count",
-            }
-            if item in tracking_keys:
-                key = tracking_keys[item]
-                current = int(await get_setting(key, "0"))
-                await set_setting(key, str(current + 1))
-
-            ch = await interaction.guild.create_text_channel(
-                f"ticket-{interaction.user.name}",
-                category=category,
-            )
-            await ch.set_permissions(
-                interaction.guild.default_role, read_messages=False
-            )
-            await ch.set_permissions(
-                interaction.user, read_messages=True, send_messages=True
+            ch = await create_redemption_ticket(
+                interaction.guild, interaction.user, item, budget_cost
             )
 
-            for staff_role_id in (ADMIN_ROLE_ID, MODERATOR_ROLE_ID):
-                staff_role = interaction.guild.get_role(staff_role_id)
-                if staff_role:
-                    await ch.set_permissions(
-                        staff_role,
-                        read_messages=True,
-                        send_messages=True,
-                        manage_messages=True,
-                    )
-
-            await ch.edit(
-                topic=(
-                    f"redemption-opener:{interaction.user.id}"
-                    f"|item:{item}|budget_usd:{budget_cost:.2f}"
-                ),
-                reason="Store redemption ticket metadata",
-            )
-
-            instructions = "- Provide necessary details."
-            if "brawl pass" in item:
-                instructions = "- Provide your in-game ID and a link to add you."
-            elif "brawl pass" in item:
-                instructions = "- Provide your in-game ID and a link to add you."
-            elif "nitro" in item:
-                instructions = (
-                    "- Provide the Discord account you'd like the Nitro gifted to."
-                )
-            elif "paypal" in item:
-                instructions = "- Provide your PayPal email address."
-            elif "shoutout" in item:
-                instructions = "- Provide the message you want to be shouted out."
-
+            instructions = _redemption_instructions(item)
             embed = discord.Embed(
                 title="✅ **Redemption Successful**",
                 description=f"A ticket has been created in {ch.mention}.\nPlease provide the following details to redeem your **{item_info['display']}**:\n{instructions}",
                 color=discord.Color.green(),
             )
             await interaction.followup.send(embed=embed)
-            item_price = item_info["price"]
-            balance_after = balance_before
-            balance_display_before = balance_before + item_price
-            ticket_embed = discord.Embed(
-                title=f"🎫 **{item.title()} Redemption Ticket**",
-                description=f"{interaction.user.mention}, please provide the following details in this ticket channel:\n\n{instructions}",
-                color=discord.Color.blue(),
-            )
-            ticket_embed.add_field(
-                name="Item Price", value=f"{item_price:,} R7 tokens", inline=True
-            )
-            ticket_embed.add_field(
-                name="Balance Before",
-                value=f"{int(round(balance_display_before)):,} R7 tokens",
-                inline=True,
-            )
-            ticket_embed.add_field(
-                name="Balance After",
-                value=f"{int(round(balance_after)):,} R7 tokens",
-                inline=True,
-            )
-            await ch.send(content=interaction.user.mention, embed=ticket_embed)
 
         except Exception as e:
             await add_item_token(user_id, item, quantity=1)
@@ -1278,11 +1499,12 @@ class Economy(commands.Cog):
         name="check-budget", description="Check the remaining budget for redemptions."
     )
     async def check_budget(self, interaction: discord.Interaction):
-        total_budget, total_spent, remaining = await get_budget_totals()
-
-        int(await get_setting("brawlpass_redeemed_count", "0"))
-        int(await get_setting("nitro_redeemed_count", "0"))
-        int(await get_setting("pin_redeemed_count", "0"))
+        total_budget, total_spent, pending_usd, available = await get_effective_budget(
+            interaction.guild
+        )
+        _, pending_count = _pending_redemptions_total(interaction.guild)
+        queue = await get_redemption_queue()
+        queued_usd = sum(_budget_cost_for_item(entry["item"]) for entry in queue)
 
         now = datetime.now(timezone.utc)
         if now.month == 12:
@@ -1295,8 +1517,107 @@ class Economy(commands.Cog):
         embed.description = (
             f"**Total Monthly Budget:** ${total_budget:.2f}\n"
             f"**Total Spent on Redemptions:** ${total_spent:.2f}\n"
-            f"**Remaining Budget:** ${remaining:.2f}\n"
+            f"**Pending Tickets:** ${pending_usd:.2f} ({pending_count} open)\n"
+            f"**Available Budget:** ${available:.2f}\n"
+            f"**Queued for Next Month:** {len(queue)} "
+            f"redemption(s) (${queued_usd:.2f} est.)\n"
             f"**Budget Resets:** <t:{reset_timestamp}:R> (<t:{reset_timestamp}:F>)"
+        )
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
+    @app_commands.command(
+        name="redemption-queue",
+        description="See your queued redemptions for next month.",
+    )
+    async def redemption_queue_status(self, interaction: discord.Interaction):
+        user_id = str(interaction.user.id)
+        queue = await get_redemption_queue()
+        lines = []
+        for position, entry in enumerate(queue, start=1):
+            if entry["user_id"] != user_id:
+                continue
+            item_display = SHOP_DATA.get(entry["item"], {}).get(
+                "display", entry["item"]
+            )
+            cost = _budget_cost_for_item(entry["item"])
+            queued_ts = int(entry["queued_at"].replace(tzinfo=timezone.utc).timestamp())
+            lines.append(
+                f"**#{position}** — {item_display} (${cost:.2f}) — "
+                f"queued <t:{queued_ts}:R>"
+            )
+
+        embed = discord.Embed(
+            title="📥 **Your Redemption Queue**",
+            description="\n".join(lines)
+            if lines
+            else "You have nothing queued. Over-budget redemptions can be "
+            "queued from `/redeem`.",
+            color=discord.Color.blue(),
+        )
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
+    @app_commands.command(
+        name="redemption-queue-list",
+        description="STAFF: List all queued redemptions.",
+    )
+    async def redemption_queue_list(self, interaction: discord.Interaction):
+        if not _is_redemption_staff(interaction.user):
+            await interaction.response.send_message(
+                "❌ Permission Denied", ephemeral=True
+            )
+            return
+
+        queue = await get_redemption_queue()
+        lines = []
+        total_usd = 0.0
+        for position, entry in enumerate(queue, start=1):
+            cost = _budget_cost_for_item(entry["item"])
+            total_usd += cost
+            queued_ts = int(entry["queued_at"].replace(tzinfo=timezone.utc).timestamp())
+            lines.append(
+                f"**{position}.** <@{entry['user_id']}> — {entry['item']} "
+                f"(${cost:.2f}) — queued <t:{queued_ts}:R> — id: `{entry['_id']}`"
+            )
+
+        embed = discord.Embed(
+            title="📥 **Redemption Queue**",
+            description="\n".join(lines) if lines else "The queue is empty.",
+            color=discord.Color.blue(),
+        )
+        embed.set_footer(
+            text=f"{len(queue)} entries | ${total_usd:.2f} estimated total"
+        )
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
+    @app_commands.command(
+        name="redemption-queue-remove",
+        description="STAFF: Remove a queue entry and give the item back.",
+    )
+    @app_commands.describe(entry_id="The entry id shown in /redemption-queue-list")
+    async def redemption_queue_remove(
+        self, interaction: discord.Interaction, entry_id: str
+    ):
+        if not _is_redemption_staff(interaction.user):
+            await interaction.response.send_message(
+                "❌ Permission Denied", ephemeral=True
+            )
+            return
+
+        doc = await remove_redemption_queue_entry(entry_id)
+        if doc is None:
+            await interaction.response.send_message(
+                "❌ Queue entry not found.", ephemeral=True
+            )
+            return
+
+        await add_item_token(doc["user_id"], doc["item"])
+        embed = discord.Embed(
+            title="✅ **Queue Entry Removed**",
+            description=(
+                f"Removed the **{doc['item']}** redemption queued by "
+                f"<@{doc['user_id']}> — their item was returned to their inventory."
+            ),
+            color=discord.Color.green(),
         )
         await interaction.response.send_message(embed=embed, ephemeral=True)
 

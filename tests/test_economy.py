@@ -1,12 +1,23 @@
 """Tests for pure functions in features/economy.py."""
 
 from datetime import datetime
+from unittest.mock import AsyncMock, MagicMock
 
+import discord
+import pytest
+
+from features.config import (
+    REDEMPTION_TICKET_CATEGORY_ID,
+    REDEMPTION_TRANSCRIPT_CHANNEL_ID,
+)
 from features.economy import (
+    Economy,
     _budget_month_key,
     _budget_cost_for_item,
-    _token_price_for_item,
     _extract_topic_value,
+    _pending_redemptions_total,
+    _redemption_instructions,
+    _token_price_for_item,
 )
 
 
@@ -94,3 +105,229 @@ def test_extract_topic_value_empty_topic():
 def test_extract_topic_value_empty_value():
     # key is present but value is empty string
     assert _extract_topic_value("key:", "key") == ""
+
+
+# --- _redemption_instructions ---
+
+
+def test_instructions_brawl_pass():
+    assert "in-game ID" in _redemption_instructions("brawl pass")
+    assert "in-game ID" in _redemption_instructions("brawl pass+")
+
+
+def test_instructions_nitro():
+    assert "Nitro" in _redemption_instructions("nitro")
+
+
+def test_instructions_paypal():
+    assert "PayPal" in _redemption_instructions("paypal")
+
+
+def test_instructions_shoutout():
+    assert "shouted out" in _redemption_instructions("shoutout")
+
+
+def test_instructions_default():
+    assert _redemption_instructions("pin") == "- Provide necessary details."
+
+
+# --- _pending_redemptions_total ---
+
+
+def _fake_ticket_channel(topic):
+    channel = MagicMock(spec=discord.TextChannel)
+    channel.topic = topic
+    return channel
+
+
+def _fake_guild_with_tickets(topics):
+    category = MagicMock(spec=discord.CategoryChannel)
+    category.text_channels = [_fake_ticket_channel(t) for t in topics]
+    guild = MagicMock(spec=discord.Guild)
+    guild.get_channel = MagicMock(
+        side_effect=lambda cid: (
+            category if cid == REDEMPTION_TICKET_CATEGORY_ID else None
+        )
+    )
+    return guild
+
+
+def test_pending_total_none_guild():
+    assert _pending_redemptions_total(None) == (0.0, 0)
+
+
+def test_pending_total_category_not_found():
+    guild = MagicMock(spec=discord.Guild)
+    guild.get_channel = MagicMock(return_value=None)
+    assert _pending_redemptions_total(guild) == (0.0, 0)
+
+
+def test_pending_total_empty_category():
+    guild = _fake_guild_with_tickets([])
+    assert _pending_redemptions_total(guild) == (0.0, 0)
+
+
+def test_pending_total_sums_ticket_topics():
+    guild = _fake_guild_with_tickets(
+        [
+            "redemption-opener:1|item:brawl pass|budget_usd:10.00",
+            "redemption-opener:2|item:paypal|budget_usd:15.00",
+        ]
+    )
+    assert _pending_redemptions_total(guild) == (25.0, 2)
+
+
+def test_pending_total_skips_non_ticket_channels():
+    guild = _fake_guild_with_tickets(
+        [
+            None,
+            "just a normal channel topic",
+            "redemption-opener:1|item:nitro|budget_usd:10.00",
+        ]
+    )
+    assert _pending_redemptions_total(guild) == (10.0, 1)
+
+
+def test_pending_total_falls_back_to_item_cost():
+    guild = _fake_guild_with_tickets(
+        [
+            "redemption-opener:1|item:brawl pass",  # missing budget_usd
+            "redemption-opener:2|item:paypal|budget_usd:notanumber",
+        ]
+    )
+    assert _pending_redemptions_total(guild) == (25.0, 2)
+
+
+def test_pending_total_ignores_zero_cost_tickets():
+    guild = _fake_guild_with_tickets(
+        [
+            "redemption-opener:1|item:shoutout|budget_usd:0.00",
+            "redemption-opener:2|item:nitro|budget_usd:10.00",
+        ]
+    )
+    assert _pending_redemptions_total(guild) == (10.0, 1)
+
+
+# --- process_redemption_queue ---
+
+
+def _make_economy_cog(category):
+    cog = Economy.__new__(Economy)  # skip __init__ so task loops don't start
+    bot = MagicMock()
+    transcript_channel = MagicMock()
+    transcript_channel.send = AsyncMock()
+    channels = {
+        REDEMPTION_TICKET_CATEGORY_ID: category,
+        REDEMPTION_TRANSCRIPT_CHANNEL_ID: transcript_channel,
+    }
+    bot.get_channel = MagicMock(side_effect=channels.get)
+    cog.bot = bot
+    return cog, transcript_channel
+
+
+def _make_category_with_members(member_ids):
+    category = MagicMock(spec=discord.CategoryChannel)
+    guild = MagicMock(spec=discord.Guild)
+    members = {mid: MagicMock(spec=discord.Member) for mid in member_ids}
+    guild.get_member = MagicMock(side_effect=members.get)
+    category.guild = guild
+    return category
+
+
+def _patch_queue_helpers(monkeypatch, entries, budgets):
+    """Patches the queue processing collaborators; returns the key mocks."""
+    create_ticket = AsyncMock()
+    remove_entry = AsyncMock()
+    refund = AsyncMock()
+    monkeypatch.setattr(
+        "features.economy.get_redemption_queue", AsyncMock(return_value=entries)
+    )
+    monkeypatch.setattr(
+        "features.economy.get_effective_budget",
+        AsyncMock(side_effect=[(50.0, 0.0, 0.0, b) for b in budgets]),
+    )
+    monkeypatch.setattr("features.economy.create_redemption_ticket", create_ticket)
+    monkeypatch.setattr("features.economy.remove_redemption_queue_entry", remove_entry)
+    monkeypatch.setattr("features.economy.increment_user_balance", refund)
+    monkeypatch.setattr("features.economy._increment_redeem_counter", AsyncMock())
+    return create_ticket, remove_entry, refund
+
+
+async def test_queue_processing_fulfills_fifo(monkeypatch):
+    category = _make_category_with_members([1, 2])
+    cog, _ = _make_economy_cog(category)
+    entries = [
+        {"_id": "a1", "user_id": "1", "item": "brawl pass"},
+        {"_id": "a2", "user_id": "2", "item": "paypal"},
+    ]
+    create_ticket, remove_entry, _ = _patch_queue_helpers(
+        monkeypatch, entries, budgets=[50.0, 40.0]
+    )
+
+    await cog.process_redemption_queue()
+
+    assert create_ticket.await_count == 2
+    first_item = create_ticket.await_args_list[0].args[2]
+    second_item = create_ticket.await_args_list[1].args[2]
+    assert (first_item, second_item) == ("brawl pass", "paypal")
+    assert remove_entry.await_count == 2
+
+
+async def test_queue_processing_skips_unaffordable_entry(monkeypatch):
+    category = _make_category_with_members([1, 2])
+    cog, _ = _make_economy_cog(category)
+    entries = [
+        {"_id": "a1", "user_id": "1", "item": "paypal"},  # $15 > $12 available
+        {"_id": "a2", "user_id": "2", "item": "brawl pass"},  # $10 fits
+    ]
+    create_ticket, remove_entry, _ = _patch_queue_helpers(
+        monkeypatch, entries, budgets=[12.0, 12.0]
+    )
+
+    await cog.process_redemption_queue()
+
+    assert create_ticket.await_count == 1
+    assert create_ticket.await_args.args[2] == "brawl pass"
+    remove_entry.assert_awaited_once_with("a2")
+
+
+async def test_queue_processing_refunds_when_member_left(monkeypatch):
+    category = _make_category_with_members([])
+    cog, transcript_channel = _make_economy_cog(category)
+    entries = [{"_id": "a1", "user_id": "1", "item": "brawl pass"}]
+    create_ticket, remove_entry, refund = _patch_queue_helpers(
+        monkeypatch, entries, budgets=[50.0]
+    )
+
+    await cog.process_redemption_queue()
+
+    create_ticket.assert_not_awaited()
+    remove_entry.assert_awaited_once_with("a1")
+    refund.assert_awaited_once_with("1", _token_price_for_item("brawl pass"))
+    transcript_channel.send.assert_awaited_once()
+
+
+async def test_queue_entry_kept_when_ticket_creation_fails(monkeypatch):
+    category = _make_category_with_members([1, 2])
+    cog, _ = _make_economy_cog(category)
+    entries = [
+        {"_id": "a1", "user_id": "1", "item": "brawl pass"},
+        {"_id": "a2", "user_id": "2", "item": "nitro"},
+    ]
+    create_ticket, remove_entry, _ = _patch_queue_helpers(
+        monkeypatch, entries, budgets=[50.0, 40.0]
+    )
+    create_ticket.side_effect = [Exception("boom"), MagicMock()]
+
+    await cog.process_redemption_queue()
+
+    assert create_ticket.await_count == 2
+    remove_entry.assert_awaited_once_with("a2")
+
+
+async def test_queue_processing_raises_without_category(monkeypatch):
+    cog, _ = _make_economy_cog(None)
+    _patch_queue_helpers(monkeypatch, [], budgets=[])
+
+    with pytest.raises(RuntimeError):
+        await cog.process_redemption_queue()
