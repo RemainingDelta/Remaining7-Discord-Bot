@@ -1,7 +1,7 @@
 # Economy Shop
 
 ## Overview
-The shop lets members spend R7 Tokens on real-world rewards. Redemptions open a private ticket channel where staff fulfill the order. Each fulfilled redemption reduces the monthly USD budget. The budget auto-resets on the first of each calendar month by detecting a month key change.
+The shop lets members spend R7 Tokens on real-world rewards. Redemptions open a private ticket channel where staff fulfill the order. Each fulfilled redemption reduces the monthly USD budget. Open (pending) tickets also reserve budget: the available budget is `monthly_budget − spent − pending`, so redemptions can never collectively exceed the cap. Requests that don't fit the available budget can be queued for the next month instead. The budget auto-resets on the first of each calendar month by detecting a month key change.
 
 ---
 
@@ -37,13 +37,15 @@ REDEMPTION_BUDGET_COSTS = {
 
 ## Redemption Flow
 
-1. Member uses `/redeem` and selects an item
-2. Bot checks their token balance ≥ item price
-3. Deducts tokens immediately via `update_user_balance()`
-4. Creates a private ticket channel in `REDEMPTION_TICKET_CATEGORY_ID`:
+1. Member uses `/redeem` and selects an item they own
+2. Bot checks the **available budget**: `monthly_budget − manual_total_spent − pending`, where pending is computed by `_pending_redemptions_total()` — it scans the redemption category's channel topics and sums each ticket's `budget_usd` (falling back to `REDEMPTION_BUDGET_COSTS` if the topic value is missing/corrupt)
+3. If the item's USD cost exceeds the available budget, the member is offered the **redemption queue** (see below) instead of a ticket
+4. Otherwise the item is consumed and `create_redemption_ticket()` opens a private ticket channel in `REDEMPTION_TICKET_CATEGORY_ID`:
    - Channel topic: `redemption-opener:{user_id}|item:{item_key}|budget_usd:{cost}`
    - Opener gets full access + slash commands; Admin/Mod roles get full access
 5. Ticket shows the item requested, token cost deducted, and remaining balance
+
+The budget guard is re-checked once after the interaction defer, so two near-simultaneous redemptions can't both claim the last of the budget.
 
 ### Redemption Ticket Resolution
 
@@ -63,13 +65,14 @@ The budget cost on the "Reduce from budget" path is read from `budget_usd` in th
 
 ## Monthly Budget System
 
-The budget state lives in the `settings` MongoDB collection as three keys:
+The budget state lives in the `settings` MongoDB collection as these keys:
 
 | Key | Value |
 |-----|-------|
 | `budget_month_key` | `"YYYY-MM"` string for the current month |
 | `monthly_budget` | Total cap as float string (default `"50.00"`) |
 | `manual_total_spent` | Cumulative USD spent this month as float string |
+| `redemption_queue_processed_month` | `"YYYY-MM"` of the last month whose queue run completed |
 
 `ensure_monthly_budget_state()` runs on every budget interaction:
 ```python
@@ -83,7 +86,43 @@ if stored_key != current_key:
     # Also resets legacy per-item counters
 ```
 
-This is lazy reset — it only resets when something touches the budget, not on a scheduled task.
+This is lazy reset — it only resets when something touches the budget, not on a scheduled task. The hourly redemption-queue task (below) touches the budget at the start of every month, so in practice the reset also happens within an hour of rollover.
+
+---
+
+## Redemption Queue
+
+When a `/redeem` request exceeds the available budget, the member gets an ephemeral prompt with **Join queue for next month** / **Cancel** buttons (`RedemptionQueueConfirmView`). Confirming consumes the item token immediately and inserts a FIFO entry into the `redemption_queue` MongoDB collection:
+
+```python
+{
+  "user_id": "1234567890",   # str, matches users collection convention
+  "item": "brawl pass",      # SHOP_DATA key
+  "budget_usd": 10.0,        # snapshot at queue time (audit/display only)
+  "queued_at": datetime,     # FIFO sort key
+}
+```
+
+`budget_usd` is a snapshot for display; processing always recomputes the cost from `REDEMPTION_BUDGET_COSTS` so a cost change while queued uses the current value.
+
+### Processing
+
+`redemption_queue_task` is an hourly `tasks.loop` on the Economy cog. Each tick it compares `redemption_queue_processed_month` with the current month key; if they differ (new month, or bot was offline on the 1st), it runs `process_redemption_queue()` and stamps the key only on success (a failed run retries next hour).
+
+`process_redemption_queue()` walks the queue in FIFO order:
+- **Member left the server** → entry is dropped, the item's token price is refunded to their balance, and a note is posted to `REDEMPTION_TRANSCRIPT_CHANNEL_ID`.
+- **Cost > available budget** (recomputed every iteration, so tickets opened earlier in the run count as pending) → entry is skipped and carries over to the next month; cheaper later entries may still be fulfilled.
+- **Otherwise** → a ticket is created via `create_redemption_ticket()` (pinging the member) and the entry is removed — only after the channel is successfully created, so failures leave the entry queued.
+
+### Queue Commands
+
+| Command | Who | Notes |
+|---------|-----|-------|
+| `/redemption-queue` | Anyone | Your queued redemptions with overall FIFO position (ephemeral) |
+| `/redemption-queue-list` | Admin/Mod | Full queue with entry ids and estimated USD total |
+| `/redemption-queue-remove <entry_id>` | Admin/Mod | Removes an entry and returns the item to the user's inventory |
+
+`/check-budget` also shows the pending-ticket total and the queued-entry count/estimate.
 
 ---
 

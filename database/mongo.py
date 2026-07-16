@@ -4,6 +4,8 @@ import re
 import uuid
 import motor.motor_asyncio
 import certifi
+from bson import ObjectId
+from bson.errors import InvalidId
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -178,6 +180,44 @@ async def set_setting(key: str, value: str):
     if db is None:
         return
     await db.settings.update_one({"_id": key}, {"$set": {"value": value}}, upsert=True)
+
+
+# --- REDEMPTION QUEUE HELPERS ---
+
+
+async def add_redemption_queue_entry(
+    user_id: str, item: str, budget_usd: float
+) -> str | None:
+    """Queues a redemption for the next month. Returns the entry id."""
+    if db is None:
+        return None
+    result = await db.redemption_queue.insert_one(
+        {
+            "user_id": user_id,
+            "item": item,
+            "budget_usd": budget_usd,
+            "queued_at": datetime.utcnow(),
+        }
+    )
+    return str(result.inserted_id)
+
+
+async def get_redemption_queue() -> list[dict]:
+    """Returns all queued redemptions in FIFO order."""
+    if db is None:
+        return []
+    return await db.redemption_queue.find({}).sort("queued_at", 1).to_list(length=None)
+
+
+async def remove_redemption_queue_entry(entry_id: str) -> dict | None:
+    """Removes a queue entry by id. Returns the removed document, or None."""
+    if db is None:
+        return None
+    try:
+        oid = ObjectId(entry_id)
+    except (InvalidId, TypeError):
+        return None
+    return await db.redemption_queue.find_one_and_delete({"_id": oid})
 
 
 # --- COUNTING HELPERS ---
