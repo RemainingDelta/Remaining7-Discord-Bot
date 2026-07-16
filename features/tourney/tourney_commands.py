@@ -1465,7 +1465,8 @@ def setup_tourney_commands(bot: commands.Bot):
                 "You’ll be prompted to provide:\n"
                 "📛 **Team Name**\n"
                 "🔢 **Match / Bracket Number**\n"
-                "📝 **Description of the Issue**\n\n"
+                "📝 **Description of the Issue**\n"
+                "🖼️ **Screenshots** *(optional, up to 3)*\n\n"
                 "A Tourney Admin will assist you as soon as possible. 🛠️"
             )
 
@@ -1965,7 +1966,8 @@ def setup_tourney_commands(bot: commands.Bot):
                     "📋 **Registration Issues**\n"
                     "🤝 **Team / Roster Questions**\n"
                     "❓ **General Inquiries**\n\n"
-                    "Click the button below to open a ticket. **Team Name** is optional."
+                    "Click the button below to open a ticket. **Team Name** is optional, "
+                    "and you can attach up to 3 screenshots."
                 ),
                 color=discord.Color.orange(),
             )
@@ -2043,7 +2045,8 @@ def setup_tourney_commands(bot: commands.Bot):
             "You’ll be prompted to provide:\n"
             "📛 **Team Name**\n"
             "🔢 **Match / Bracket Number**\n"
-            "📝 **Description of the Issue**\n\n"
+            "📝 **Description of the Issue**\n"
+            "🖼️ **Screenshots** *(optional, up to 3)*\n\n"
             "A Tourney Admin will assist you as soon as possible. 🛠️"
         )
 
@@ -2083,7 +2086,8 @@ def setup_tourney_commands(bot: commands.Bot):
                 "📋 **Registration Issues**\n"
                 "🤝 **Team / Roster Questions**\n"
                 "❓ **General Inquiries**\n\n"
-                "Click the button below to open a ticket. **Team Name** is optional."
+                "Click the button below to open a ticket. **Team Name** is optional, "
+                "and you can attach up to 3 screenshots."
             ),
             color=discord.Color.orange(),
         )

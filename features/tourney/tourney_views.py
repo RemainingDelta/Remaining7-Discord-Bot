@@ -10,30 +10,44 @@ class TourneyReportModal(discord.ui.Modal, title="Tourney Support"):
     def __init__(self):
         super().__init__()
 
+        # All inputs are wrapped in Labels: Discord rejects modals that mix
+        # legacy ActionRow text inputs with new components like FileUpload.
         self.team_name = discord.ui.TextInput(
-            label="Matcherino Team Name",
             placeholder="Ex. XYZ",
             required=True,
             max_length=100,
         )
         self.bracket = discord.ui.TextInput(
-            label="Match No.",
             placeholder="Ex. 3, 23, 145",
             required=True,
             max_length=50,
         )
         self.issue = discord.ui.TextInput(
-            label="Issue / Report",
             placeholder="Describe the issue you are trying to report…",
             style=discord.TextStyle.paragraph,
             required=True,
             max_length=1000,
         )
+        self.image_upload = discord.ui.FileUpload(
+            custom_id="tourney_ticket_images",
+            required=False,
+            min_values=0,
+            max_values=3,
+        )
 
         # add the inputs to the modal
-        self.add_item(self.team_name)
-        self.add_item(self.bracket)
-        self.add_item(self.issue)
+        self.add_item(
+            discord.ui.Label(text="Matcherino Team Name", component=self.team_name)
+        )
+        self.add_item(discord.ui.Label(text="Match No.", component=self.bracket))
+        self.add_item(discord.ui.Label(text="Issue / Report", component=self.issue))
+        self.add_item(
+            discord.ui.Label(
+                text="Screenshots (Optional)",
+                description="Attach up to 3 images as proof for your report.",
+                component=self.image_upload,
+            )
+        )
 
     async def on_submit(self, interaction: discord.Interaction):
         from .tourney_utils import create_tourney_ticket_channel
@@ -44,6 +58,7 @@ class TourneyReportModal(discord.ui.Modal, title="Tourney Support"):
             team_name=self.team_name.value,
             bracket=self.bracket.value,
             issue=self.issue.value,
+            images=self.image_upload.values,
         )
 
         try:
@@ -498,22 +513,37 @@ class PreTourneyReportModal(discord.ui.Modal, title="Pre-Tourney Support"):
     def __init__(self):
         super().__init__()
 
+        # All inputs are wrapped in Labels: Discord rejects modals that mix
+        # legacy ActionRow text inputs with new components like FileUpload.
         self.team_name = discord.ui.TextInput(
-            label="Team Name (Optional)",
             placeholder="Ex. XYZ",
             required=False,  # <--- NOT REQUIRED
             max_length=100,
         )
         self.issue = discord.ui.TextInput(
-            label="Issue / Question",
             placeholder="How can we help?",
             style=discord.TextStyle.paragraph,
             required=True,  # <--- REQUIRED
             max_length=1000,
         )
+        self.image_upload = discord.ui.FileUpload(
+            custom_id="pretourney_ticket_images",
+            required=False,
+            min_values=0,
+            max_values=3,
+        )
 
-        self.add_item(self.team_name)
-        self.add_item(self.issue)
+        self.add_item(
+            discord.ui.Label(text="Team Name (Optional)", component=self.team_name)
+        )
+        self.add_item(discord.ui.Label(text="Issue / Question", component=self.issue))
+        self.add_item(
+            discord.ui.Label(
+                text="Screenshots (Optional)",
+                description="Attach up to 3 images related to your question.",
+                component=self.image_upload,
+            )
+        )
 
     async def on_submit(self, interaction: discord.Interaction):
         from .tourney_utils import create_pre_tourney_ticket_channel
@@ -522,6 +552,7 @@ class PreTourneyReportModal(discord.ui.Modal, title="Pre-Tourney Support"):
             interaction,
             team_name=self.team_name.value,
             issue=self.issue.value,
+            images=self.image_upload.values,
         )
 
         try:

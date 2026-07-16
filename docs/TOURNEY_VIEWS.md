@@ -28,6 +28,9 @@ The modal that appears when a member clicks "Open Tourney Ticket" during a live 
 | `team_name` | Matcherino Team Name | Yes | 100 | Used for fuzzy matching |
 | `bracket` | Match No. | Yes | 50 | Parsed as `int`; if non-integer, falls back to team name lookup |
 | `issue` | Issue / Report | Yes | 1000 | Paragraph style (`discord.TextStyle.paragraph`) |
+| `image_upload` | Screenshots (Optional) | No | 3 files | `discord.ui.FileUpload` (requires discord.py ≥ 2.7); values passed to `create_tourney_ticket_channel(images=…)` |
+
+**Component structure note**: Every field (text inputs included) is wrapped in a `discord.ui.Label` rather than added directly. Discord rejects modals that mix legacy ActionRow text inputs with new components like `FileUpload` — so once one new-style component is present, all fields must use Labels. Field titles live on the `Label`, not on the `TextInput`.
 
 **`on_submit` logic** (the most complex part of the views file):
 
@@ -76,6 +79,7 @@ The modal for pre-tournament support tickets. Simpler than `TourneyReportModal` 
 |-------|-------|----------|-----------|
 | `team_name` | Team Name (Optional) | No | 100 |
 | `issue` | Issue / Question | Yes | 1000 |
+| `image_upload` | Screenshots (Optional) | No | 3 files |
 
 **`on_submit`**: Calls `create_pre_tourney_ticket_channel()` directly. No Matcherino lookup is performed (no bracket data exists pre-tournament). Also increments the tourney queue counter.
 

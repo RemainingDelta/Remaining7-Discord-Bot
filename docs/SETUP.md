@@ -33,7 +33,7 @@ pytest-asyncio>=0.23
 
 | Package | Used by |
 |---------|---------|
-| `discord.py>=2.7` | Everything — requires 2.x for app commands and modals |
+| `discord.py>=2.7` | Everything — 2.7 specifically is required for the `discord.ui.FileUpload` / `discord.ui.Label` modal components used by tourney ticket image upload |
 | `motor` | All MongoDB operations (async driver) |
 | `dnspython` + `certifi` | Required by motor for MongoDB Atlas SRV connection strings |
 | `python-dotenv` | Loading `.env` file |
