@@ -136,3 +136,37 @@ def test_unregister_nonexistent_channel_does_not_raise():
     tu._register_ticket_for_user(888, 8001)
     tu._unregister_ticket_for_user(888, 9999)  # channel not in set
     assert tu._get_open_ticket_count(888) == 1
+
+
+# --- _filter_image_attachments ---
+
+
+class _FakeAttachment:
+    def __init__(self, content_type):
+        self.content_type = content_type
+
+
+def test_filter_image_attachments_none_input():
+    assert tu._filter_image_attachments(None) == []
+
+
+def test_filter_image_attachments_empty_list():
+    assert tu._filter_image_attachments([]) == []
+
+
+def test_filter_image_attachments_keeps_images():
+    png = _FakeAttachment("image/png")
+    jpeg = _FakeAttachment("image/jpeg")
+    assert tu._filter_image_attachments([png, jpeg]) == [png, jpeg]
+
+
+def test_filter_image_attachments_drops_non_images():
+    png = _FakeAttachment("image/png")
+    video = _FakeAttachment("video/mp4")
+    text = _FakeAttachment("text/plain")
+    assert tu._filter_image_attachments([png, video, text]) == [png]
+
+
+def test_filter_image_attachments_drops_missing_content_type():
+    unknown = _FakeAttachment(None)
+    assert tu._filter_image_attachments([unknown]) == []

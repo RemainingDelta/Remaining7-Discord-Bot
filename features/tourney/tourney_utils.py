@@ -22,6 +22,10 @@ from features.config import (
 _ticket_counter: int = 1
 _pre_tourney_ticket_counter: int = 1
 
+# Prefix of the bot message that carries images submitted via the ticket modal.
+# Used to find those images again when the transcript is generated on delete.
+SUBMITTED_IMAGES_MARKER = "🖼️ **Submitted Images**"
+
 # user_id -> set of open ticket channel IDs
 _user_open_tickets: dict[int, set[int]] = {}
 
@@ -43,6 +47,72 @@ async def _get_translation(text: str) -> str | None:
         return translated
     except Exception:
         return None
+
+
+def _filter_image_attachments(
+    attachments: list[discord.Attachment] | None,
+) -> list[discord.Attachment]:
+    """Keep only attachments Discord identifies as images."""
+    if not attachments:
+        return []
+    return [
+        a for a in attachments if a.content_type and a.content_type.startswith("image/")
+    ]
+
+
+async def _post_submitted_images(
+    channel: discord.TextChannel,
+    opener: discord.abc.User,
+    attachments: list[discord.Attachment] | None,
+) -> None:
+    """Re-upload modal-submitted images into the ticket channel.
+
+    Interaction attachments are not guaranteed to stay on Discord's CDN, so the
+    images are re-sent as bot-owned files. The marker content lets
+    delete_ticket_with_transcript() find them again for the transcript log.
+    """
+    if not attachments:
+        return
+
+    images = _filter_image_attachments(attachments)
+
+    # Tell the user when uploads were discarded, otherwise they believe their
+    # proof was submitted while staff sees nothing.
+    dropped = len(attachments) - len(images)
+    if dropped:
+        plural = "s were" if dropped > 1 else " was"
+        try:
+            await channel.send(
+                f"⚠️ {dropped} submitted file{plural} ignored — only images "
+                f"(PNG, JPG, etc.) are accepted. Please post other proof "
+                f"directly in this channel."
+            )
+        except Exception:
+            pass
+
+    if not images:
+        return
+
+    # One message per image so each renders full-size instead of as a collage.
+    # No mention here — the opener is already pinged by the proof embed message,
+    # and a second ping on ticket open is noisy.
+    total = len(images)
+    opener_name = discord.utils.escape_markdown(opener.display_name)
+    for index, attachment in enumerate(images, start=1):
+        counter = f" ({index}/{total})" if total > 1 else ""
+        content = f"{SUBMITTED_IMAGES_MARKER} from **{opener_name}**{counter}:"
+        try:
+            file = await attachment.to_file()
+            await channel.send(content=content, file=file)
+        except discord.HTTPException:
+            # Upload failed (e.g. over the guild size limit) — fall back to a link
+            # so staff can at least view the image while the interaction lives.
+            try:
+                await channel.send(content=f"{content}\n{attachment.url}")
+            except Exception:
+                pass
+        except Exception:
+            continue
 
 
 def _get_open_ticket_count(user_id: int) -> int:
@@ -133,6 +203,7 @@ async def create_tourney_ticket_channel(
     team_name: str,
     bracket: str,
     issue: str,
+    images: list[discord.Attachment] | None = None,
 ):
     await interaction.response.defer(ephemeral=True)
     guild = interaction.guild
@@ -232,6 +303,8 @@ async def create_tourney_ticket_channel(
 
     await channel.send(embed=ticket_embed)
 
+    await _post_submitted_images(channel, interaction.user, images)
+
     proof_embed = discord.Embed(
         title="📎 Proof Required",
         description=(
@@ -244,6 +317,16 @@ async def create_tourney_ticket_channel(
         ),
         color=discord.Color.red(),
     )
+
+    if _filter_image_attachments(images):
+        proof_embed.add_field(
+            name="✅ Screenshots Received",
+            value=(
+                "The screenshot(s) you attached when opening this ticket count "
+                "as proof — nothing more is needed unless a Tourney Admin asks."
+            ),
+            inline=False,
+        )
 
     await channel.send(
         content=f"{interaction.user.mention} 👇 **Please read this:**",
@@ -271,6 +354,7 @@ async def create_pre_tourney_ticket_channel(
     interaction: discord.Interaction,
     team_name: str | None,
     issue: str,
+    images: list[discord.Attachment] | None = None,
 ):
     await interaction.response.defer(ephemeral=True)
 
@@ -366,6 +450,9 @@ async def create_pre_tourney_ticket_channel(
         )
 
     await channel.send(embed=ticket_embed)
+
+    await _post_submitted_images(channel, interaction.user, images)
+
     await interaction.followup.send(
         f"Support ticket created: {channel.mention}", ephemeral=True
     )
@@ -575,6 +662,44 @@ async def build_transcript_text(channel: discord.TextChannel) -> str:
     return "\n".join(lines)
 
 
+async def _collect_submitted_images(
+    channel: discord.TextChannel,
+    client: discord.Client,
+) -> list[tuple[bytes, str]]:
+    """Re-download the images posted by _post_submitted_images() as
+    (bytes, filename) pairs before the channel (and its CDN links) is deleted.
+
+    Raw bytes rather than discord.File so the caller can send the same images
+    to multiple destinations (opener DM + log channel) with a single download —
+    discord.File objects are single-use. The marker messages are among the
+    first in the channel."""
+    bot_id = client.user.id if client.user else None
+    if bot_id is None:
+        return []
+
+    images: list[tuple[bytes, str]] = []
+    try:
+        # Each submitted image is its own marker message, so keep scanning
+        # instead of stopping at the first hit.
+        async for msg in channel.history(limit=25, oldest_first=True):
+            if msg.author.id != bot_id or not msg.content.startswith(
+                SUBMITTED_IMAGES_MARKER
+            ):
+                continue
+            for attachment in msg.attachments:
+                # Cap at 9 so transcript file + images stay within the
+                # 10-attachments-per-message limit.
+                if len(images) >= 9:
+                    return images
+                try:
+                    images.append((await attachment.read(), attachment.filename))
+                except Exception:
+                    continue
+    except Exception:
+        pass
+    return images
+
+
 async def delete_ticket_with_transcript(
     guild: discord.Guild,
     channel: discord.TextChannel,
@@ -617,6 +742,17 @@ async def delete_ticket_with_transcript(
     file_for_dm = discord.File(bytes_for_dm, filename=filename)
     file_for_log = discord.File(bytes_for_log, filename=filename)
 
+    # Images submitted with the ticket modal, downloaded once and re-sent to
+    # both the opener DM and the log channel so they survive channel deletion.
+    submitted_images = await _collect_submitted_images(channel, client)
+
+    def _image_files() -> list[discord.File]:
+        # discord.File is single-use, so each send needs fresh objects.
+        return [
+            discord.File(io.BytesIO(data), filename=name)
+            for data, name in submitted_images
+        ]
+
     # DM opener
     if opener_id is not None:
         user = client.get_user(opener_id)
@@ -627,16 +763,28 @@ async def delete_ticket_with_transcript(
                 user = None
 
         if user is not None:
+            dm_content = (
+                f"Here is the transcript for your closed ticket: "
+                f"**#{channel.name}** in **{guild.name}**."
+            )
             try:
                 await user.send(
-                    content=(
-                        f"Here is the transcript for your closed ticket: "
-                        f"**#{channel.name}** in **{guild.name}**."
-                    ),
-                    file=file_for_dm,
+                    content=dm_content,
+                    files=[file_for_dm, *_image_files()],
                 )
             except discord.Forbidden:
                 pass
+            except discord.HTTPException:
+                if not submitted_images:
+                    raise
+                # Images pushed the DM over a limit — retry transcript only.
+                retry_dm = discord.File(
+                    io.BytesIO(transcript_text.encode("utf-8")), filename=filename
+                )
+                try:
+                    await user.send(content=dm_content, files=[retry_dm])
+                except discord.Forbidden:
+                    pass
 
     # Log channel
     log_channel = guild.get_channel(LOG_CHANNEL_ID) if LOG_CHANNEL_ID else None
@@ -666,14 +814,26 @@ async def delete_ticket_with_transcript(
                 match_num = bracket_match.group(1).strip()
 
         # 👇 2. Update Content
-        await log_channel.send(
-            content=(
-                f"📝 Transcript for ticket **#{channel.name}** "
-                f"deleted by **{deleter_name}** (opener: {opener_mention}).\n"
-                f"🛡️ **Team:** `{team_name}` | 🔢 **Match:** `{match_num}`"
-            ),
-            file=file_for_log,
+        log_content = (
+            f"📝 Transcript for ticket **#{channel.name}** "
+            f"deleted by **{deleter_name}** (opener: {opener_mention}).\n"
+            f"🛡️ **Team:** `{team_name}` | 🔢 **Match:** `{match_num}`"
         )
+
+        try:
+            await log_channel.send(
+                content=log_content,
+                files=[file_for_log, *_image_files()],
+            )
+        except discord.HTTPException:
+            if not submitted_images:
+                raise
+            # Image upload pushed the message over a limit — send the
+            # transcript alone rather than losing it entirely.
+            retry_file = discord.File(
+                io.BytesIO(transcript_text.encode("utf-8")), filename=filename
+            )
+            await log_channel.send(content=log_content, files=[retry_file])
 
     await channel.delete(reason=f"Tourney ticket deleted by {deleter}")
 

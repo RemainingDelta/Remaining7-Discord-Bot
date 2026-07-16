@@ -8,10 +8,11 @@ Tournament tickets are private Discord text channels created when a member submi
 ## Ticket Creation Flow
 
 1. Member clicks the **Open Ticket** button on the tourney panel
-2. A Discord modal appears with three fields:
+2. A Discord modal appears with three text fields plus an optional file upload:
    - Team Name
    - Match / Bracket Number
    - Issue description
+   - Screenshots (optional, up to 3 images via Discord's native modal file upload)
 3. On submit, `create_tourney_ticket_channel()` runs:
    - Defers the response (ephemeral) immediately to buy time
    - Checks that the active category has **< 50 channels** (Discord's hard limit)
@@ -21,7 +22,9 @@ Tournament tickets are private Discord text channels created when a member submi
    - Sets permission overwrites: opener gets full access + slash commands; all `ALLOWED_STAFF_ROLES` get full access + manage messages; `@everyone` is hidden
    - Writes the channel topic: `tourney-opener:{user_id}|team:{team}|bracket:{num}|issue:{issue}`
    - Auto-detects and translates the issue text if non-English
-   - Sends the ticket embed + a "proof required" embed
+   - Sends the ticket embed
+   - Re-uploads any modal-submitted images into the channel via `_post_submitted_images()`, **one message per image** so each renders full-size, prefixed with `🖼️ **Submitted Images** from **Name** (1/3):` (`SUBMITTED_IMAGES_MARKER`; display name is markdown-escaped, counter omitted for a single image, no ping) — interaction attachments are not guaranteed to persist on Discord's CDN, so re-posting makes them durable and lets the delete flow find them again. Non-image files are filtered out (`_filter_image_attachments()`) and a "⚠️ N submitted file(s) were ignored" notice is posted so the opener knows; if a re-upload fails (e.g. size limit), that image falls back to a CDN link
+   - Sends the "proof required" embed (pings the opener); when the opener attached screenshots in the modal, it includes a "✅ Screenshots Received" field saying no further proof is needed
    - Checks the opener against the blacklist and alerts admins if flagged
 
 ### Channel Naming Convention
@@ -125,9 +128,10 @@ This is non-blocking — the ticket opens regardless.
 3. Calls `_unregister_ticket_for_user()` to release the slot
 4. Builds a plain-text transcript via `build_transcript_text()`
 5. Creates two `io.BytesIO` copies of the transcript (one for DM, one for log channel) — must be separate because `discord.File` is single-use
-6. DMs the transcript to the opener (if findable via `client.get_user()` or `client.fetch_user()`)
-7. Posts the transcript to `LOG_CHANNEL_ID` with metadata extracted from the topic (team name, match number)
-8. Calls `channel.delete()`
+6. Re-downloads any images from the `🖼️ Submitted Images` marker messages via `_collect_submitted_images()` (scans the first 25 messages; capped at 9 images so transcript + images stay within Discord's 10-attachments-per-message limit). Images are downloaded once as raw bytes and fresh `discord.File` objects are built per destination, since `discord.File` is single-use
+7. DMs the transcript to the opener (if findable via `client.get_user()` or `client.fetch_user()`) with the submitted images attached — if the images push the DM over a limit, retries with the transcript alone
+8. Posts the transcript to `LOG_CHANNEL_ID` with metadata extracted from the topic (team name, match number) and the submitted images attached — same retry-without-images fallback
+9. Calls `channel.delete()`
 
 ### Transcript Format
 
