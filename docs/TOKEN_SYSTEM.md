@@ -1,7 +1,7 @@
 # Token System
 
 ## Overview
-R7 Tokens are the primary server currency. Members earn them passively through chat messages and via `/daily` claims. The passive listener runs on every `on_message` event and enforces a per-user cooldown tracked in an in-memory dict. Server Boosters receive a 5% bonus on passive earnings.
+R7 Tokens are the primary server currency. Members earn them passively through chat messages and via `/daily` claims. The passive listener runs on every `on_message` event and enforces a per-user cooldown tracked in an in-memory dict. Server Boosters receive a ~10% average bonus on passive token earnings, a passive XP bonus in the general channel, and a flat +20 tokens on every `/daily` claim.
 
 ---
 
@@ -12,7 +12,7 @@ The `on_message` listener in `features/economy.py` fires on every message:
 1. Ignores bots, DMs, and channels in `PASSIVE_REWARD_EXCLUDED_CHANNEL_IDS`
 2. Enforces a **20-second cooldown** per user via `_cooldowns: dict[int, float]` mapping `user_id → last_earn_timestamp`
 3. Awards a random amount of `2–5 tokens` (`random.randint(2, 5)`)
-4. If the member has the **Server Booster** role, adds 5%: `int(amount * 1.05)`
+4. If the member has the **Server Booster** role (`SERVER_BOOSTER_ROLE_ID`), there is a 35% chance of +1 bonus token (~10% average increase). Boosters also roll a separate 35% chance of +1 bonus XP on every general-channel message, independent of the token cooldown.
 5. Updates balance in MongoDB via `update_user_balance()`
 6. Fires the quest listener (`process_quest_update()`) for the message action
 
@@ -34,7 +34,8 @@ On claim:
 1. Reads `daily_last_claimed` from MongoDB
 2. Checks `daily_message_count >= 5`
 3. Calculates token reward based on user's current level
-4. Resets `daily_message_count` to 0 and updates `daily_last_claimed` to now
+4. Adds a flat **+20 tokens** if the member has the Server Booster role (shown as a separate line in the claim embed)
+5. Resets `daily_message_count` to 0 and updates `daily_last_claimed` to now
 
 ---
 
