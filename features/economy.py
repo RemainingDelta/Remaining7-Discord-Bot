@@ -39,6 +39,7 @@ from features.config import (
     MODERATOR_ROLE_ID,
     REDEMPTION_TICKET_CATEGORY_ID,
     REDEMPTION_TRANSCRIPT_CHANNEL_ID,
+    SERVER_BOOSTER_ROLE_ID,
     TRIAL_MODERATOR_ROLE_ID,
     PASSIVE_REWARD_EXCLUDED_CHANNEL_IDS,
 )
@@ -1047,7 +1048,20 @@ class Economy(commands.Cog):
         current_timestamp = time.time()
         datetime.utcnow().strftime("%Y-%m-%d")
 
+        booster_xp_bonus = 0
+
         if message.channel.id == GENERAL_CHANNEL_ID:
+            is_booster = False
+            if message.guild:
+                booster_role = message.guild.get_role(SERVER_BOOSTER_ROLE_ID)
+                is_booster = (
+                    booster_role is not None and booster_role in message.author.roles
+                )
+
+            # Booster Bonus: 35% Chance of +1 XP per general-channel message
+            if is_booster and random.random() < 0.35:
+                booster_xp_bonus = 1
+
             # --- TRACK DAILY MESSAGE COUNT (tied to /daily cooldown window) ---
             # Format: "LAST_DAILY_TIMESTAMP:COUNT" — resets when user claims /daily
             last_daily_str = await get_setting(f"daily_{user_id}")
@@ -1085,13 +1099,9 @@ class Economy(commands.Cog):
             if should_award_tokens:
                 earned_tokens = random.randint(2, 5)
 
-                # Booster Bonus: 17.5% Chance (Avg 5% increase)
-                SERVER_BOOSTER_ROLE_ID = 647685778255642626
-                if message.guild:
-                    booster_role = message.guild.get_role(SERVER_BOOSTER_ROLE_ID)
-                    if booster_role and booster_role in message.author.roles:
-                        if random.random() < 0.175:
-                            earned_tokens += 1
+                # Booster Bonus: 35% Chance (Avg 10% increase)
+                if is_booster and random.random() < 0.35:
+                    earned_tokens += 1
 
                 current_balance = await get_user_balance(user_id)
                 await update_user_balance(user_id, current_balance + earned_tokens)
@@ -1102,7 +1112,7 @@ class Economy(commands.Cog):
         BASE_EXP = 100
 
         level, exp = await get_leveling_data(user_id)
-        exp += EXP_PER_MESSAGE
+        exp += EXP_PER_MESSAGE + booster_xp_bonus
 
         while True:
             required_exp = int(BASE_EXP * (1.5 ** (level - 1)))
@@ -1390,18 +1400,30 @@ class Economy(commands.Cog):
         bonus_multiplier = 1 + (level - 1) * 0.05
         final_tokens = int(daily_tokens * bonus_multiplier)
 
+        # Booster Bonus: flat +20 tokens on every claim
+        booster_bonus = 0
+        if interaction.guild:
+            booster_role = interaction.guild.get_role(SERVER_BOOSTER_ROLE_ID)
+            if booster_role and booster_role in interaction.user.roles:
+                booster_bonus = 20
+        final_tokens += booster_bonus
+
         current_balance = await get_user_balance(user_id)
         new_balance = current_balance + final_tokens
 
         await update_user_balance(user_id, new_balance)
         await set_setting(f"daily_{user_id}", str(now.timestamp()))
 
+        description = (
+            f"You received **{final_tokens} R7 tokens**!\n"
+            f"New balance: **{int(new_balance)}** | Level: **{level}**"
+        )
+        if booster_bonus:
+            description += f"\n🚀 **Booster Bonus:** +{booster_bonus} tokens included!"
+
         embed = discord.Embed(
             title="🎉 Daily Reward Claimed!",
-            description=(
-                f"You received **{final_tokens} R7 tokens**!\n"
-                f"New balance: **{int(new_balance)}** | Level: **{level}**"
-            ),
+            description=description,
             color=discord.Color.green(),
         )
         await interaction.response.send_message(embed=embed)
@@ -1789,7 +1811,8 @@ class Economy(commands.Cog):
             f"*Requires 5 messages sent in {general_ch} since your last `/daily` claim.*\n"
             f"🪂 **Supply Drops:** Random crates appear in {general_ch}! Click the button to claim.\n"
             f"🏆 **Events:** Earn massive token rewards in {event_ch}.\n"
-            "🚀 **Booster Bonus:** Server Boosters receive a **5% increase** in coins on average."
+            "🚀 **Booster Bonus:** Server Boosters receive a **10% increase** in coins on average, "
+            "bonus XP in general chat, and **+20 tokens** on every `/daily` claim."
         )
         earn_embed.add_field(name="📈 Earning Methods", value=earn_text, inline=False)
         earn_embed.set_thumbnail(url=self.bot.user.display_avatar.url)
