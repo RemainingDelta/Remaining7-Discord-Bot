@@ -39,6 +39,8 @@ Mechanics:
 - `/reset-quests` deletes the user's quest doc, so the forced reassignment re-evaluates booster status at that moment.
 - Reduction math: `booster_quest_target()` in `database/mongo.py` (`max(1, round(target * 0.8))`).
 
+> When changing this perk, also update the `/booster-perks` embed in `features/general.py`.
+
 ---
 
 ## Progress Tracking

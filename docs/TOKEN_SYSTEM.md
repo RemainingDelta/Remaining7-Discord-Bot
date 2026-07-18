@@ -3,6 +3,8 @@
 ## Overview
 R7 Tokens are the primary server currency. Members earn them passively through chat messages and via `/daily` claims. The passive listener runs on every `on_message` event and enforces a per-user cooldown tracked in an in-memory dict. Server Boosters receive a ~10% average bonus on passive token earnings, a passive XP bonus in the general channel, a flat +20 tokens on every `/daily` claim, and a once-monthly 10% shop discount (see `ECONOMY_SHOP.md`).
 
+> When changing any booster perk here, also update the `/booster-perks` embed in `features/general.py`.
+
 ---
 
 ## Passive Earning
