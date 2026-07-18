@@ -34,6 +34,7 @@ from database.mongo import (
 # --- CONFIGURATION ---
 from features.config import (
     ADMIN_ROLE_ID,
+    BOOSTER_CHANNEL_ID,
     BOTS_CATEGORY_ID,
     GENERAL_CHANNEL_ID,
     EVENT_ANNOUNCEMENTS_CHANNEL_ID,
@@ -946,10 +947,11 @@ class ShopPaginationView(discord.ui.View):
 
 
 class DropView(discord.ui.View):
-    def __init__(self, amount):
+    def __init__(self, amount, on_claim=None):
         super().__init__(timeout=None)
         self.amount = amount
         self.claimed = False
+        self.on_claim = on_claim
 
     @discord.ui.button(
         label="Claim Supply Drop", style=discord.ButtonStyle.green, emoji="🎁"
@@ -991,6 +993,9 @@ class DropView(discord.ui.View):
             f"🎉 **+{self.amount} Tokens** added to your account!", ephemeral=True
         )
 
+        if self.on_claim:
+            await self.on_claim(interaction)
+
 
 # --- COG ---
 
@@ -999,6 +1004,7 @@ class Economy(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.supply_drop_task.start()
+        self.booster_drop_task.start()
         self.redemption_queue_task.start()
 
     async def cog_load(self):
@@ -1006,6 +1012,7 @@ class Economy(commands.Cog):
 
     def cog_unload(self):
         self.supply_drop_task.cancel()
+        self.booster_drop_task.cancel()
         self.redemption_queue_task.cancel()
 
     # --- REDEMPTION QUEUE PROCESSING ---
@@ -1096,7 +1103,7 @@ class Economy(commands.Cog):
 
         booster_xp_bonus = 0
 
-        if message.channel.id == GENERAL_CHANNEL_ID:
+        if message.channel.id in (GENERAL_CHANNEL_ID, BOOSTER_CHANNEL_ID):
             is_booster = False
             if message.guild:
                 booster_role = message.guild.get_role(SERVER_BOOSTER_ROLE_ID)
@@ -1203,6 +1210,58 @@ class Economy(commands.Cog):
         )
         await channel.send(embed=embed, view=DropView(amount))
         print(f"🪂 Auto-Drop sent: {amount} tokens")
+
+    # --- BOOSTER CHANNEL DROP TASK ---
+    # Gap between drops = sleep + ~1s → uniform 0-4h, avg ~2h, hard 4h pity cap.
+    @tasks.loop(seconds=1)
+    async def booster_drop_task(self):
+        await self.bot.wait_until_ready()
+        await asyncio.sleep(random.randint(0, 14400))
+        try:
+            await self._post_booster_drop()
+        except Exception as e:
+            print(f"❌ Booster drop failed: {e}")
+
+    async def _post_booster_drop(self):
+        channel = self.bot.get_channel(BOOSTER_CHANNEL_ID)
+        if not channel:
+            return
+
+        await self._expire_previous_booster_drop(channel)
+
+        amount = random.randint(10, 25)
+        embed = discord.Embed(
+            title="🚀 Booster Supply Drop!",
+            description=f"A booster-exclusive crate with **{amount} R7 Tokens** has landed!\n\n**Click FAST to claim it!**",
+            color=discord.Color.fuchsia(),
+        )
+
+        async def on_claim(interaction: discord.Interaction):
+            stored_id = await get_setting("booster_drop_message_id")
+            if stored_id == str(interaction.message.id):
+                await set_setting("booster_drop_message_id", "")
+
+        msg = await channel.send(embed=embed, view=DropView(amount, on_claim=on_claim))
+        await set_setting("booster_drop_message_id", str(msg.id))
+        print(f"🚀 Booster drop sent: {amount} tokens")
+
+    async def _expire_previous_booster_drop(self, channel):
+        prev_id = await get_setting("booster_drop_message_id")
+        if not prev_id:
+            return
+
+        try:
+            msg = await channel.fetch_message(int(prev_id))
+            # Skip drops the claim button already edited to CLAIMED.
+            if msg.embeds and "CLAIMED" not in (msg.embeds[0].description or ""):
+                embed = msg.embeds[0]
+                embed.color = discord.Color.dark_grey()
+                embed.description = "**⌛ EXPIRED!**\n\nNobody claimed this drop in time. Keep an eye out — another one is inbound!"
+                await msg.edit(embed=embed, view=None)
+        except (discord.NotFound, discord.Forbidden, discord.HTTPException, ValueError):
+            pass
+
+        await set_setting("booster_drop_message_id", "")
 
     # --- MANUAL DROP COMMAND ---
     @app_commands.command(name="drop", description="ADMIN: Force a supply drop.")
