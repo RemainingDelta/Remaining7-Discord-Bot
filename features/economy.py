@@ -58,8 +58,8 @@ DEFAULT_MONTHLY_BUDGET = 50.0
 
 # Dollar impact for rewards that consume the monthly redemption budget.
 REDEMPTION_BUDGET_COSTS = {
-    "brawl pass": 10.0,
-    "brawl pass+": 15.0,
+    "brawl pass": 9.0,
+    "brawl pass+": 13.0,
     "coc gold pass": 7.0,
     "cr diamond pass": 12.0,
     "nitro": 10.0,
