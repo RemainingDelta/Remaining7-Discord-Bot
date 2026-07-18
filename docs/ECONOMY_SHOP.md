@@ -12,7 +12,7 @@ All items are defined in `SHOP_DATA` in `features/config.py`. Each entry looks l
 ```python
 "brawl pass": {
     "display": "**Brawl Pass**",
-    "price": 5000,        # R7 token cost
+    "price": 18000,        # R7 token cost
     "description": "..."
 }
 ```
@@ -46,7 +46,7 @@ Server Boosters get a **10% token discount on one shop purchase per calendar mon
 Mechanics:
 - Discounted price is `_discounted_price(price)` = `int(price * 0.9)`. The discount is skipped when it would save less than 1 token (e.g. free items), so it can't be burned for nothing.
 - `booster_discount_month` is only stamped **after** a completed purchase — a failed balance check doesn't consume the month's discount. No reset logic is needed: a stale month key simply stops matching after rollover.
-- `/shop` previews the discount for eligible viewers: `~~5000~~ **4500** R7 tokens (10% booster discount)`.
+- `/shop` previews the discount for eligible viewers: `~~18000~~ **16200** R7 tokens (10% booster discount)`.
 - The **USD redemption budget is unaffected**: the discount only reduces the token price at `/buy`; redemption still consumes the full `REDEMPTION_BUDGET_COSTS` cost.
 
 > When changing this perk, also update the `/booster-perks` embed in `features/general.py`.
