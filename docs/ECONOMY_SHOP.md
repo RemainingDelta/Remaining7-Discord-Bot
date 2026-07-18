@@ -21,8 +21,8 @@ Token prices are read via `_token_price_for_item(item_name)`. USD budget costs p
 
 ```python
 REDEMPTION_BUDGET_COSTS = {
-    "brawl pass": 10.0,
-    "brawl pass+": 15.0,
+    "brawl pass": 9.0,
+    "brawl pass+": 13.0,
     "coc gold pass": 7.0,
     "cr diamond pass": 12.0,
     "nitro": 10.0,

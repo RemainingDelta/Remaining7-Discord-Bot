@@ -398,37 +398,37 @@ SHOP_DATA = {
     "brawl pass": {
         "display": "🎮 **Brawl Pass**",
         "desc": "Unlock exclusive rewards in Brawl Stars!",
-        "price": 15300,
+        "price": 18000,
     },
     "brawl pass+": {
         "display": "💎 **Brawl Pass+**",
         "desc": "Unlock even more exclusive rewards in Brawl Stars!",
-        "price": 22100,
+        "price": 26000,
     },
     "coc gold pass": {
         "display": "🛡️ **Clash of Clans Gold Pass**",
         "desc": "Unlock the Gold Pass for the current season!",
-        "price": 11900,
+        "price": 14000,
     },
     "cr diamond pass": {
         "display": "💠 **Clash Royale Diamond Pass**",
         "desc": "Unlock the Diamond Pass for exclusive perks!",
-        "price": 20400,
+        "price": 24000,
     },
     "nitro": {
         "display": "🤖 **Discord Nitro**",
         "desc": "Get Discord Nitro for 1 month!",
-        "price": 17000,
+        "price": 20000,
     },
     "paypal": {
         "display": "💵 **15 USD PayPal**",
         "desc": "Redeem 15 USD via PayPal!",
-        "price": 25500,
+        "price": 30000,
     },
     "shoutout": {
         "display": "📣 **Shoutout**",
         "desc": "Get a personal shoutout in announcements!",
-        "price": 12000,
+        "price": 14000,
     },
 }
 

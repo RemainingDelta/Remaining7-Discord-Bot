@@ -41,11 +41,11 @@ def test_budget_month_key_matches_current_month():
 
 
 def test_budget_cost_brawl_pass():
-    assert _budget_cost_for_item("brawl pass") == 10.0
+    assert _budget_cost_for_item("brawl pass") == 9.0
 
 
 def test_budget_cost_brawl_pass_plus():
-    assert _budget_cost_for_item("brawl pass+") == 15.0
+    assert _budget_cost_for_item("brawl pass+") == 13.0
 
 
 def test_budget_cost_nitro():
@@ -61,7 +61,7 @@ def test_budget_cost_shoutout_is_free():
 
 
 def test_budget_cost_case_insensitive():
-    assert _budget_cost_for_item("Brawl Pass") == 10.0
+    assert _budget_cost_for_item("Brawl Pass") == 9.0
     assert _budget_cost_for_item("NITRO") == 10.0
 
 
@@ -252,7 +252,7 @@ def test_pending_total_falls_back_to_item_cost():
             "redemption-opener:2|item:paypal|budget_usd:notanumber",
         ]
     )
-    assert _pending_redemptions_total(guild) == (25.0, 2)
+    assert _pending_redemptions_total(guild) == (24.0, 2)
 
 
 def test_pending_total_ignores_zero_cost_tickets():
@@ -335,7 +335,7 @@ async def test_queue_processing_skips_unaffordable_entry(monkeypatch):
     cog, _ = _make_economy_cog(category)
     entries = [
         {"_id": "a1", "user_id": "1", "item": "paypal"},  # $15 > $12 available
-        {"_id": "a2", "user_id": "2", "item": "brawl pass"},  # $10 fits
+        {"_id": "a2", "user_id": "2", "item": "brawl pass"},  # $9 fits
     ]
     create_ticket, remove_entry, _ = _patch_queue_helpers(
         monkeypatch, entries, budgets=[12.0, 12.0]
