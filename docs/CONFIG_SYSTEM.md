@@ -39,6 +39,7 @@ Key IDs defined in config:
 | Constant | Purpose |
 |----------|---------|
 | `GENERAL_CHANNEL_ID` | Main chat channel (passive tokens, slowmode) |
+| `BOOSTER_CHANNEL_ID` | Booster-only `#general-plus` channel (passive tokens, booster supply drops) |
 | `TOURNEY_SUPPORT_CHANNEL_ID` | Where the live ticket panel is posted |
 | `PRE_TOURNEY_SUPPORT_CHANNEL_ID` | Pre-tourney ticket panel |
 | `TOURNEY_CATEGORY_ID` | Active live tourney ticket category |

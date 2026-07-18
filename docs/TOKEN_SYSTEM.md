@@ -7,12 +7,12 @@ R7 Tokens are the primary server currency. Members earn them passively through c
 
 ## Passive Earning
 
-The `on_message` listener in `features/economy.py` fires on every message:
+The `on_message` listener in `features/economy.py` fires on every message. Token earning, daily message count tracking, and quest progress apply identically in the general channel (`GENERAL_CHANNEL_ID`) and the booster-only channel (`BOOSTER_CHANNEL_ID`, `#general-plus`):
 
 1. Ignores bots, DMs, and channels in `PASSIVE_REWARD_EXCLUDED_CHANNEL_IDS`
 2. Enforces a **20-second cooldown** per user via `_cooldowns: dict[int, float]` mapping `user_id → last_earn_timestamp`
 3. Awards a random amount of `2–5 tokens` (`random.randint(2, 5)`)
-4. If the member has the **Server Booster** role (`SERVER_BOOSTER_ROLE_ID`), there is a 35% chance of +1 bonus token (~10% average increase). Boosters also roll a separate 35% chance of +1 bonus XP on every general-channel message, independent of the token cooldown.
+4. If the member has the **Server Booster** role (`SERVER_BOOSTER_ROLE_ID`), there is a 35% chance of +1 bonus token (~10% average increase). Boosters also roll a separate 35% chance of +1 bonus XP on every general/booster-channel message, independent of the token cooldown.
 5. Updates balance in MongoDB via `update_user_balance()`
 6. Fires the quest listener (`process_quest_update()`) for the message action
 
@@ -60,6 +60,19 @@ Admin command. Distributes tokens to members active in the general channel:
 3. Divides `amount` among them (or gives `amount` to each — depends on config)
 4. Calls `update_user_balance()` for each recipient
 5. Posts a confirmation embed listing recipients and amount per person
+
+---
+
+## Booster Channel Supply Drops
+
+The `booster_drop_task` in `features/economy.py` posts automatic supply drops of **10–25 tokens** into the booster-only channel (`BOOSTER_CHANNEL_ID`, `#general-plus`):
+
+1. Sleeps a uniform random 0–14400 seconds between drops (average ~2 hours, hard 4-hour pity cap)
+2. Posts an embed with a claim button (`DropView`) — first booster to click gets the tokens; staff cannot claim
+3. Stores the active drop's message ID in the `settings` collection under `booster_drop_message_id`; claiming clears it
+4. When a new drop fires, the previous **unclaimed** drop message is edited to an EXPIRED state with the button removed; claimed drops keep their CLAIMED state
+
+Channel access is restricted to the Server Booster role via manual Discord permission setup — the bot only needs the channel ID.
 
 ---
 
