@@ -4,7 +4,13 @@ from discord.ext import commands
 from datetime import datetime
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from features.config import ADMIN_ROLE_ID, MODERATOR_ROLE_ID, BOT_VERSION
+from features.config import (
+    ADMIN_ROLE_ID,
+    BOOSTER_CHANNEL_ID,
+    BOT_VERSION,
+    GENERAL_CHANNEL_ID,
+    MODERATOR_ROLE_ID,
+)
 
 
 class General(commands.Cog):
@@ -69,6 +75,7 @@ class General(commands.Cog):
         embed.add_field(name="🔢 Counting Game", value=counting_text, inline=False)
 
         utility_text = (
+            "`/booster-perks` - View all Server Booster perks\n"
             "`/convert-time` - Convert a date and time to Discord timestamp formats\n"
             "`/version` - View the bot's current version"
         )
@@ -113,6 +120,18 @@ class General(commands.Cog):
             "`/hacked-list` - View all users currently flagged as compromised."
         )
         embed.add_field(name="🚨 Security Protocol", value=security_text, inline=False)
+
+        # Scam Image Detection
+        scam_text = (
+            "Images are auto-scanned against the scam blacklist — matches are deleted, "
+            "the poster gets a 10-min timeout, and an alert with Confirm/Dismiss buttons is posted in mod-logs.\n"
+            "`!scam-add` - Reply to an image (or attach one) to blacklist it.\n"
+            "`!scam-remove <md5> [md5 ...]` - Remove entries by MD5 prefix.\n"
+            "`!scam-list` - View all blacklisted images.\n"
+            "`!scam-rename <md5> <name>` - Give an entry a readable name.\n"
+            "`!scam-test` - Dry-run detection on an image (no action taken)."
+        )
+        embed.add_field(name="🖼️ Scam Image Detection", value=scam_text, inline=False)
 
         # Server Tools
         tools_text = (
@@ -213,6 +232,44 @@ class General(commands.Cog):
         "AEDT": "Australia/Sydney",
         "BRT": "America/Sao_Paulo",
     }
+
+    # NOTE: Keep this embed in sync with the actual perks — update it whenever a
+    # booster perk is added, modified, or removed anywhere in the bot.
+    @app_commands.command(
+        name="booster-perks",
+        description="View all perks for Server Boosters.",
+    )
+    async def booster_perks(self, interaction: discord.Interaction):
+        general_ch = f"<#{GENERAL_CHANNEL_ID}>"
+        booster_ch = f"<#{BOOSTER_CHANNEL_ID}>"
+
+        perks_text = (
+            "Boost the server to unlock all of the perks below. "
+            "Thank you for supporting R7! 💖\n\n"
+            f"🔓 **Exclusive Channel:** Access to {booster_ch} — supply-drop crates "
+            "(**10-25 tokens**) land there every ~2 hours on average, first to click claims it.\n"
+            f"💰 **Token Bonus:** ~10% more tokens on average in {general_ch} and the booster channel.\n"
+            f"✨ **XP Bonus:** 35% chance of +1 bonus XP per message in {general_ch} and the booster channel.\n"
+            "📅 **Daily Bonus:** Flat **+20 tokens** on every `/daily` claim.\n"
+            "📜 **Easier Quests:** Daily/weekly quest targets reduced by **20%** "
+            "*(applies from your next quest cycle after boosting)*.\n"
+            "📣 **Booster Shoutout:** A private ticket opens when you boost — write a message "
+            "for staff to review and feature in announcements once approved "
+            "*(self-promo and similar are not allowed)*. *(Once per calendar month.)*\n"
+            "🛒 **Shop Discount:** **10% off** one shop purchase per calendar month via `/buy` "
+            "*(unlocks after **14+ consecutive days** of boosting)*."
+        )
+
+        embed = discord.Embed(
+            title="🚀 **Server Booster Perks**",
+            description=perks_text,
+            color=discord.Color.fuchsia(),
+        )
+
+        embed.set_footer(text="Perks apply while your boost is active.")
+        embed.set_thumbnail(url=self.bot.user.display_avatar.url)
+
+        await interaction.response.send_message(embed=embed)
 
     @app_commands.command(name="version", description="View the bot's current version.")
     async def version(self, interaction: discord.Interaction):

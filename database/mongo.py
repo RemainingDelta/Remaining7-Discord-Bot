@@ -1,8 +1,11 @@
 from datetime import datetime
 import os
+import re
 import uuid
 import motor.motor_asyncio
 import certifi
+from bson import ObjectId
+from bson.errors import InvalidId
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -150,6 +153,34 @@ async def add_item_token(user_id: str, item_name: str, quantity: int = 1):
     )
 
 
+async def get_booster_discount_month(user_id: str) -> str | None:
+    """Returns the "YYYY-MM" month key of the user's last booster discount use."""
+    doc = await get_user_data(user_id)
+    return doc.get("booster_discount_month")
+
+
+async def set_booster_discount_month(user_id: str, month_key: str):
+    if db is None:
+        return
+    await db.users.update_one(
+        {"_id": user_id}, {"$set": {"booster_discount_month": month_key}}, upsert=True
+    )
+
+
+async def get_booster_shoutout_month(user_id: str) -> str | None:
+    """Returns the "YYYY-MM" month key of the user's last booster shoutout ticket."""
+    doc = await get_user_data(user_id)
+    return doc.get("booster_shoutout_month")
+
+
+async def set_booster_shoutout_month(user_id: str, month_key: str):
+    if db is None:
+        return
+    await db.users.update_one(
+        {"_id": user_id}, {"$set": {"booster_shoutout_month": month_key}}, upsert=True
+    )
+
+
 async def get_item_count(user_id: str, item_name: str) -> int:
     """Checks how many of an item a user has."""
     doc = await get_user_data(user_id)
@@ -177,6 +208,44 @@ async def set_setting(key: str, value: str):
     if db is None:
         return
     await db.settings.update_one({"_id": key}, {"$set": {"value": value}}, upsert=True)
+
+
+# --- REDEMPTION QUEUE HELPERS ---
+
+
+async def add_redemption_queue_entry(
+    user_id: str, item: str, budget_usd: float
+) -> str | None:
+    """Queues a redemption for the next month. Returns the entry id."""
+    if db is None:
+        return None
+    result = await db.redemption_queue.insert_one(
+        {
+            "user_id": user_id,
+            "item": item,
+            "budget_usd": budget_usd,
+            "queued_at": datetime.utcnow(),
+        }
+    )
+    return str(result.inserted_id)
+
+
+async def get_redemption_queue() -> list[dict]:
+    """Returns all queued redemptions in FIFO order."""
+    if db is None:
+        return []
+    return await db.redemption_queue.find({}).sort("queued_at", 1).to_list(length=None)
+
+
+async def remove_redemption_queue_entry(entry_id: str) -> dict | None:
+    """Removes a queue entry by id. Returns the removed document, or None."""
+    if db is None:
+        return None
+    try:
+        oid = ObjectId(entry_id)
+    except (InvalidId, TypeError):
+        return None
+    return await db.redemption_queue.find_one_and_delete({"_id": oid})
 
 
 # --- COUNTING HELPERS ---
@@ -308,6 +377,65 @@ async def get_hacked_users():
 async def remove_hacked_user(user_id: str):
     """Removes the hacked tag (e.g., after they recover account)."""
     await db.hacked_users.delete_one({"_id": user_id})
+
+
+# --- SCAM IMAGE BLACKLIST ---
+
+
+async def add_scam_image(filename: str, data: bytes, md5: str):
+    # _id is the MD5 hash so two different images with the same filename
+    # are stored as separate documents rather than overwriting each other.
+    await db.scam_images.update_one(
+        {"_id": md5},
+        {"$set": {"filename": filename, "data": data, "md5": md5}},
+        upsert=True,
+    )
+
+
+async def get_scam_images(include_data: bool = True):
+    # scam-list only needs filenames/hashes — skip the binary blobs there.
+    projection = None if include_data else {"data": 0}
+    cursor = db.scam_images.find({}, projection)
+    return await cursor.to_list(length=None)
+
+
+async def remove_scam_image(md5_prefix: str) -> int:
+    result = await db.scam_images.delete_many(
+        {"md5": {"$regex": f"^{re.escape(md5_prefix)}"}}
+    )
+    return result.deleted_count
+
+
+async def rename_scam_image(md5_prefix: str, new_filename: str) -> bool:
+    result = await db.scam_images.update_one(
+        {"md5": {"$regex": f"^{re.escape(md5_prefix)}"}},
+        {"$set": {"filename": new_filename}},
+    )
+    return result.matched_count > 0
+
+
+async def ensure_scam_lock_ttl_index():
+    """TTL index so detection locks auto-expire ~60s after creation.
+    Without this, a user+image lock lives forever and re-posts of the
+    same scam image by the same user would be silently ignored.
+    """
+    await db.scam_detection_locks.create_index("ts", expireAfterSeconds=60)
+
+
+async def acquire_scam_detection_lock(author_id: int, image_md5: str) -> bool:
+    """Atomically claim a detection slot for (author, image).
+    Returns True if this caller claimed it (should proceed).
+    Returns False if another handler already claimed it (should skip).
+    Lock expires after 60 seconds via TTL index on 'ts'.
+    """
+    key = f"{author_id}:{image_md5}"
+    result = await db.scam_detection_locks.find_one_and_update(
+        {"_id": key},
+        {"$setOnInsert": {"_id": key, "ts": datetime.utcnow()}},
+        upsert=True,
+        return_document=False,
+    )
+    return result is None  # None means doc didn't exist before — we claimed it
 
 
 # --- PAYOUT / ADMIN COMPENSATION HELPERS ---
@@ -734,10 +862,20 @@ async def get_active_quest(user_id: str, q_key: str):
     return quest_entry
 
 
-async def assign_random_quest(user_id: str, q_key: str):
+BOOSTER_QUEST_TARGET_MULTIPLIER = 0.8
+
+
+def booster_quest_target(target: int) -> int:
+    """Returns the reduced quest target for server boosters (20% off)."""
+    return max(1, round(target * BOOSTER_QUEST_TARGET_MULTIPLIER))
+
+
+async def assign_random_quest(user_id: str, q_key: str, is_booster: bool = False):
     """Picks a random active quest from the DB and assigns it to the user.
 
     q_key is one of: daily_message, weekly_message, daily_megabox, weekly_megabox
+    Boosters get a reduced target, stored on the assignment record so the
+    threshold is fixed for the quest's lifetime regardless of boost changes.
     """
     if db is None:
         return None
@@ -762,15 +900,23 @@ async def assign_random_quest(user_id: str, q_key: str):
 
     quest = random.choice(matching_quests)
 
+    target = quest.get("target_count", quest.get("target", 100))
+    description = quest["description"]
+    if is_booster:
+        reduced = booster_quest_target(target)
+        description = description.replace(str(target), str(reduced), 1)
+        target = reduced
+
     new_entry = {
         "quest_id": quest["_id"],
         "name": quest["name"],
-        "description": quest["description"],
-        "target_count": quest.get("target_count", quest.get("target", 100)),
+        "description": description,
+        "target_count": target,
         "reward_tokens": quest.get("reward_tokens", 0),
         "reward_exp": quest.get("reward_exp", 0),
         "progress": 0,
         "completed": False,
+        "booster_reduced": is_booster,
         "date_assigned": datetime.utcnow(),
     }
 

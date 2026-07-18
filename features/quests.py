@@ -4,9 +4,11 @@ from discord.ext import commands
 
 # Import Config
 from features.config import (
+    BOOSTER_CHANNEL_ID,
     BOTS_CATEGORY_ID,
     GENERAL_CHANNEL_ID,
     PASSIVE_REWARD_EXCLUDED_CHANNEL_IDS,
+    SERVER_BOOSTER_ROLE_ID,
 )
 
 # Import Database Helpers
@@ -80,6 +82,12 @@ DEFAULT_QUESTS = [
 ]
 
 
+def _is_booster(member) -> bool:
+    """Booster role check; safe against non-Member objects (DMs, None)."""
+    get_role = getattr(member, "get_role", None)
+    return get_role is not None and get_role(SERVER_BOOSTER_ROLE_ID) is not None
+
+
 class Quests(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
@@ -103,7 +111,9 @@ class Quests(commands.Cog):
 
     # --- HELPERS ---
 
-    async def process_quest_update(self, user_id, channel, action_type="message"):
+    async def process_quest_update(
+        self, user_id, channel, action_type="message", member=None
+    ):
         """Checks daily/weekly quests for progress."""
         if action_type == "message":
             q_keys = ["daily_message", "weekly_message"]
@@ -116,7 +126,9 @@ class Quests(commands.Cog):
             # 1. Get or Assign Quest
             quest = await get_active_quest(user_id, q_key)
             if not quest:
-                quest = await assign_random_quest(user_id, q_key)
+                quest = await assign_random_quest(
+                    user_id, q_key, is_booster=_is_booster(member)
+                )
 
             if not quest:
                 continue
@@ -164,12 +176,12 @@ class Quests(commands.Cog):
             return
         if message.channel.id in PASSIVE_REWARD_EXCLUDED_CHANNEL_IDS:
             return
-        if message.channel.id != GENERAL_CHANNEL_ID:
+        if message.channel.id not in (GENERAL_CHANNEL_ID, BOOSTER_CHANNEL_ID):
             return
 
         # Trigger message quest updates
         await self.process_quest_update(
-            str(message.author.id), message.channel, "message"
+            str(message.author.id), message.channel, "message", member=message.author
         )
 
     # Kept to prevent errors if main.py expects them, but they do nothing for quests now
@@ -218,7 +230,9 @@ class Quests(commands.Cog):
         for q_key, title in quest_slots:
             quest = await get_active_quest(user_id, q_key)
             if not quest:
-                quest = await assign_random_quest(user_id, q_key)
+                quest = await assign_random_quest(
+                    user_id, q_key, is_booster=_is_booster(interaction.user)
+                )
 
             if quest:
                 # Progress Bar Logic

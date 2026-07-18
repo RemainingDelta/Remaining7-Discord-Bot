@@ -1192,7 +1192,6 @@ def setup_tourney_commands(bot: commands.Bot):
 
         await close_ticket_via_command(ctx)
 
-    @bot.command(name="lock")
     async def lock_command(ctx: commands.Context):
         """Temporarily lock the OTHER ticket channel from members."""
         if not isinstance(ctx.author, discord.Member) or not is_staff(ctx.author):
@@ -1253,12 +1252,8 @@ def setup_tourney_commands(bot: commands.Bot):
         task = asyncio.create_task(auto_reopen())
         lock_tasks[channel.id] = task
 
-    @bot.command(name="unlock")
     async def unlock_command(ctx: commands.Context):
-        """
-        Manually unlock the general support channel (Legacy feature).
-        Previously named !reopen.
-        """
+        """Unlock the general support channel. Called internally by !endtourney."""
         if not isinstance(ctx.author, discord.Member) or not is_staff(ctx.author):
             await ctx.reply("You don't have permission to unlock the ticket channel.")
             return
@@ -1315,7 +1310,7 @@ def setup_tourney_commands(bot: commands.Bot):
             await reopen_ticket_via_command(ctx)
         else:
             await ctx.reply(
-                "⚠️ This command is for reopening **Closed Tourney Tickets**.\nTo unlock the main support channel, use `!unlock`."
+                "⚠️ This command is for reopening **Closed Tourney Tickets**."
             )
 
     @bot.command(name="starttourney")
@@ -1470,7 +1465,8 @@ def setup_tourney_commands(bot: commands.Bot):
                 "You’ll be prompted to provide:\n"
                 "📛 **Team Name**\n"
                 "🔢 **Match / Bracket Number**\n"
-                "📝 **Description of the Issue**\n\n"
+                "📝 **Description of the Issue**\n"
+                "🖼️ **Screenshots** *(optional, up to 3)*\n\n"
                 "A Tourney Admin will assist you as soon as possible. 🛠️"
             )
 
@@ -1970,7 +1966,8 @@ def setup_tourney_commands(bot: commands.Bot):
                     "📋 **Registration Issues**\n"
                     "🤝 **Team / Roster Questions**\n"
                     "❓ **General Inquiries**\n\n"
-                    "Click the button below to open a ticket. **Team Name** is optional."
+                    "Click the button below to open a ticket. **Team Name** is optional, "
+                    "and you can attach up to 3 screenshots."
                 ),
                 color=discord.Color.orange(),
             )
@@ -2048,7 +2045,8 @@ def setup_tourney_commands(bot: commands.Bot):
             "You’ll be prompted to provide:\n"
             "📛 **Team Name**\n"
             "🔢 **Match / Bracket Number**\n"
-            "📝 **Description of the Issue**\n\n"
+            "📝 **Description of the Issue**\n"
+            "🖼️ **Screenshots** *(optional, up to 3)*\n\n"
             "A Tourney Admin will assist you as soon as possible. 🛠️"
         )
 
@@ -2088,7 +2086,8 @@ def setup_tourney_commands(bot: commands.Bot):
                 "📋 **Registration Issues**\n"
                 "🤝 **Team / Roster Questions**\n"
                 "❓ **General Inquiries**\n\n"
-                "Click the button below to open a ticket. **Team Name** is optional."
+                "Click the button below to open a ticket. **Team Name** is optional, "
+                "and you can attach up to 3 screenshots."
             ),
             color=discord.Color.orange(),
         )
@@ -2566,7 +2565,6 @@ def setup_tourney_commands(bot: commands.Bot):
             "`!endtourney` - Closes all active tickets, generates staff stats, posts the Pre-Tourney panel, and unlocks general support.\n"
             "`/tourney-panel` - Post the live tourney support button.\n"
             "`/pre-tourney-panel` - Post the pre-tourney support button.\n"
-            "`!lock` / `!unlock` - Manually close or open the general server support channel.\n"
             "`/tourney-test-mode` - Toggle 100-ticket limit and 0.1s cooldown for testing."
         )
         embed.add_field(name="⚙️ Session Management", value=session_text, inline=False)

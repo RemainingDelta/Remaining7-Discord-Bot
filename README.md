@@ -2,7 +2,7 @@
 
 ## Overview
 **Name:** Remaining7 Discord Bot
-**Version:** v1.10.0
+**Version:** v1.11.0
 **Contributors:** remainingdelta, nightwarrior5
 **Objective:** A feature-rich Discord bot for the Remaining7 community server (16k+ members). Handles an R7 Token economy, leveling, quests, a Brawl Stars collection minigame, tournament management with Matcherino integration, support tickets, event operations, a security protocol, and multi-language translation.
 **Server Link:** https://discord.gg/6MzrjS2X8k
@@ -32,6 +32,7 @@ Remaining7-Discord-Bot/
 ├── .gitignore
 ├── CLAUDE.md
 ├── README.md
+├── docs/                             # Feature implementation guides
 ├── database/
 │   └── mongo.py                     # All MongoDB helper functions
 ├── features/
@@ -39,6 +40,7 @@ Remaining7-Discord-Bot/
 │   ├── economy.py                   # R7 Tokens, shop, daily, leveling, leaderboards
 │   ├── quests.py                    # Daily & weekly quest system
 │   ├── security.py                  # Hacked protocol (timeout, purge, flag)
+│   ├── scam_detection.py            # Scam image detection (MD5/pHash/ORB blacklist)
 │   ├── event.py                     # Event channel cleanup & reward payouts
 │   ├── general.py                   # /help, /mod-help, /admin-help, /version, /convert-time
 │   ├── translation.py               # !t prefix & /translate slash command (55 languages)
@@ -47,6 +49,8 @@ Remaining7-Discord-Bot/
 │   ├── support_tickets.py           # General support tickets (issues, support, apps, partnership)
 │   ├── github_tickets.py           # AI-powered GitHub issue creation from tickets (Gemini)
 │   ├── ticket_command_router.py     # Shared routing for tourney & support ticket commands
+│   ├── booster_shoutout.py          # Auto-opened booster shoutout tickets
+│   ├── message_mirror.py            # Moderator message link mirror via webhook
 │   ├── brawl/
 │   │   ├── brawlers.json            # Brawler data (name, rarity, gadgets, star powers, hypercharges)
 │   │   ├── brawlers.py              # Brawler dataclass definitions
@@ -56,14 +60,19 @@ Remaining7-Discord-Bot/
 │       ├── tourney_commands.py      # All tournament slash & prefix commands
 │       ├── tourney_utils.py         # Ticket lifecycle helpers, auto-translation
 │       ├── tourney_views.py         # discord.ui.View classes for ticket buttons
+│       ├── tourney_reports.py       # Monthly tournament report generation
 │       └── matcherino.py            # Matcherino API integration
+├── tests/                            # Pytest unit tests (pure functions & regex helpers)
 └── .github/
     ├── ISSUE_TEMPLATE/
     │   ├── bug.md
     │   ├── enhancement.md
     │   └── feature.md
     └── workflows/
-        └── lint.yml                 # Ruff linting CI
+        ├── lint.yml                 # Ruff linting CI
+        ├── tests.yml                # Pytest CI
+        ├── version-check.yml        # Blocks PRs into main without a pyproject.toml version bump
+        └── pr-issue-reference-check.yml  # Verifies issue number matches across branch/title/body
 ```
 
 ---
@@ -71,7 +80,7 @@ Remaining7-Discord-Bot/
 ## Core Features
 
 ### R7 Token Economy
-- **Passive Income:** Users earn 2–5 R7 Tokens per message (20-second cooldown). Server Boosters get a 5% increase in tokens on average.
+- **Passive Income:** Users earn 2–5 R7 Tokens per message (20-second cooldown), restricted to the general and booster channels. Server Boosters get a ~10% increase in tokens on average.
 - **Daily Rewards:** `/daily` grants 80–160 tokens (scaled by level). Requires 5 messages sent since last claim and a 24-hour cooldown.
 - **Supply Drop:** `/drop <amount>` (Admin) to force a token drop in general chat.
 - **Balance & Ranking:** `/balance [user]`, `/leaderboard [page]`.
@@ -88,7 +97,7 @@ Remaining7-Discord-Bot/
 - **Budget Override:** `/set-budget <amount>` (Admin).
 
 ### Leveling & XP
-- XP earned passively from messages alongside tokens.
+- XP earned passively from messages alongside tokens, restricted to the general and booster channels.
 - `/level [user]` — progress bar and next-level XP goal.
 - `/levels-leaderboard [page]` — server-wide level rankings (paginated).
 
@@ -101,6 +110,16 @@ Every user always has **4 active quests** — one daily and one weekly per categ
 - `/quests` — interactive progress bars for all 4 active quests.
 - `/reset-quests <user>` (Admin) — force-reset a user's quest assignments.
 - Quests auto-assign randomly per slot; completion rewards are granted instantly.
+- Server Boosters get quest targets cut by 20% (decided and stored at assignment time).
+
+### Server Booster Perks
+- **Token & XP Bonus:** ~10% average increase in both passive token and XP earning (35% chance of +1 per message on each).
+- **Daily Bonus:** Flat +20 tokens added to every `/daily` claim.
+- **Booster Channel:** Exclusive `#general-plus` channel with its own supply drops (10–25 tokens, roughly every 2 hours) — first booster to claim wins it.
+- **Shop Discount:** 10% off one purchase per calendar month, requires 14+ consecutive days boosted.
+- **Reduced Quest Thresholds:** Quest targets cut by 20%, applied at assignment time.
+- **Booster Shoutout:** Boosting for the first time auto-opens a private ticket (once per calendar month) where the booster can submit a message for staff to feature.
+- **Guide:** `/booster-perks` — full perk summary embed.
 
 ### Brawl Stars Collection Minigame
 - **Gacha Drops:**
@@ -124,7 +143,6 @@ Every user always has **4 active quests** — one daily and one weekly per categ
 - **Ticket Panels:** `/tourney-panel` (live) and `/pre-tourney-panel` (pre-tourney) post interactive open buttons.
 - **Ticket Operations:**
   - `!close` / `!c` — close a ticket.
-  - `!lock` / `!unlock` — lock/unlock a ticket channel.
   - `!delete` / `!del` — delete ticket with transcript.
   - `!reopen` — reopen a closed ticket.
   - `/add <user>` / `/remove <user>` — manage ticket access.
@@ -158,7 +176,7 @@ Every user always has **4 active quests** — one daily and one weekly per categ
 - **Ticket Types:**
   - Report an Issue — bugs, rule violations, technical problems.
   - Server Support — general server assistance.
-  - Staff Application — apply for Tourney Admin or Event Staff.
+  - Staff Application — apply for Event Staff (Tourney Admin / Moderator closed).
   - Server Partnership — propose a partnership.
 - One open ticket per type per user.
 - Staff can close, reopen, and delete tickets with transcript generation.
@@ -182,6 +200,19 @@ Every user always has **4 active quests** — one daily and one weekly per categ
 - `/unhacked <user>` — remove flag and timeout.
 - `/hacked-list` — view all currently flagged users.
 - Logs to moderator logs channel. Prevents targeting equal/higher role members.
+
+### Scam Image Detection
+- Automatically scans every image attachment against a MongoDB blacklist using three matchers: MD5 (identical files), pHash (re-compressed/resized copies), and ORB (cropped variants).
+- On a match: deletes the message, purges other copies of the image across all channels (30-min lookback), applies a 10-minute precautionary timeout, and sends a mod alert with the image and action buttons.
+- **Confirm Hacked** button — upgrades to a 7-day timeout, flags the user in the hacked DB, and DMs them. **False Positive** button — removes the timeout.
+- `!scam-add` (reply or attach) — add image(s) to the blacklist.
+- `!scam-remove <md5> [md5 ...]` — remove entries by MD5 prefix.
+- `!scam-list` — view all blacklisted images.
+- `!scam-rename <md5> <name>` — give an entry a readable name.
+- `!scam-test` (reply or attach) — dry-run detection with match distances, no action taken.
+
+### Message Mirror
+- Moderators can repost any message by pasting its Discord link alone in a message — the bot mirrors it via a temporary webhook using the original author's name and avatar in the current channel.
 
 ### Translation
 - `!t [language]` / `!translate [language]` — reply to a message to translate it to English.
@@ -247,7 +278,7 @@ This bot requires **Python 3.10+** and a **MongoDB Atlas** database.
     python main.py
     ```
 
-    There is no test suite. Testing is done by running the bot with `BOT_MODE=DEV` against a test Discord server.
+    Unit tests cover pure functions and regex helpers (`pytest`); most behavior is still tested by running the bot with `BOT_MODE=DEV` against a test Discord server.
 
 ---
 
@@ -302,7 +333,9 @@ Uses MongoDB database `r7_bot_db` with the following collections:
 - Active development on `dev` branch.
 - Feature/bug branches merge into `dev` via PR.
 - `dev` merges into `main` for release.
-- Ruff enforced via CI (`.github/workflows/lint.yml`).
+- Ruff enforced via CI (`.github/workflows/lint.yml`); pytest suite runs on every push/PR (`tests.yml`).
+- PRs into `main` are blocked unless `pyproject.toml`'s version was bumped (`version-check.yml`).
+- PRs into `dev` are checked for a consistent issue number across branch name, title, and body (`pr-issue-reference-check.yml`).
 
 ---
 

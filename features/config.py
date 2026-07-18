@@ -29,6 +29,7 @@ if MODE == "PROD":
     ADMIN_ROLE_ID = 1317689015482187777
     MODERATOR_ROLE_ID = 663499255616634923
     TRIAL_MODERATOR_ROLE_ID = 1317969199041085470
+    SERVER_BOOSTER_ROLE_ID = 647685778255642626
 
     MEMBER_ROLE_ID = 699305248568901652
 
@@ -38,6 +39,7 @@ if MODE == "PROD":
     SUPPORT_STAFF_APPS_CATEGORY_ID = 1330243733177897030
     SUPPORT_PARTNERSHIP_CATEGORY_ID = 1330243884911169657
     REDEMPTION_TICKET_CATEGORY_ID = 1481456156080738346
+    BOOSTER_SHOUTOUT_CATEGORY_ID = 1527922487214735422
     BOTS_CATEGORY_ID = 767612682357964810
     SUPPORT_TRANSCRIPT_LOG_CHANNEL_ID = 1481117793222004746
     REDEMPTION_TRANSCRIPT_CHANNEL_ID = 1515605936801316874
@@ -46,6 +48,7 @@ if MODE == "PROD":
     LOG_CHANNEL_ID = 1442374964144640090
     HALL_OF_FAME_CHANNEL_ID = 734197257267839047
     GENERAL_CHANNEL_ID = 294192597939912714
+    BOOSTER_CHANNEL_ID = 1527942112526602250
     BRAWL_CHAT_CHANNEL_ID = 1157054341547556905
     TOURNEY_CHAT_CHANNEL_ID = 721938563490643968
     TOURNEY_UPDATES_CHANNEL_ID = 1363702666865410148
@@ -211,6 +214,9 @@ else:
     ADMIN_ROLE_ID = 1442028239009615925
     MODERATOR_ROLE_ID = 528976783173877771
     TRIAL_MODERATOR_ROLE_ID = 1469939063342502032
+    SERVER_BOOSTER_ROLE_ID = (
+        647685778255642626  # Same as prod — dev server has no booster role
+    )
 
     MEMBER_ROLE_ID = 528976903080640523
 
@@ -220,6 +226,7 @@ else:
     SUPPORT_STAFF_APPS_CATEGORY_ID = 1480728684704043098
     SUPPORT_PARTNERSHIP_CATEGORY_ID = 1480728776919879721
     REDEMPTION_TICKET_CATEGORY_ID = 1481455542236086293
+    BOOSTER_SHOUTOUT_CATEGORY_ID = 1527922852979015772
     BOTS_CATEGORY_ID = 1506812222704451677
     SUPPORT_TRANSCRIPT_LOG_CHANNEL_ID = 1480735066924781711
     REDEMPTION_TRANSCRIPT_CHANNEL_ID = 1515606218654220288
@@ -228,6 +235,7 @@ else:
     LOG_CHANNEL_ID = 1442227896302174298
     HALL_OF_FAME_CHANNEL_ID = 1442663794903089325
     GENERAL_CHANNEL_ID = 528717317526388758
+    BOOSTER_CHANNEL_ID = 1527943085777223780
     BRAWL_CHAT_CHANNEL_ID = 1479696939179180136
     TOURNEY_CHAT_CHANNEL_ID = 1479696993809862738
     TOURNEY_UPDATES_CHANNEL_ID = 1479971576748441691
@@ -390,37 +398,37 @@ SHOP_DATA = {
     "brawl pass": {
         "display": "🎮 **Brawl Pass**",
         "desc": "Unlock exclusive rewards in Brawl Stars!",
-        "price": 15300,
+        "price": 18000,
     },
     "brawl pass+": {
         "display": "💎 **Brawl Pass+**",
         "desc": "Unlock even more exclusive rewards in Brawl Stars!",
-        "price": 22100,
+        "price": 26000,
     },
     "coc gold pass": {
         "display": "🛡️ **Clash of Clans Gold Pass**",
         "desc": "Unlock the Gold Pass for the current season!",
-        "price": 11900,
+        "price": 14000,
     },
     "cr diamond pass": {
         "display": "💠 **Clash Royale Diamond Pass**",
         "desc": "Unlock the Diamond Pass for exclusive perks!",
-        "price": 20400,
+        "price": 24000,
     },
     "nitro": {
         "display": "🤖 **Discord Nitro**",
         "desc": "Get Discord Nitro for 1 month!",
-        "price": 17000,
+        "price": 20000,
     },
     "paypal": {
         "display": "💵 **15 USD PayPal**",
         "desc": "Redeem 15 USD via PayPal!",
-        "price": 25500,
+        "price": 30000,
     },
     "shoutout": {
         "display": "📣 **Shoutout**",
         "desc": "Get a personal shoutout in announcements!",
-        "price": 12000,
+        "price": 14000,
     },
 }
 

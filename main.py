@@ -53,6 +53,9 @@ async def on_ready():
         await bot.load_extension("features.security")
         print("✅ Loaded Feature: Security (Hacked)")
 
+        await bot.load_extension("features.scam_detection")
+        print("✅ Loaded Feature: Scam Detection")
+
         await bot.load_extension("features.brawl.commands")
         print("✅ Loaded Feature: Brawl (Drops)")
 
@@ -67,6 +70,9 @@ async def on_ready():
         await bot.load_extension("features.support_tickets")
         print("✅ Loaded Feature: Support Tickets")
 
+        await bot.load_extension("features.booster_shoutout")
+        print("✅ Loaded Feature: Booster Shoutout")
+
         await bot.load_extension("features.github_tickets")
         print("✅ Loaded Feature: GitHub Tickets")
 
@@ -75,6 +81,9 @@ async def on_ready():
 
         await bot.load_extension("features.counting")
         print("✅ Loaded Feature: Counting")
+
+        await bot.load_extension("features.message_mirror")
+        print("✅ Loaded Feature: Message Mirror")
 
         await bot.load_extension("features.tourney.tourney_reports")
         print("✅ Loaded Feature: Tourney Reports")
