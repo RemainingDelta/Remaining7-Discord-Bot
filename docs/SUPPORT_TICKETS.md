@@ -11,7 +11,7 @@ The support ticket system provides four types of private help channels for membe
 |----------|------|---------|---------|
 | `bug` | Report an Issue | Bugs, violations, technical problems | Separate issue category |
 | `support` | Server Support | General assistance | Separate support category |
-| `staff_app` | Staff Application | Tourney Admin / Event Staff applications | Separate applications category |
+| `staff_app` | Staff Application | Event Staff applications (Tourney Admin / Moderator closed, shown struck through) | Separate applications category |
 | `partnership` | Server Partnership | Partnership proposals | Separate partnership category |
 
 ---

@@ -158,7 +158,7 @@ Every user always has **4 active quests** — one daily and one weekly per categ
 - **Ticket Types:**
   - Report an Issue — bugs, rule violations, technical problems.
   - Server Support — general server assistance.
-  - Staff Application — apply for Tourney Admin or Event Staff.
+  - Staff Application — apply for Event Staff (Tourney Admin / Moderator closed).
   - Server Partnership — propose a partnership.
 - One open ticket per type per user.
 - Staff can close, reopen, and delete tickets with transcript generation.

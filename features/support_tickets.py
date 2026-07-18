@@ -48,7 +48,7 @@ TICKET_TYPES = {
         "category_id": SUPPORT_STAFF_APPS_CATEGORY_ID,
         "open_message": (
             "**Which position do you want to apply for:**\n"
-            "**Tourney Admin** - Run Matcherino tournaments and manage support tickets\n"
+            "~~**Tourney Admin** - Run Matcherino tournaments and manage support tickets~~\n"
             "**Event Staff** - Bring our community together by hosting fun, engaging events\n"
             "~~**Moderator** - Monitor chats, assist members, and enforce server rules fairly~~\n\n"
             "Then please present your reasons for why we should accept you.\n\n"
@@ -639,7 +639,7 @@ class SupportTickets(commands.Cog):
                 "**Available categories:**\n"
                 "🔧 **Report an Issue** — Bugs, rule-break reports, or technical problems\n"
                 "🛡️ **Server Support** — General assistance for the server\n"
-                f"📋 **Staff Application** — Apply for **Tourney Admin** or **Event Staff** (**No Moderator** spots currently open). More info: {staff_info}\n"
+                f"📋 **Staff Application** — Apply for **Event Staff** (**No Tourney Admin or Moderator** spots currently open). More info: {staff_info}\n"
                 "🤝 **Server Partnership** — Propose a partnership with your server details and goals\n\n"
                 "⚠️ **Tourney tickets opened here will not be prioritised and may go unanswered.**\n"
                 f"For tourney-related concerns, go to {tourney_ch}"
