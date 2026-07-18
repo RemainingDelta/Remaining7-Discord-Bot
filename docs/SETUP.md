@@ -183,6 +183,7 @@ No other infrastructure needed — the hacked system is self-contained.
 SUPPORT_TICKET_CATEGORY_ID    # (and per-type categories)
 REDEMPTION_TICKET_CATEGORY_ID
 REDEMPTION_TRANSCRIPT_CHANNEL_ID
+BOOSTER_SHOUTOUT_CATEGORY_ID
 ADMIN_ROLE_ID
 MODERATOR_ROLE_ID
 ```

@@ -167,6 +167,20 @@ async def set_booster_discount_month(user_id: str, month_key: str):
     )
 
 
+async def get_booster_shoutout_month(user_id: str) -> str | None:
+    """Returns the "YYYY-MM" month key of the user's last booster shoutout ticket."""
+    doc = await get_user_data(user_id)
+    return doc.get("booster_shoutout_month")
+
+
+async def set_booster_shoutout_month(user_id: str, month_key: str):
+    if db is None:
+        return
+    await db.users.update_one(
+        {"_id": user_id}, {"$set": {"booster_shoutout_month": month_key}}, upsert=True
+    )
+
+
 async def get_item_count(user_id: str, item_name: str) -> int:
     """Checks how many of an item a user has."""
     doc = await get_user_data(user_id)
