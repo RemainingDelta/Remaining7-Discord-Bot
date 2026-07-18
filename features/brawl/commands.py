@@ -704,7 +704,7 @@ class BrawlCommands(commands.Cog):
         quests_cog = self.bot.get_cog("Quests")
         if quests_cog:
             await quests_cog.process_quest_update(
-                user_id, interaction.channel, "megabox"
+                user_id, interaction.channel, "megabox", member=interaction.user
             )
 
     @app_commands.command(name="starrdrop", description="Open a random Starr Drop!")
@@ -738,7 +738,7 @@ class BrawlCommands(commands.Cog):
         quests_cog = self.bot.get_cog("Quests")
         if quests_cog:
             await quests_cog.process_quest_update(
-                user_id, interaction.channel, "megabox"
+                user_id, interaction.channel, "megabox", member=interaction.user
             )
 
     @app_commands.command(
