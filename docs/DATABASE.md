@@ -36,6 +36,7 @@ Key fields:
 | `daily_last_claimed` | datetime | Last `/daily` claim timestamp |
 | `daily_message_count` | int | Messages since last `/daily` |
 | `booster_discount_month` | str | `"YYYY-MM"` of the last booster shop discount use |
+| `booster_shoutout_month` | str | `"YYYY-MM"` of the last auto-created booster shoutout ticket |
 | `brawlers` | dict | Map of `brawler_id → {level, gadgets, star_powers, hypercharge, coins, power_points}` |
 | `coins` | int | Brawl coins |
 | `power_points` | int | Brawl power points |
@@ -122,7 +123,7 @@ Per-staff per-session ticket closure counts. Indexed by `session_id + user_id`.
 ---
 
 ### `support_ticket_counters`
-Auto-increment counters for support ticket channels. One document per ticket type (`_id = "bug"`, `"support"`, `"staff_app"`, `"partnership"`). Contains a single `count` field.
+Auto-increment counters for support ticket channels. One document per ticket type (`_id = "bug"`, `"support"`, `"staff_app"`, `"partnership"`). Contains a single `count` field. Booster shoutout tickets share this collection under `_id = "booster_shoutout"`.
 
 ---
 

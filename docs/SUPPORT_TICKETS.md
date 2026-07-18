@@ -30,7 +30,7 @@ A user can only have one open ticket per ticket type at a time. This is tracked 
 
 ## Auto-Increment Counters
 
-Each ticket type has an independent counter in the `support_ticket_counters` MongoDB collection:
+Each ticket type has an independent counter in the `support_ticket_counters` MongoDB collection (also shared with booster shoutout tickets under `_id = "booster_shoutout"` — see `docs/BOOSTER_SHOUTOUT.md`):
 - `_id = "bug"`, `_id = "support"`, etc.
 - Contains a single `count` field
 - Incremented via `$inc: {count: 1}` on each new ticket

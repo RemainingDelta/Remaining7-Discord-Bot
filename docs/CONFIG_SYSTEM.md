@@ -51,6 +51,7 @@ Key IDs defined in config:
 | `TOURNEY_REPORT_CHANNEL_ID` | Where end-of-tourney stat embeds are archived |
 | `LOG_CHANNEL_ID` | Transcript log channel |
 | `REDEMPTION_TICKET_CATEGORY_ID` | Redemption ticket category |
+| `BOOSTER_SHOUTOUT_CATEGORY_ID` | Booster shoutout ticket category |
 | `REDEMPTION_TRANSCRIPT_CHANNEL_ID` | Redemption transcript archive |
 | `MODERATOR_LOGS_CHANNEL_ID` | Mod action log channel |
 | `SPANISH_CHANNEL_ID` | Spanish support channel (locked during SA tourneys) |

@@ -70,6 +70,9 @@ async def on_ready():
         await bot.load_extension("features.support_tickets")
         print("✅ Loaded Feature: Support Tickets")
 
+        await bot.load_extension("features.booster_shoutout")
+        print("✅ Loaded Feature: Booster Shoutout")
+
         await bot.load_extension("features.github_tickets")
         print("✅ Loaded Feature: GitHub Tickets")
 
