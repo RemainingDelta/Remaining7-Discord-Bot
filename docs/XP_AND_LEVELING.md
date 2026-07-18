@@ -15,6 +15,8 @@ In the `on_message` listener (same cooldown gate as token earning):
 4. New level is derived from `new_exp` using the level formula
 5. `update_leveling_data(user_id, new_level, new_exp)` writes both back
 
+Server Boosters additionally roll a **35% chance of +1 bonus XP** per general-channel message (independent of the token cooldown).
+
 XP earning happens in the same single `on_message` handler as tokens. The two are not separate listeners — one fire updates both.
 
 ---

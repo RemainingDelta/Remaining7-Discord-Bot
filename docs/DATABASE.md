@@ -35,6 +35,7 @@ Key fields:
 | `exp` | int | Total XP |
 | `daily_last_claimed` | datetime | Last `/daily` claim timestamp |
 | `daily_message_count` | int | Messages since last `/daily` |
+| `booster_discount_month` | str | `"YYYY-MM"` of the last booster shop discount use |
 | `brawlers` | dict | Map of `brawler_id → {level, gadgets, star_powers, hypercharge, coins, power_points}` |
 | `coins` | int | Brawl coins |
 | `power_points` | int | Brawl power points |

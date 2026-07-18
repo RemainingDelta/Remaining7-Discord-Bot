@@ -1,6 +1,6 @@
 """Tests for pure functions in features/economy.py."""
 
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock
 
 import discord
@@ -12,8 +12,10 @@ from features.config import (
 )
 from features.economy import (
     Economy,
+    _booster_tenure_eligible,
     _budget_month_key,
     _budget_cost_for_item,
+    _discounted_price,
     _extract_topic_value,
     _pending_redemptions_total,
     _redemption_instructions,
@@ -72,6 +74,61 @@ def test_budget_cost_unknown_item_returns_zero():
 
 def test_token_price_unknown_item_returns_zero():
     assert _token_price_for_item("this item does not exist") == 0
+
+
+# --- _discounted_price ---
+
+
+def test_discounted_price_brawl_pass():
+    assert _discounted_price(5000) == 4500
+
+
+def test_discounted_price_small_price():
+    assert _discounted_price(500) == 450
+
+
+def test_discounted_price_truncates():
+    assert _discounted_price(55) == 49
+
+
+def test_discounted_price_zero():
+    assert _discounted_price(0) == 0
+
+
+# --- _booster_tenure_eligible ---
+
+
+class _FakeMember:
+    def __init__(self, has_role: bool, premium_since):
+        self._has_role = has_role
+        self.premium_since = premium_since
+
+    def get_role(self, role_id):
+        return MagicMock() if self._has_role else None
+
+
+def test_tenure_eligible_long_boost():
+    since = datetime.now(timezone.utc) - timedelta(days=20)
+    assert _booster_tenure_eligible(_FakeMember(True, since)) is True
+
+
+def test_tenure_ineligible_short_boost():
+    since = datetime.now(timezone.utc) - timedelta(days=5)
+    assert _booster_tenure_eligible(_FakeMember(True, since)) is False
+
+
+def test_tenure_ineligible_no_premium_since():
+    assert _booster_tenure_eligible(_FakeMember(True, None)) is False
+
+
+def test_tenure_ineligible_without_role():
+    since = datetime.now(timezone.utc) - timedelta(days=20)
+    assert _booster_tenure_eligible(_FakeMember(False, since)) is False
+
+
+def test_tenure_ineligible_non_member_user():
+    # Users outside a guild (e.g. DMs) have no get_role/premium_since.
+    assert _booster_tenure_eligible(object()) is False
 
 
 # --- _extract_topic_value ---

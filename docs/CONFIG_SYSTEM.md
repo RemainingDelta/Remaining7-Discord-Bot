@@ -67,6 +67,7 @@ Key IDs defined in config:
 | `TRIAL_MODERATOR_ROLE_ID` | Trial mod (limited access) |
 | `TOURNEY_ADMIN_ROLE_ID` | Tournament staff (granted `moderate_members` during live tourney) |
 | `MEMBER_ROLE_ID` | Base member role |
+| `SERVER_BOOSTER_ROLE_ID` | Server Booster perks (token/XP bonuses, daily bonus, shop discount); dev reuses the prod ID since the dev server has no booster role |
 | `ALLOWED_STAFF_ROLES` | List of role IDs with tourney ticket access |
 
 ---
