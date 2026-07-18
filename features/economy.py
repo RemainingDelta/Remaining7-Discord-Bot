@@ -15,6 +15,8 @@ from database.mongo import (
     get_leveling_data,
     update_leveling_data,
     add_item_token,
+    get_booster_discount_month,
+    set_booster_discount_month,
     get_item_count,
     remove_item_token,
     get_setting,
@@ -152,6 +154,39 @@ def _token_price_for_item(item_name: str) -> int:
         return int(item_cfg.get("price", 0))
     except Exception:
         return 0
+
+
+BOOSTER_DISCOUNT_RATE = 0.10
+BOOSTER_DISCOUNT_MIN_BOOST_DAYS = 14
+
+
+def _discounted_price(price: int) -> int:
+    return int(price * (1 - BOOSTER_DISCOUNT_RATE))
+
+
+def _booster_tenure_eligible(member) -> bool:
+    """Booster role held and boosting for at least the minimum streak length.
+
+    premium_since resets to None when a boost lapses, so the 14-day gate
+    restarts on every new boost streak.
+    """
+    get_role = getattr(member, "get_role", None)
+    if get_role is None or get_role(SERVER_BOOSTER_ROLE_ID) is None:
+        return False
+    premium_since = getattr(member, "premium_since", None)
+    if premium_since is None:
+        return False
+    return datetime.now(timezone.utc) - premium_since >= timedelta(
+        days=BOOSTER_DISCOUNT_MIN_BOOST_DAYS
+    )
+
+
+async def _booster_discount_available(member) -> bool:
+    """Tenure-eligible booster who hasn't used the monthly discount yet."""
+    if not _booster_tenure_eligible(member):
+        return False
+    used_month = await get_booster_discount_month(str(member.id))
+    return used_month != _budget_month_key()
 
 
 def _extract_topic_value(topic: str | None, key: str) -> str | None:
@@ -846,12 +881,15 @@ class LevelsLeaderboardView(discord.ui.View):
 
 
 class ShopPaginationView(discord.ui.View):
-    def __init__(self, data: dict, items_per_page: int = 4):
+    def __init__(
+        self, data: dict, items_per_page: int = 4, booster_discount: bool = False
+    ):
         super().__init__(timeout=60)
         self.data = list(data.items())
         self.items_per_page = items_per_page
         self.current_page = 0
         self.total_pages = (len(self.data) - 1) // items_per_page + 1
+        self.booster_discount = booster_discount
 
     def create_embed(self):
         start = self.current_page * self.items_per_page
@@ -866,9 +904,17 @@ class ShopPaginationView(discord.ui.View):
         )
 
         for key, info in page_items:
+            price = info["price"]
+            if self.booster_discount and _discounted_price(price) < price:
+                price_line = (
+                    f"**Price:** ~~{price}~~ **{_discounted_price(price)}** "
+                    "R7 tokens (10% booster discount)"
+                )
+            else:
+                price_line = f"**Price:** {price} R7 tokens"
             embed.add_field(
                 name=info["display"],
-                value=f"{info['desc']}\n**Price:** {info['price']} R7 tokens",
+                value=f"{info['desc']}\n{price_line}",
                 inline=False,
             )
         return embed
@@ -1197,8 +1243,11 @@ class Economy(commands.Cog):
 
     @app_commands.command(name="shop", description="View the R7 token shop.")
     async def shop(self, interaction: discord.Interaction):
+        discount_eligible = await _booster_discount_available(interaction.user)
         # Create the view with 4 items per page
-        view = ShopPaginationView(SHOP_DATA, items_per_page=4)
+        view = ShopPaginationView(
+            SHOP_DATA, items_per_page=4, booster_discount=discount_eligible
+        )
         view.update_buttons()
         await interaction.response.send_message(embed=view.create_embed(), view=view)
 
@@ -1225,6 +1274,15 @@ class Economy(commands.Cog):
 
         item_info = SHOP_DATA[item]
         price = item_info["price"]
+        original_price = price
+
+        # Don't burn the monthly discount on items where 10% saves nothing.
+        discount_applied = _discounted_price(
+            price
+        ) < price and await _booster_discount_available(interaction.user)
+        if discount_applied:
+            price = _discounted_price(price)
+
         balance = await get_user_balance(user_id)
 
         if balance < price:
@@ -1239,10 +1297,24 @@ class Economy(commands.Cog):
         new_balance = balance - price
         await update_user_balance(user_id, new_balance)
         await add_item_token(user_id, item)
+        if discount_applied:
+            # Marked only after a completed purchase, so a failed balance
+            # check doesn't consume the monthly discount.
+            await set_booster_discount_month(user_id, _budget_month_key())
+
+        description = (
+            f"You have purchased **{item_info['display']}**!\n"
+            "Please use `/redeem` to claim it."
+        )
+        if discount_applied:
+            description += (
+                f"\n🚀 **Booster Discount:** ~~{original_price}~~ **{price}** "
+                "R7 tokens — 10% off applied (1/month)"
+            )
 
         embed = discord.Embed(
             title="✅ **Purchase Successful**",
-            description=f"You have purchased **{item_info['display']}**!\nPlease use `/redeem` to claim it.",
+            description=description,
             color=discord.Color.green(),
         )
         embed.set_footer(text=f"Your new balance: {int(new_balance)} R7 tokens")
@@ -1826,7 +1898,9 @@ class Economy(commands.Cog):
         spend_text = (
             "🛒 **The Shop:** Use `/shop` to browse rewards like Brawl Pass, Discord Nitro, and PayPal.\n"
             "💳 **Purchasing:** Use `/buy <item>` to spend your tokens on an item.\n"
-            "🎟️ **Redeeming:** Use `/redeem <item>` to open a ticket and claim your reward from staff."
+            "🎟️ **Redeeming:** Use `/redeem <item>` to open a ticket and claim your reward from staff.\n"
+            "🚀 **Booster Discount:** Boosters of **14+ days** automatically get "
+            "**10% off** one purchase per month."
         )
         spend_embed.add_field(name="🛍️ Shopping Flow", value=spend_text, inline=False)
 

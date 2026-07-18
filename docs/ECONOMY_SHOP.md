@@ -35,6 +35,22 @@ REDEMPTION_BUDGET_COSTS = {
 
 ---
 
+## Booster Discount
+
+Server Boosters get a **10% token discount on one shop purchase per calendar month**, applied automatically at `/buy` time. Eligibility (`_booster_discount_available()`):
+
+1. Has the Server Booster role (`SERVER_BOOSTER_ROLE_ID`)
+2. `member.premium_since` is at least **14 days** ago — `premium_since` resets to `None` on boost lapse and to a new datetime on re-boost, so the gate restarts with every new boost streak
+3. Hasn't used the discount this month: the `users` doc field `booster_discount_month` (`"YYYY-MM"`) differs from the current `_budget_month_key()`
+
+Mechanics:
+- Discounted price is `_discounted_price(price)` = `int(price * 0.9)`. The discount is skipped when it would save less than 1 token (e.g. free items), so it can't be burned for nothing.
+- `booster_discount_month` is only stamped **after** a completed purchase — a failed balance check doesn't consume the month's discount. No reset logic is needed: a stale month key simply stops matching after rollover.
+- `/shop` previews the discount for eligible viewers: `~~5000~~ **4500** R7 tokens (10% booster discount)`.
+- The **USD redemption budget is unaffected**: the discount only reduces the token price at `/buy`; redemption still consumes the full `REDEMPTION_BUDGET_COSTS` cost.
+
+---
+
 ## Redemption Flow
 
 1. Member uses `/redeem` and selects an item they own
