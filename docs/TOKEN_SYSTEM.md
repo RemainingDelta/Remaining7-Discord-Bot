@@ -9,7 +9,7 @@ R7 Tokens are the primary server currency. Members earn them passively through c
 
 ## Passive Earning
 
-The `on_message` listener in `features/economy.py` fires on every message. Token earning, daily message count tracking, and quest progress apply identically in the general channel (`GENERAL_CHANNEL_ID`) and the booster-only channel (`BOOSTER_CHANNEL_ID`, `#general-plus`):
+The `on_message` listener in `features/economy.py` fires on every message. Token earning, XP earning, daily message count tracking, and quest progress apply identically in the general channel (`GENERAL_CHANNEL_ID`) and the booster-only channel (`BOOSTER_CHANNEL_ID`, `#general-plus`) — no rewards are granted outside these two channels:
 
 1. Ignores bots, DMs, and channels in `PASSIVE_REWARD_EXCLUDED_CHANNEL_IDS`
 2. Enforces a **20-second cooldown** per user via `_cooldowns: dict[int, float]` mapping `user_id → last_earn_timestamp`

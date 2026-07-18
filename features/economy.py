@@ -1160,37 +1160,37 @@ class Economy(commands.Cog):
                 await update_user_balance(user_id, current_balance + earned_tokens)
                 await set_setting(f"last_message_{user_id}", str(current_timestamp))
 
-        # --- PART 2: XP & LEVELING (EVERY MESSAGE) ---
-        EXP_PER_MESSAGE = 10
-        BASE_EXP = 100
+            # --- PART 2: XP & LEVELING ---
+            EXP_PER_MESSAGE = 10
+            BASE_EXP = 100
 
-        level, exp = await get_leveling_data(user_id)
-        exp += EXP_PER_MESSAGE + booster_xp_bonus
+            level, exp = await get_leveling_data(user_id)
+            exp += EXP_PER_MESSAGE + booster_xp_bonus
 
-        while True:
-            required_exp = int(BASE_EXP * (1.5 ** (level - 1)))
-            if exp >= required_exp:
-                exp -= required_exp
-                level += 1
+            while True:
+                required_exp = int(BASE_EXP * (1.5 ** (level - 1)))
+                if exp >= required_exp:
+                    exp -= required_exp
+                    level += 1
 
-                embed = discord.Embed(
-                    title="🎉 Level Up!",
-                    description=f"{message.author.mention}, you reached **Level {level}**!",
-                    color=discord.Color.green(),
-                )
-                embed.add_field(
-                    name="Bonus",
-                    value="Daily rewards increased by **5%**!",
-                    inline=False,
-                )
-                try:
-                    await message.channel.send(embed=embed)
-                except discord.Forbidden:
-                    pass  # Ignore if bot can't send in that channel
-            else:
-                break
+                    embed = discord.Embed(
+                        title="🎉 Level Up!",
+                        description=f"{message.author.mention}, you reached **Level {level}**!",
+                        color=discord.Color.green(),
+                    )
+                    embed.add_field(
+                        name="Bonus",
+                        value="Daily rewards increased by **5%**!",
+                        inline=False,
+                    )
+                    try:
+                        await message.channel.send(embed=embed)
+                    except discord.Forbidden:
+                        pass  # Ignore if bot can't send in that channel
+                else:
+                    break
 
-        await update_leveling_data(user_id, level, exp)
+            await update_leveling_data(user_id, level, exp)
 
     # --- AUTO DROP TASK ---
     @tasks.loop(hours=6)

@@ -1,21 +1,21 @@
 # XP and Leveling
 
 ## Overview
-XP is earned alongside tokens on every message (same `on_message` listener, same 20-second cooldown). Level is derived from cumulative XP using a formula — it is not stored as a separate counter that increments discretely. Higher level increases the daily token reward.
+XP is earned alongside tokens in the same `on_message` listener, restricted to the same channels as passive token earning — the general chat channel (`GENERAL_CHANNEL_ID`) and the booster-only channel (`BOOSTER_CHANNEL_ID`). Level is derived from cumulative XP using a formula — it is not stored as a separate counter that increments discretely. Higher level increases the daily token reward.
 
 ---
 
 ## XP Earning
 
-In the `on_message` listener (same cooldown gate as token earning):
+In the `on_message` listener, gated by the same channel restriction as token earning (not the 20-second token cooldown — XP accrues on every qualifying message):
 
-1. A random XP amount is chosen (exact range defined in the listener, similar to token range)
+1. A flat `EXP_PER_MESSAGE = 10` is awarded
 2. `get_leveling_data(user_id)` fetches `(level, exp)` from the `users` collection
 3. New XP total is calculated: `new_exp = exp + xp_gained`
 4. New level is derived from `new_exp` using the level formula
 5. `update_leveling_data(user_id, new_level, new_exp)` writes both back
 
-Server Boosters additionally roll a **35% chance of +1 bonus XP** per general-channel message (independent of the token cooldown). When changing this perk, also update the `/booster-perks` embed in `features/general.py`.
+Server Boosters additionally roll a **35% chance of +1 bonus XP** per general/booster-channel message (independent of the token cooldown). When changing this perk, also update the `/booster-perks` embed in `features/general.py`.
 
 XP earning happens in the same single `on_message` handler as tokens. The two are not separate listeners — one fire updates both.
 
