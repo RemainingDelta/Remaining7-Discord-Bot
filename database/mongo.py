@@ -848,10 +848,20 @@ async def get_active_quest(user_id: str, q_key: str):
     return quest_entry
 
 
-async def assign_random_quest(user_id: str, q_key: str):
+BOOSTER_QUEST_TARGET_MULTIPLIER = 0.8
+
+
+def booster_quest_target(target: int) -> int:
+    """Returns the reduced quest target for server boosters (20% off)."""
+    return max(1, round(target * BOOSTER_QUEST_TARGET_MULTIPLIER))
+
+
+async def assign_random_quest(user_id: str, q_key: str, is_booster: bool = False):
     """Picks a random active quest from the DB and assigns it to the user.
 
     q_key is one of: daily_message, weekly_message, daily_megabox, weekly_megabox
+    Boosters get a reduced target, stored on the assignment record so the
+    threshold is fixed for the quest's lifetime regardless of boost changes.
     """
     if db is None:
         return None
@@ -876,15 +886,23 @@ async def assign_random_quest(user_id: str, q_key: str):
 
     quest = random.choice(matching_quests)
 
+    target = quest.get("target_count", quest.get("target", 100))
+    description = quest["description"]
+    if is_booster:
+        reduced = booster_quest_target(target)
+        description = description.replace(str(target), str(reduced), 1)
+        target = reduced
+
     new_entry = {
         "quest_id": quest["_id"],
         "name": quest["name"],
-        "description": quest["description"],
-        "target_count": quest.get("target_count", quest.get("target", 100)),
+        "description": description,
+        "target_count": target,
         "reward_tokens": quest.get("reward_tokens", 0),
         "reward_exp": quest.get("reward_exp", 0),
         "progress": 0,
         "completed": False,
+        "booster_reduced": is_booster,
         "date_assigned": datetime.utcnow(),
     }
 

@@ -22,6 +22,25 @@ Defined in `DEFAULT_QUESTS` inside `features/quests.py` and seeded into the `que
 
 ---
 
+## Booster Threshold Reduction
+
+Server boosters (holders of `SERVER_BOOSTER_ROLE_ID`) get a **20% reduced target** on all quest types:
+
+| Quest | Base Target | Booster Target |
+|-------|-------------|----------------|
+| Daily Chatter / Quick Convo / Engaged Today | 80 / 160 / 240 | 64 / 128 / 192 |
+| Mega Box Maniac (daily) | 100 | 80 |
+| Weekly Regular / Consistent Contributor / Server Pillar | 500 / 750 / 1000 | 400 / 600 / 800 |
+| Mega Box Grinder (weekly) | 500 | 400 |
+
+Mechanics:
+- The booster role is checked **at assignment time** inside `assign_random_quest(user_id, q_key, is_booster)`. The reduced target (and a description rewritten with the reduced count) is stored on the `user_quests` record along with a `booster_reduced` flag — it is **not** recomputed at progress-check time.
+- Because assignment is lazy (expired quests reassign on the next message/box open/`/quests`), reductions take effect at the **next quest cycle** after boosting, and revert to standard targets at the next cycle after the boost lapses. An in-flight quest keeps its stored target either way.
+- `/reset-quests` deletes the user's quest doc, so the forced reassignment re-evaluates booster status at that moment.
+- Reduction math: `booster_quest_target()` in `database/mongo.py` (`max(1, round(target * 0.8))`).
+
+---
+
 ## Progress Tracking
 
 `process_quest_update(user_id, channel, action_type)` is called from:
