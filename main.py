@@ -79,6 +79,9 @@ async def on_ready():
         await bot.load_extension("features.counting")
         print("✅ Loaded Feature: Counting")
 
+        await bot.load_extension("features.message_mirror")
+        print("✅ Loaded Feature: Message Mirror")
+
         await bot.load_extension("features.tourney.tourney_reports")
         print("✅ Loaded Feature: Tourney Reports")
 
