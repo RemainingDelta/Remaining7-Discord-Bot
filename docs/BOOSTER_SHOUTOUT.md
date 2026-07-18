@@ -5,6 +5,8 @@ When a member starts boosting the server, the bot automatically opens a private 
 
 Source: `features/booster_shoutout.py`
 
+> When changing this perk, also update the `/booster-perks` embed in `features/general.py`.
+
 ---
 
 ## Boost Detection

@@ -49,6 +49,8 @@ Mechanics:
 - `/shop` previews the discount for eligible viewers: `~~5000~~ **4500** R7 tokens (10% booster discount)`.
 - The **USD redemption budget is unaffected**: the discount only reduces the token price at `/buy`; redemption still consumes the full `REDEMPTION_BUDGET_COSTS` cost.
 
+> When changing this perk, also update the `/booster-perks` embed in `features/general.py`.
+
 ---
 
 ## Redemption Flow
