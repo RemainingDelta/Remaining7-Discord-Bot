@@ -74,6 +74,129 @@ Release body content below is preserved exactly as published — nothing has bee
 - Interactive embeds for `/level`, `/quests`, `/leaderboard`, `/brawlers`, and queue dashboard
 - Button panels for tourney and pre-tourney support ticket creation
 
+
+### PR Descriptions
+
+#### PR #1 — Updated README (merged 2025-12-18)
+
+*(no description)*
+
+#### PR #4 — Fixed 3-Bug (merged 2025-12-20)
+
+Resolves #3
+
+#### PR #5 — Added tourney payout commands (merged 2025-12-20)
+
+*(no description)*
+
+#### PR #6 — Updated README (merged 2025-12-20)
+
+*(no description)*
+
+#### PR #8 — Fixed 7-Bug (Discord 50 channels one category rate limit) (merged 2025-12-21)
+
+Resolved #7
+
+#### PR #9 — Updated README (merged 2025-12-21)
+
+*(no description)*
+
+#### PR #10 — Updated leaderboard view and remove ping when closing tourney tickets (merged 2025-12-21)
+
+*(no description)*
+
+#### PR #11 — Added !delete and !reopen commands & changed /hall-of-fame success message to be visible to all (merged 2025-12-22)
+
+Added !delete and !reopen commands in case buttons fail & changed /hall-of-fame success message to be visible to all
+
+#### PR #12 — Added live tournament queue stats and /queue command, also fixed /level_leaderboard (merged 2025-12-22)
+
+*(no description)*
+
+#### PR #13 — Small fix to remove irrelevant footer (merged 2025-12-22)
+
+*(no description)*
+
+#### PR #14 — Added tourney blacklist commands (merged 2025-12-23)
+
+*(no description)*
+
+#### PR #17 — Supply drops can no longer claimed by moderators (merged 2025-12-23)
+
+*(no description)*
+
+#### PR #18 — Revamped Level Leaderboard view (merged 2025-12-25)
+
+*(no description)*
+
+#### PR #19 — Added master switch to the env (merged 2025-12-26)
+
+*(no description)*
+
+#### PR #20 — Added basic brawl collectible system (merged 2025-12-27)
+
+*(no description)*
+
+#### PR #21 — Updated real ids for brawler emojis (merged 2025-12-27)
+
+*(no description)*
+
+#### PR #22 — Updated emoji ids and added brawler leveling (merged 2025-12-28)
+
+*(no description)*
+
+#### PR #23 — Updated README to include all the info on the new Brawl Stars Collection System (merged 2025-12-28)
+
+*(no description)*
+
+#### PR #24 — Removed debug command, added fair content policy disclaimer (merged 2025-12-28)
+
+*(no description)*
+
+#### PR #25 — Added gadgets and starpowers (merged 2025-12-29)
+
+*(no description)*
+
+#### PR #26 — Added hypercharges (merged 2025-12-30)
+
+*(no description)*
+
+#### PR #27 — Some fixes and QOL changes (merged 2026-01-03)
+
+*(no description)*
+
+#### PR #28 — Added buying gadgets, starpowers, hypercharges (merged 2026-01-04)
+
+*(no description)*
+
+#### PR #30 — Updated Brawl Pass prices to reflect in game changes (merged 2026-01-14)
+
+*(no description)*
+
+#### PR #31 — Fixed 29-Bug (Hacked Log in Transcript Channel) (merged 2026-01-18)
+
+Resolved #29
+
+#### PR #32 — Fixed 2-Bug (Chat activity is no longer generating token rewards) (merged 2026-01-18)
+
+Resolved #2
+
+#### PR #33 — Updated README and imports (merged 2026-01-18)
+
+*(no description)*
+
+#### PR #34 — Fixed 15-Bug (Quests got removed) (merged 2026-01-18)
+
+Resolved #15
+
+#### PR #36 — 35-Bug Make supply drops have no timeout (merged 2026-01-24)
+
+Resolves #35
+
+#### PR #38 — 37-Feature Add tourney stats for when tourneys end (merged 2026-01-31)
+
+Closes #37
+
 ---
 
 ## v1.0.1 — 2026-01-31T22:40:19Z
@@ -84,6 +207,13 @@ Release body content below is preserved exactly as published — nothing has bee
 - **`!endtourney` stats panel not deleting:** `!endtourney` now reliably deletes the live stats panel on tourney end.
 
 **Full Changelog**: https://github.com/RemainingDelta/Remaining7-Discord-Bot/compare/v1.0.0...v1.0.1
+
+
+### PR Descriptions
+
+#### PR #40 — 39-Bug Fix !endtourney not deleting live tourney stats message (merged 2026-01-31)
+
+Close #39
 
 ---
 
@@ -104,6 +234,16 @@ Release body content below is preserved exactly as published — nothing has bee
 
 **Full Changelog**: https://github.com/RemainingDelta/Remaining7-Discord-Bot/compare/v1.0.1...v1.0.2
 
+
+### PR Descriptions
+
+#### PR #42 — 41-Feature Mention match number and team name in transcript message (merged 2026-02-01)
+
+Now shows: 
+<img width="966" height="499" alt="Screenshot 2026-01-31 at 7 08 56 PM" src="https://github.com/user-attachments/assets/d7aa6cec-93a7-47f5-86b6-16aef9fe38e6" />
+
+Close #41
+
 ---
 
 ## v1.1.0 — 2026-02-01T04:47:34Z
@@ -121,6 +261,17 @@ Release body content below is preserved exactly as published — nothing has bee
 
 **Full Changelog**: https://github.com/RemainingDelta/Remaining7-Discord-Bot/compare/v1.0.2...v1.1.0
 
+
+### PR Descriptions
+
+#### PR #44 — 43-Feature Add COC Gold Pass and CR Diamond Pass with pagination view (merged 2026-02-01)
+
+Shop now has pagination view and has new items:
+<img width="413" height="427" alt="Screenshot 2026-01-31 at 11 43 14 PM" src="https://github.com/user-attachments/assets/accc9187-eb60-44df-b888-fe66afd52dfe" />
+<img width="367" height="361" alt="Screenshot 2026-01-31 at 11 42 55 PM" src="https://github.com/user-attachments/assets/4b5933ef-54df-4017-92cc-dfae08e795bf" />
+
+Close #43
+
 ---
 
 ## v1.1.1 — 2026-02-08T05:55:42Z
@@ -134,6 +285,13 @@ Release body content below is preserved exactly as published — nothing has bee
 
 **Full Changelog**: https://github.com/RemainingDelta/Remaining7-Discord-Bot/compare/v1.1.0...v1.1.1
 
+
+### PR Descriptions
+
+#### PR #51 — 46-Enhancement reduce chat token cooldown from 60s to 20s (merged 2026-02-08)
+
+Closes #46
+
 ---
 
 ## v1.1.2 — 2026-02-08T06:40:22Z
@@ -146,6 +304,13 @@ Release body content below is preserved exactly as published — nothing has bee
 - Ensures limited shop rewards remain exclusively available to community members
 
 **Full Changelog**: https://github.com/RemainingDelta/Remaining7-Discord-Bot/compare/v1.1.1...v1.1.2
+
+
+### PR Descriptions
+
+#### PR #52 — 48-Enhancement restrict staff from buying and redeeming shop items (merged 2026-02-08)
+
+Closes #48
 
 ---
 
@@ -165,6 +330,13 @@ Release body content below is preserved exactly as published — nothing has bee
 
 **Full Changelog**: https://github.com/RemainingDelta/Remaining7-Discord-Bot/compare/v1.1.2...v1.1.3
 
+
+### PR Descriptions
+
+#### PR #53 — 49-Enhancement add Glowbert and paginate brawler shop (merged 2026-02-10)
+
+Closes #49
+
 ---
 
 ## v1.1.4 — 2026-02-14T02:51:50Z
@@ -177,6 +349,13 @@ Release body content below is preserved exactly as published — nothing has bee
 
 **Full Changelog**: https://github.com/RemainingDelta/Remaining7-Discord-Bot/compare/v1.1.3...v1.1.4
 
+
+### PR Descriptions
+
+#### PR #59 — 58-Bug fix bug where tourney admins can update payouts (merged 2026-02-14)
+
+Closes #58
+
 ---
 
 ## v1.1.5 — 2026-02-14T03:37:59Z
@@ -187,6 +366,13 @@ Release body content below is preserved exactly as published — nothing has bee
 - **Token balance displaying as decimals:** `/balance`, `/buy`, `/daily`, and the token leaderboard now correctly display token amounts as whole numbers instead of long floating-point decimals
 
 **Full Changelog**: https://github.com/RemainingDelta/Remaining7-Discord-Bot/compare/v1.1.4...v1.1.5
+
+
+### PR Descriptions
+
+#### PR #60 — 54-Bug fix decimal display bug in token balances (merged 2026-02-14)
+
+Closes #54
 
 ---
 
@@ -199,6 +385,13 @@ Release body content below is preserved exactly as published — nothing has bee
 - Aligned all internal IDs and stats with the latest Brawl Stars data
 
 **Full Changelog**: https://github.com/RemainingDelta/Remaining7-Discord-Bot/compare/v1.1.5...v1.1.6
+
+
+### PR Descriptions
+
+#### PR #61 — 50-Bug fix brawler in json (merged 2026-02-14)
+
+Closes #50
 
 ---
 
@@ -218,6 +411,13 @@ Release body content below is preserved exactly as published — nothing has bee
 
 **Full Changelog**: https://github.com/RemainingDelta/Remaining7-Discord-Bot/compare/v1.1.6...v1.2.0
 
+
+### PR Descriptions
+
+#### PR #62 — Add bidirectional translation to and from English (merged 2026-02-14)
+
+Closes #47
+
 ---
 
 ## v1.2.1 — 2026-02-14T18:21:43Z
@@ -231,6 +431,13 @@ Release body content below is preserved exactly as published — nothing has bee
 
 **Full Changelog**: https://github.com/RemainingDelta/Remaining7-Discord-Bot/compare/v1.2.0...v1.2.1
 
+
+### PR Descriptions
+
+#### PR #64 — 63-Enhancement add manual source language override to !translate (merged 2026-02-14)
+
+Closes #63
+
 ---
 
 ## v1.2.2 — 2026-02-14T19:01:07Z
@@ -243,6 +450,15 @@ Release body content below is preserved exactly as published — nothing has bee
 - If locked, the bot displays a combined status embed showing message progress and cooldown timer together
 
 **Full Changelog**: https://github.com/RemainingDelta/Remaining7-Discord-Bot/compare/v1.2.1...v1.2.2
+
+
+### PR Descriptions
+
+#### PR #65 — 45-Enhancement add 5 message requirement for /daily command (merged 2026-02-14)
+
+Release v1.2.2
+
+Closes #45
 
 ---
 
@@ -264,6 +480,33 @@ Release body content below is preserved exactly as published — nothing has bee
 - All staff-facing help responses are ephemeral and hidden from public view
 
 **Full Changelog**: https://github.com/RemainingDelta/Remaining7-Discord-Bot/compare/v1.2.2...v1.3.0
+
+
+### PR Descriptions
+
+#### PR #70 — 55-Feature add economy help command (merged 2026-02-15)
+
+Closes #55
+
+#### PR #71 — 56-Feature add general help command listing all bot commands (merged 2026-02-15)
+
+Closes #56
+
+#### PR #72 — 57-Feature add tourney admin help command (merged 2026-02-15)
+
+Closes #57
+
+#### PR #74 — 73-Feature add even staff help command (merged 2026-02-15)
+
+Closes #73
+
+#### PR #76 — 75-Feature add mod help command (merged 2026-02-15)
+
+Closes #75
+
+#### PR #78 — 77-Feature add admin help command (merged 2026-02-15)
+
+Closes #77
 
 ---
 
@@ -291,6 +534,21 @@ Release body content below is preserved exactly as published — nothing has bee
 
 **Full Changelog**: https://github.com/RemainingDelta/Remaining7-Discord-Bot/compare/v1.3.0...v1.4.0
 
+
+### PR Descriptions
+
+#### PR #79 — 68-Bug fix on_message listener registering twice (merged 2026-02-15)
+
+Closes #68
+
+#### PR #80 — 69-Feature integrate Matcherino bracket scraping (merged 2026-02-16)
+
+Part of #66 
+Closes #69 
+
+When creating a tourney ticket, you will see something like this:
+<img width="387" height="204" alt="Screenshot 2026-02-15 at 10 27 39 PM" src="https://github.com/user-attachments/assets/ecb37f32-ae9f-4823-b6da-aa711e52fa48" />
+
 ---
 
 ## v1.5.0 — 2026-02-16T19:29:08Z
@@ -308,6 +566,13 @@ Release body content below is preserved exactly as published — nothing has bee
 - Tournament support panels turn red and display a warning footer when Test Mode is active to prevent accidental use during live events
 
 **Full Changelog**: https://github.com/RemainingDelta/Remaining7-Discord-Bot/compare/v1.4.0...v1.5.0
+
+
+### PR Descriptions
+
+#### PR #85 — 84-Feature add test tourney mode toggle (merged 2026-02-16)
+
+Closes #84
 
 ---
 
@@ -331,6 +596,29 @@ Release body content below is preserved exactly as published — nothing has bee
 
 **Full Changelog**: https://github.com/RemainingDelta/Remaining7-Discord-Bot/compare/v1.5.0...v1.6.0
 
+
+### PR Descriptions
+
+#### PR #86 — 82-Feature add match_info command (merged 2026-02-21)
+
+Part of #66 
+Closes #82
+
+#### PR #87 — 81-Feature add match-history command (merged 2026-02-21)
+
+Part of #66 
+Closes #81
+
+#### PR #88 — 83-Feature add 1m match refresher for match info and set-ticket-match command (merged 2026-02-21)
+
+Part of #66 
+Closes #83 
+
+While the sub-issue focused on the core 5-minute refresher, the following improvements were added for better staff control and UI:
+- **Increased Frequency**: The refresher loop was updated from 5 minutes to 1 minute to provide near-instant score updates.
+- **Live Relative Timestamps**: Switched to Discord’s native relative time formatting. Embeds now dynamically show time elapsed (e.g., "3 minutes ago") instead of a static clock.
+- **New Management Command**: Added /set-ticket-match to allow staff to correct match numbers or team names on the fly. This ensures the refresher task picks up corrected data without requiring a new ticket.
+
 ---
 
 ## v1.6.1 — 2026-02-21T20:28:23Z
@@ -348,6 +636,14 @@ Release body content below is preserved exactly as published — nothing has bee
 
 **Full Changelog**: https://github.com/RemainingDelta/Remaining7-Discord-Bot/compare/v1.6.0...v1.6.1
 
+
+### PR Descriptions
+
+#### PR #90 — 89-Enhancement add fuzzy team match (merged 2026-02-21)
+
+Part of #66 
+Closes #89
+
 ---
 
 ## v1.6.2 — 2026-02-21T22:45:10Z
@@ -361,6 +657,22 @@ Release body content below is preserved exactly as published — nothing has bee
 - `/tourney-admin-help` now documents all four Matcherino tools — `/set-matcherino`, `/match-info`, `/match-history`, and `/set-ticket-match`
 
 **Full Changelog**: https://github.com/RemainingDelta/Remaining7-Discord-Bot/compare/v1.6.1...v1.6.2
+
+
+### PR Descriptions
+
+#### PR #92 — 91-Bug fix refresher overwriting /match-info match embeds (merged 2026-02-21)
+
+Closes #91 
+
+### Screenshots
+<img width="649" height="774" alt="Screenshot 2026-02-21 at 5 21 42 PM" src="https://github.com/user-attachments/assets/b274faed-f4e5-455f-b69a-46e602f2ecd3" />
+
+<img width="610" height="790" alt="Screenshot 2026-02-21 at 5 28 02 PM" src="https://github.com/user-attachments/assets/699f2dbf-b376-4d42-be08-31fdbabdd724" />
+
+#### PR #94 — 93-Enhancement bump up version number and add new commands to /tourney-admin-help (merged 2026-02-21)
+
+Closes #93
 
 ---
 
@@ -382,6 +694,26 @@ Release body content below is preserved exactly as published — nothing has bee
 
 **Full Changelog**: https://github.com/RemainingDelta/Remaining7-Discord-Bot/compare/v1.6.2...v1.6.3
 
+
+### PR Descriptions
+
+#### PR #96 — 95-Bug fix tourney admins not being able to use commands in ticket channels (merged 2026-02-22)
+
+Closes #95
+
+#### PR #98 — 97-Bug fix set-ticket-match command from changing channel name (merged 2026-02-23)
+
+Closes #97
+
+#### PR #100 — 99-Enhancement update hall-of-fame command to pull directly from the website (merged 2026-02-23)
+
+Part of #66 
+Closes #99
+
+#### PR #102 — 101-Enhancement bumping up version number to v1.6.3 and updating hall-of-fame description (merged 2026-02-24)
+
+Closes #101
+
 ---
 
 ## v1.6.4 — 2026-02-28T04:38:18Z
@@ -402,6 +734,26 @@ Release body content below is preserved exactly as published — nothing has bee
 
 **Full Changelog**: https://github.com/RemainingDelta/Remaining7-Discord-Bot/compare/v1.6.3...v1.6.4
 
+
+### PR Descriptions
+
+#### PR #104 — 103-Enhancement add auto translation for tourney ticket issues (merged 2026-02-28)
+
+Closes #103
+
+### Screenshots
+<img width="339" height="414" alt="image" src="https://github.com/user-attachments/assets/cb22aa0d-30f7-4e25-900d-67844fe32096" />
+
+<img width="538" height="356" alt="Screenshot 2026-02-27 at 9 46 31 PM" src="https://github.com/user-attachments/assets/54be2e51-bab2-4388-b34f-1f3e5b4dd403" />
+
+#### PR #106 — 105-Enhancement add redirect for espanol channel for SA tourneys (merged 2026-02-28)
+
+Closes #105
+
+#### PR #108 — 107-Enhancement bump up version to v1.6.4 (merged 2026-02-28)
+
+Closes #107
+
 ---
 
 ## v1.7.0 — 2026-03-05T04:07:55Z
@@ -417,6 +769,23 @@ Release body content below is preserved exactly as published — nothing has bee
 - Bracket-wide scan pulls live data from Matcherino to power the progress report
 
 **Full Changelog**: https://github.com/RemainingDelta/Remaining7-Discord-Bot/compare/v1.6.4...v1.7.0
+
+
+### PR Descriptions
+
+#### PR #110 — 109-Feature add tourney progress report command  (merged 2026-03-05)
+
+Part of #66
+Closes #109 
+
+New command: `/tourney-progress`
+
+### Screenshots
+<img width="474" height="281" alt="Screenshot 2026-03-04 at 10 42 37 PM" src="https://github.com/user-attachments/assets/1cda8b8f-458d-45ad-8cb2-2cbd37db5d5f" />
+
+#### PR #112 — 111-Enhancement bump version to v1.7.0 (merged 2026-03-05)
+
+Closes #111
 
 ---
 
@@ -436,6 +805,48 @@ Release body content below is preserved exactly as published — nothing has bee
 - **Tournament stuck on "Finals in progress":** Fixed completion status logic so a 100% completion rate correctly triggers a "Tournament Over" signal
 
 **Full Changelog**: https://github.com/RemainingDelta/Remaining7-Discord-Bot/compare/v1.7.0...v1.7.1
+
+
+### PR Descriptions
+
+#### PR #118 — 113-Bug fix bottleneck matches to contain the correct match number (merged 2026-03-07)
+
+Actual Bracket:
+<img width="285" height="137" alt="image" src="https://github.com/user-attachments/assets/b7078760-55fa-4744-adb0-f53a3c5fd52e" />
+Tourney: https://matcherino.com/supercell/tournaments/184533/bracket/bracket
+
+Before:
+<img width="470" height="293" alt="Screenshot 2026-03-06 at 10 17 15 PM" src="https://github.com/user-attachments/assets/68b8e02a-2b9e-4d75-a40d-3f2140079c84" />
+
+After:
+<img width="485" height="280" alt="Screenshot 2026-03-06 at 10 17 29 PM" src="https://github.com/user-attachments/assets/2116ecd2-23f3-47a1-b740-2d5a22c5aa0c" />
+
+
+
+Closes #113
+
+#### PR #119 — 115-Bug fix finished tourneys showing in progress (merged 2026-03-07)
+
+Before:
+<img width="471" height="295" alt="Screenshot 2026-03-06 at 10 31 29 PM" src="https://github.com/user-attachments/assets/116241f3-bea7-4400-bb15-9ff0ee8f2290" />
+
+After:
+<img width="481" height="286" alt="Screenshot 2026-03-06 at 10 30 30 PM" src="https://github.com/user-attachments/assets/202737d4-4d24-47c4-aebe-f4ca2e5c1a85" />
+
+Closes #115
+
+#### PR #120 — 116-Enhancement add 5 min panel tourney panel refresh (merged 2026-03-07)
+
+Part of #66 
+Closes #116
+
+#### PR #121 — 117-Feature add sticky messages for tourney redirection in a few channels (merged 2026-03-07)
+
+Closes #117
+
+#### PR #123 — 122-Enhancement bump up version to v1.7.1 (merged 2026-03-07)
+
+Closes #122
 
 ---
 
@@ -461,6 +872,33 @@ Release body content below is preserved exactly as published — nothing has bee
 
 **Full Changelog**: https://github.com/RemainingDelta/Remaining7-Discord-Bot/compare/v1.7.1...v1.7.2
 
+
+### PR Descriptions
+
+#### PR #125 — 124-Enhancement add automated detection of semi-final teams, final teams, and winner and add automated annoucements (merged 2026-03-08)
+
+Closes #124
+
+#### PR #127 — 126-Bug !starttourney resets total tourney time (merged 2026-03-08)
+
+Closes #126
+
+#### PR #129 — 128-Bug fix duplicate tourney progress dashboard (merged 2026-03-08)
+
+Closes #128
+
+
+<img width="738" height="534" alt="Screenshot 2026-03-07 at 9 57 47 PM" src="https://github.com/user-attachments/assets/1922595c-8b43-4ce2-a71b-75971a0bf5fd" />
+
+#### PR #131 — 130-Enhancement add sticky support redirection for SA tourneys (merged 2026-03-08)
+
+Closes #130
+
+#### PR #133 — 132-Enhancement match info embed now moves to the bottom of ticket channel everytime (merged 2026-03-08)
+
+Part of #66 
+Closes #132
+
 ---
 
 ## v1.7.3 — 2026-03-11T02:53:35Z
@@ -478,6 +916,15 @@ Release body content below is preserved exactly as published — nothing has bee
 - Restricted to Admin and Moderator roles, independent of tourney staff permissions
 
 **Full Changelog**: https://github.com/RemainingDelta/Remaining7-Discord-Bot/compare/v1.7.2...v1.7.3
+
+
+### PR Descriptions
+
+#### PR #135 — 134-Enhancement revamp support ticket system (merged 2026-03-11)
+
+Closes #134
+
+<img width="647" height="404" alt="image" src="https://github.com/user-attachments/assets/055415df-c90d-4593-8f10-836e7b69d317" />
 
 ---
 
@@ -497,6 +944,25 @@ Release body content below is preserved exactly as published — nothing has bee
 
 **Full Changelog**: https://github.com/RemainingDelta/Remaining7-Discord-Bot/compare/v1.7.3...v1.7.4
 
+
+### PR Descriptions
+
+#### PR #137 — 136-Bug update transcript message (merged 2026-03-12)
+
+Now displayes:
+<img width="747" height="230" alt="image" src="https://github.com/user-attachments/assets/8bc4601a-c879-40d6-8af0-ed972b6edfdf" />
+
+Closes #136
+
+#### PR #138 — 16-Bug fix budget with revamped ticket system (merged 2026-03-12)
+
+- Added a monthly budget system with automatic month rollover: budget resets to $50.00, spent resets to 0, and budget tracking keys refresh when a new UTC month is detected.
+- Updated `/set-budget` to set the current remaining budget (not the monthly cap) by recalculating spent amount behind the scenes.
+- Added redemption close actions that now correctly affect budget/refunds: Give back tokens and delete refunds token value, while Reduce from budget and delete deducts the item’s USD cost from budget.
+- Added a `/redeem` budget guard so users cannot open redemption tickets if the item cost exceeds remaining monthly budget.
+
+Closes #16
+
 ---
 
 ## v1.7.5 — 2026-03-21T15:55:59Z
@@ -512,6 +978,21 @@ Release body content below is preserved exactly as published — nothing has bee
 - **Milestone messages deleting instead of updating:** Semi-final, final, and winner announcements now edit in-place when bracket teams update, ensuring there is never a gap in the updates channel
 
 **Full Changelog**: https://github.com/RemainingDelta/Remaining7-Discord-Bot/compare/v1.7.4...v1.7.5
+
+
+### PR Descriptions
+
+#### PR #140 — 139-Feature add CLAUDE.md file (merged 2026-03-14)
+
+Closes #139
+
+#### PR #153 — v1.7.5 (merged 2026-03-21)
+
+### Changes
+* Fixed automated tournament milestone messages (semi-final, final, winner) not persisting — messages now edit in-place when bracket teams update instead of being deleted
+* Aligned the `/daily` 5-message requirement reset with the 24-hour cooldown timer instead of resetting at 00:00 UTC
+* Excluded `economy-commands` and `bot-commands` channels from counting toward the `/daily` message requirement
+* Bot now auto-detects and reposts the active support panel on startup to prevent "Interaction Failed" after a restart
 
 ---
 
@@ -545,6 +1026,23 @@ Release body content below is preserved exactly as published — nothing has bee
 - Updated `.env` variable names to `DEV_TOKEN`, `PROD_TOKEN`, and `BOT_MODE`
 
 **Full Changelog**: https://github.com/RemainingDelta/Remaining7-Discord-Bot/compare/v1.7.5...v1.8.0
+
+
+### PR Descriptions
+
+#### PR #179 — v1.8.0 (merged 2026-03-29)
+
+### Changes
+* Fixed bug where previous tourney milestone updates were not sent if they hadn't already posted
+* Fixed bug where consolation match winner was incorrectly announced as tournament winner
+* Removed Claude files from repo tracking and added `.claude/`, `CLAUDE.md` to `.gitignore`
+* Added Ruff linting and formatting workflow, reformatted all files to pass checks
+* Updated README and `.env` variable names (`DEV_TOKEN`, `PROD_TOKEN`, `BOT_MODE`)
+* Added feature to dynamically grant and revoke Timeout Members permission for Tourney Admins on `!starttourney` / `!endtourney`
+* Added `/convert-time` command to generate all Discord timestamp formats from a given date, time, and timezone
+* Added DM to user when flagged via `/hacked` or `!hacked`
+* Added auto team detection via fuzzy matching when match number is missing or incorrect
+* Updated README and all help commands to reflect current feature set
 
 ---
 
@@ -587,6 +1085,28 @@ Release body content below is preserved exactly as published — nothing has bee
 
 **Full Changelog**: https://github.com/RemainingDelta/Remaining7-Discord-Bot/compare/v1.8.0…v1.9.0
 
+
+### PR Descriptions
+
+#### PR #236 — v1.9.0 (merged 2026-04-26)
+
+### Changes
+* Fixed post-close ticket permissions to lock `send_messages` for all non-staff users, not just the opener — covers users added via `/add`
+* Added Portuguese translation embed to SA tournament sticky messages; SA tourneys now send Spanish + Portuguese embeds together
+* Added test suite with unit tests across brawl, economy, matcherino, tickets, tourney utils, translation, and general features; added CI workflow and pytest config; pinned minimum dependency versions
+* Added Makefile with `make test`, `make lint`, `make fix`, `make ci`, and `make up` commands for local dev convenience
+* Moved `BOT_VERSION` source of truth from `config.py` to `pyproject.toml`; `config.py` now reads version dynamically via `tomllib`
+* Fixed stale Matcherino ID persisting across reused tourney sessions — clears DB ID and resets in-memory dashboard state on `!starttourney`; added `/set-matcherino` reminder to confirmation message
+* Added ML training data collection to the tourney system — `/set-matcherino` now accepts a `collect_data` flag; snapshots with per-round timestamps, durations, and match counts are written to `tourney_snapshots` on every dashboard poll when enabled; resets on `!endtourney`
+* Made `/set-matcherino` confirmation response public so all staff can see when the tourney ID is updated
+* Added AI-powered GitHub issue creator via bot @mention:
+  * Added Gemini and GitHub token env vars and repo config
+  * Added GitHub tickets cog listening for bot @mentions and extracting raw text
+  * Integrated Gemini 2.5 Flash to classify descriptions as bug/enhancement/feature and return structured title + body
+  * Added `create_github_issue()` wired to Gemini output, replying with the created issue link
+  * Gated issue creation behind `TICKET_CREATOR_ID` and a Yes/No confirmation prompt with 60s timeout
+  * Added pytest coverage for `call_gemini`, `create_github_issue`, and the `on_message` listener
+
 ---
 
 ## v1.9.1 — 2026-05-21T07:39:19Z
@@ -609,6 +1129,21 @@ Release body content below is preserved exactly as published — nothing has bee
                                                                                                                                                                          
   **Full Changelog**: https://github.com/RemainingDelta/Remaining7-Discord-Bot/compare/v1.9.0…v1.9.1
 
+
+### PR Descriptions
+
+#### PR #276 — v1.9.1 (merged 2026-05-21)
+
+### Changes                                                                                                                                                              
+  * Fixed `!hacked` triggering on messages with trailing text after the command                                                                                            
+  * Updated `/hacked` message purge window to 12 hours instead of 7 days                                                                                                   
+  * Updated `/hacked-list` to paginate with navigation buttons                                                                                                             
+  * Updated token rewards to skip messages sent in BOTS category channels                                                                                                  
+  * Updated server booster bonus token chance from 2% to 5%                                                                                                                
+  * Added admin role rename on tourney start with automatic restore on end                                                                                                 
+  * Added 60s slow mode to general channel on tourney start/end with confirmation messages                                                                                 
+  * Updated redeem ticket embed to include item price and balance before/after redemption
+
 ---
 
 ## v1.9.2 — 2026-05-29T12:04:35Z
@@ -622,6 +1157,14 @@ Release body content below is preserved exactly as published — nothing has bee
 - Renamed `DAILY_MSG_EXCLUDED_CHANNEL_IDS` to `PASSIVE_REWARD_EXCLUDED_CHANNEL_IDS` to reflect its broader usage                                                        
                                                                                                                                                                             
 **Full Changelog:** https://github.com/RemainingDelta/Remaining7-Discord-Bot/compare/v1.9.1...v1.9.2   
+
+
+### PR Descriptions
+
+#### PR #284 — v1.9.2 (merged 2026-05-29)
+
+### Changes                                                                                                                                                             
+  * Fixed passive token and XP rewards being earned in bot command channels (`BOT_COMMANDS_CHANNEL_ID`, `ECONOMY_COMMANDS_CHANNEL_ID`) by adding an early return in the `on_message` handler
 
 ---
 
@@ -666,6 +1209,39 @@ Release body content below is preserved exactly as published — nothing has bee
 ## 📊 Full Changelog
 https://github.com/RemainingDelta/Remaining7-Discord-Bot/compare/v1.9.2...v1.10.0
 
+
+### PR Descriptions
+
+#### PR #329 — v1.10.0 (merged 2026-06-21)
+
+### Changes
+  - Added megabox quest type with dedicated daily and weekly slots; opening a Mega Box or Starr Drop counts toward progress
+  - Added monthly tournament reports with auto Matcherino ID detection on `!starttourney`
+  - Added `/active-matches` command to display active match scores grouped by round
+  - Added `/poll-rewards` command to distribute tokens to poll voters
+  - Added sticky messages feature (`!sticky` / `!unsticky`) with debounced repost
+  - Added counting game with sequential validation and `/set-count` staff command
+  - Added `/version` slash command
+  - Added transcript generation to redemption ticket close flow
+  - Added `/reset-quests` admin command to force-reset a user's quest assignments
+  - Updated quest rewards to better incentivize harder quests across all tiers
+  - Updated `!starttourney` to enable slow mode with a 1-hour auto-disable and public general chat notice
+  - Updated event cleanup alerts to replace the previous day's warning instead of stacking
+  - Updated passive token earning, XP, quest progress, and daily tracking to general chat only
+  - Updated server booster token bonus from 2% to 5%
+  - Updated hacked embed to include moderator identity and response time duration
+  - Updated `/check-budget` to show next budget reset date
+  - Updated README and all help commands
+  - Added 15 unit tests covering `TIMEZONE_ALIASES` and `/convert-time`
+  - Fixed TBD slot display with incorrect source match scores and teams
+  - Fixed bracket progress showing wrong round numbers
+  - Fixed redeem ticket not pinging the redeeming user
+  - Fixed floating-point display in redemption ticket balance fields
+  - Fixed Gemini API failure in GitHub issue creation confirm button
+  - Fixed commands failing for users who have left the server
+  - Fixed passive token and XP being earned in bot command channels
+  - Fixed quest progress counting in restricted channels
+
 ---
 
 ## v1.11.0 — 2026-07-18T10:23:48Z
@@ -702,5 +1278,29 @@ https://github.com/RemainingDelta/Remaining7-Discord-Bot/compare/v1.9.2...v1.10.
 - Updated README and shop docs to match the v1.11.0 feature set and fixed several stale figures/examples
 
 **Full Changelog**: https://github.com/RemainingDelta/Remaining7-Discord-Bot/compare/v1.10.0...v1.11.0
+
+
+### PR Descriptions
+
+#### PR #372 — v1.11.0 (merged 2026-07-18)
+
+### Changes
+  * Added ~10% average booster bonus to both passive tokens and XP per message
+  * Added a flat +20 token bonus to `/daily` for boosters
+  * Added an exclusive booster-only channel with periodic token supply drops
+  * Added a monthly 10% shop discount for boosters, gated behind 14 consecutive days of boosting
+  * Added a 20% quest threshold reduction for boosters
+  * Added auto-opened booster shoutout tickets on first boost
+  * Added `/booster-perks` command summarizing all booster perks
+  * Added optional image uploads (up to 3 files) to tourney ticket modals
+  * Added a moderator message mirror — reposts any message via webhook by pasting its Discord link
+  * Added a scam image detection system (MD5/pHash/ORB matching) with auto-purge and mod alert buttons
+  * Fixed XP being earned in every channel — now restricted to general and booster channels like tokens
+  * Fixed redemption budget to count pending tickets and queue overflow requests to next month
+  * Token shop prices increased by ~18% (now 2,000 tokens per dollar)
+  * Removed "Tourney Admin" as a selectable staff application role
+  * Removed the manual `!lock`/`!unlock` commands now that ticket locking is automatic
+  * Added a `docs/` folder with implementation guides for every major feature
+  * Updated README and shop docs to match the v1.11.0 feature set and fixed stale figures/examples
 
 ---
