@@ -55,12 +55,13 @@ The tournament system orchestrates the full lifecycle of a Brawl Stars tournamen
 7. **Posts the tournament report embed** to the command channel and archives it to `TOURNEY_REPORT_CHANNEL_ID`
 8. **Closes the session** in MongoDB (`end_tourney_session()`) and disables data collection
 9. **Clears the bracket team cache** (`clear_bracket_teams_cache()`)
-10. **Reopens** `OTHER_TICKET_CHANNEL_ID` (unlocks members)
-11. **Restores Admin role name** to its original value
-12. **Cancels the slowmode timer** and removes slowmode from general channel immediately
-13. **Unlocks Spanish channel** (`SPANISH_CHANNEL_ID`)
-14. **Main tourney support channel**: hides from `@everyone`, purges, renames to `「❌❌❌」「🔴」tourney-support`
-15. **Pre-tourney support channel**: re-opens for viewing (not sending), purges, posts pre-tourney panel, renames to `「🟡」pre-tourney-support`
+10. **Auto-posts Hall of Fame** using the session's `matcherino_id` (shared `post_hall_of_fame()` helper, also used by `/hall-of-fame`) — skipped if no `matcherino_id` was set; failures are caught and reported without blocking the rest of `!endtourney`
+11. **Reopens** `OTHER_TICKET_CHANNEL_ID` (unlocks members)
+12. **Restores Admin role name** to its original value
+13. **Cancels the slowmode timer** and removes slowmode from general channel immediately
+14. **Unlocks Spanish channel** (`SPANISH_CHANNEL_ID`)
+15. **Main tourney support channel**: hides from `@everyone`, purges, renames to `「❌❌❌」「🔴」tourney-support`
+16. **Pre-tourney support channel**: re-opens for viewing (not sending), purges, posts pre-tourney panel, renames to `「🟡」pre-tourney-support`
 
 ---
 
