@@ -2,7 +2,7 @@
 
 ## Overview
 **Name:** Remaining7 Discord Bot
-**Version:** v1.11.0
+**Version:** v1.11.1
 **Contributors:** remainingdelta, nightwarrior5
 **Objective:** A feature-rich Discord bot for the Remaining7 community server (16k+ members). Handles an R7 Token economy, leveling, quests, a Brawl Stars collection minigame, tournament management with Matcherino integration, support tickets, event operations, a security protocol, and multi-language translation.
 **Server Link:** https://discord.gg/6MzrjS2X8k
