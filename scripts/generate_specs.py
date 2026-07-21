@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate Part 3 of logs/SPECS.md and PR-description sections of logs/CHANGELOG.md.
+"""Generate Part 3 of docs/logs/SPECS.md and PR-description sections of docs/logs/CHANGELOG.md.
 
 Pulls releases, walks the commit range of each release to find issue-branch
 references (e.g. "42-Bug", "42-Enhancement"), fetches each issue's spec from
@@ -18,8 +18,8 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-SPECS_PATH = ROOT / "logs" / "SPECS.md"
-CHANGELOG_PATH = ROOT / "logs" / "CHANGELOG.md"
+SPECS_PATH = ROOT / "docs" / "logs" / "SPECS.md"
+CHANGELOG_PATH = ROOT / "docs" / "logs" / "CHANGELOG.md"
 
 PART3_STUB = "*(To be filled in.)*"
 PART3_HEADING = "## Part 3 — Tracked (January 31, 2026 onwards)"
@@ -38,7 +38,7 @@ ANCILLARY_EXACT = {
     "pytest.ini",
     "CLAUDE.md",
 }
-ANCILLARY_PREFIXES = ("docs/", "tests/", ".github/", "logs/", "scripts/")
+ANCILLARY_PREFIXES = ("docs/", "tests/", ".github/", "scripts/")
 
 # Feature-file aliases: a touched file counts as "mentioned" in the issue if
 # any of its keywords appear in the issue title/body.
