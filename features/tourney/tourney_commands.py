@@ -1865,6 +1865,21 @@ def setup_tourney_commands(bot: commands.Bot):
             await end_tourney_session(session["_id"])
             await set_tourney_collect_data(session["_id"], False)
             clear_bracket_teams_cache()
+
+            # 7. Auto-post Hall of Fame using this tournament's Matcherino ID
+            if matcherino_id:
+                try:
+                    hof_success, hof_message = await post_hall_of_fame(
+                        guild, str(matcherino_id)
+                    )
+                    await ctx.send(
+                        hof_message if hof_success else f"⚠️ Hall of Fame: {hof_message}"
+                    )
+                except Exception as e:
+                    print(f"⚠️ Could not auto-generate Hall of Fame post: {e}")
+                    await ctx.send(
+                        "⚠️ Hall of Fame auto-generation failed — run `/hall-of-fame` manually."
+                    )
         # ------------------------------
 
         await unlock_command(ctx)
@@ -2194,40 +2209,27 @@ def setup_tourney_commands(bot: commands.Bot):
             f"{user.mention} has been removed from this ticket by {interaction.user.mention}."
         )
 
-    @app_commands.command(
-        name="hall-of-fame",
-        description="Automatically fetch results and post to Hall of Fame.",
-    )
-    @app_commands.describe(tournament_id="The Matcherino ID (e.g. 183089)")
-    async def hall_of_fame(interaction: discord.Interaction, tournament_id: str):
-        if not isinstance(interaction.user, discord.Member) or not is_staff(
-            interaction.user
-        ):
-            await interaction.response.send_message(
-                "❌ Permission denied.", ephemeral=True
-            )
-            return
+    async def post_hall_of_fame(
+        guild: discord.Guild, tournament_id: str
+    ) -> tuple[bool, str]:
+        """Fetch results for tournament_id and post them to the Hall of Fame channel.
 
-        # Get the target channel first to ensure config is correct
-        target_channel = interaction.guild.get_channel(HALL_OF_FAME_CHANNEL_ID)
+        Returns (success, message) instead of talking to a discord.Interaction so it
+        can be called both from the /hall-of-fame slash command and from !endtourney.
+        """
+        target_channel = guild.get_channel(HALL_OF_FAME_CHANNEL_ID)
         if not target_channel or not isinstance(target_channel, discord.TextChannel):
-            await interaction.response.send_message(
+            return (
+                False,
                 f"❌ Could not find Hall of Fame channel (ID: {HALL_OF_FAME_CHANNEL_ID}).",
-                ephemeral=True,
             )
-            return
-
-        await interaction.response.defer()
 
         # Clean ID and fetch data using the new scraper
         clean_id = "".join(filter(str.isdigit, tournament_id))
         data = fetch_payout_report(clean_id)
 
         if "error" in data:
-            await interaction.followup.send(
-                f"❌ **Error:** {data['error']}", ephemeral=True
-            )
-            return
+            return False, f"❌ **Error:** {data['error']}"
 
         # Map variables for the embed
         tourney_name = data["tourney_name"]
@@ -2251,14 +2253,31 @@ def setup_tourney_commands(bot: commands.Bot):
 
         try:
             await target_channel.send(embed=embed)
-            await interaction.followup.send(
-                f"✅ Hall of Fame post sent to {target_channel.mention}!"
-            )
+            return True, f"✅ Hall of Fame post sent to {target_channel.mention}!"
         except discord.Forbidden:
-            await interaction.followup.send(
+            return (
+                False,
                 f"❌ I don't have permission to post in {target_channel.mention}.",
-                ephemeral=True,
             )
+
+    @app_commands.command(
+        name="hall-of-fame",
+        description="Automatically fetch results and post to Hall of Fame.",
+    )
+    @app_commands.describe(tournament_id="The Matcherino ID (e.g. 183089)")
+    async def hall_of_fame(interaction: discord.Interaction, tournament_id: str):
+        if not isinstance(interaction.user, discord.Member) or not is_staff(
+            interaction.user
+        ):
+            await interaction.response.send_message(
+                "❌ Permission denied.", ephemeral=True
+            )
+            return
+
+        await interaction.response.defer()
+
+        success, message = await post_hall_of_fame(interaction.guild, tournament_id)
+        await interaction.followup.send(message, ephemeral=not success)
 
     # =========================================================================
     #  PAYOUT COMMANDS

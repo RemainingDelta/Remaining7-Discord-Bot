@@ -1227,7 +1227,8 @@ class Economy(commands.Cog):
         if not channel:
             return
 
-        await self._expire_previous_booster_drop(channel)
+        if not await self._expire_previous_booster_drop(channel):
+            return
 
         amount = random.randint(10, 25)
         embed = discord.Embed(
@@ -1245,23 +1246,34 @@ class Economy(commands.Cog):
         await set_setting("booster_drop_message_id", str(msg.id))
         print(f"🚀 Booster drop sent: {amount} tokens")
 
-    async def _expire_previous_booster_drop(self, channel):
+    async def _expire_previous_booster_drop(self, channel) -> bool:
+        """Returns True if it's safe to post a new drop (nothing left un-expired)."""
         prev_id = await get_setting("booster_drop_message_id")
         if not prev_id:
-            return
+            return True
 
         try:
             msg = await channel.fetch_message(int(prev_id))
-            # Skip drops the claim button already edited to CLAIMED.
-            if msg.embeds and "CLAIMED" not in (msg.embeds[0].description or ""):
-                embed = msg.embeds[0]
-                embed.color = discord.Color.dark_grey()
-                embed.description = "**⌛ EXPIRED!**\n\nNobody claimed this drop in time. Keep an eye out — another one is inbound!"
+        except (discord.NotFound, ValueError):
+            await set_setting("booster_drop_message_id", "")
+            return True
+        except discord.HTTPException as e:
+            print(f"⚠️ Booster drop expiry fetch failed, retrying next cycle: {e}")
+            return False
+
+        # Skip drops the claim button already edited to CLAIMED.
+        if msg.embeds and "CLAIMED" not in (msg.embeds[0].description or ""):
+            embed = msg.embeds[0]
+            embed.color = discord.Color.dark_grey()
+            embed.description = "**⌛ EXPIRED!**\n\nNobody claimed this drop in time. Keep an eye out — another one is inbound!"
+            try:
                 await msg.edit(embed=embed, view=None)
-        except (discord.NotFound, discord.Forbidden, discord.HTTPException, ValueError):
-            pass
+            except discord.HTTPException as e:
+                print(f"⚠️ Booster drop expiry edit failed, retrying next cycle: {e}")
+                return False
 
         await set_setting("booster_drop_message_id", "")
+        return True
 
     # --- MANUAL DROP COMMAND ---
     @app_commands.command(name="drop", description="ADMIN: Force a supply drop.")
