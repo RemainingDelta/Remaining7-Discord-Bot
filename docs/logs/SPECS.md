@@ -3323,3 +3323,105 @@ Implemented in `b85d891`. Files: `README.md`, `docs/ECONOMY_SHOP.md`
 
 ✅ Reviewed against the diff: implementation matches the filed spec.
 
+### v1.11.1 — 2026-07-20
+
+#### #373 — Feature: Add logs/SPECS.md and logs/CHANGELOG.md as persistent development history (Enhancement)
+
+> ### Overview
+> Adds a `logs/` directory at repo root containing two files that preserve development history and intent in a form that survives outside of GitHub — `SPECS.md` as a chronological as-implemented spec record and `CHANGELOG.md` as a chronological record of PR descriptions and release notes.
+>
+> ### Technical Requirements
+> - [ ] Create `logs/` directory at repo root
+> - [ ] Create `logs/SPECS.md` with three-era structure: Part 1 (Baseline — inherited SQLite monolith, pre-Dec 14 2025), Part 2 (Pre-Release R7 — MongoDB rewrite through Jan 30 2026), Part 3 (Tracked — Jan 31 2026 onwards, issue-referenced specs)
+> - [ ] Create `logs/CHANGELOG.md` populated chronologically from existing release n …(truncated)
+
+Implemented in `013339e`, `473cc3b`, `8b72088`, `a01b2e4`. Files: `logs/CHANGELOG.md`, `logs/SPECS.md`, `scripts/generate_specs.py`
+
+✅ Reviewed against the diff: implementation matches the filed spec.
+
+📝 Review note: Self-referential — this issue created SPECS.md and CHANGELOG.md themselves. Parts 1–2 of SPECS.md were authored manually; Part 3 and the CHANGELOG PR-description blocks were produced by `scripts/generate_specs.py` from GitHub data, covering releases through v1.11.0. The generator is one-shot (aborts if its output already exists), so this v1.11.1 section was appended by hand in the same format.
+
+#### #374 — Enhancement: Automate Hall of Fame generation on tournament end (Enhancement)
+
+> ### Overview
+> This enhancement integrates the Hall of Fame generation process directly into the `!endtourney` command, ensuring that the Hall of Fame is automatically updated upon tournament completion.
+>
+> ### Current Behavior
+> The Hall of Fame likely requires a separate, manual trigger to generate or update. The `!endtourney` command currently only concludes a tournament without initiating Hall of Fame generation.
+>
+> ### Proposed Behavior
+> When the `!endtourney` command is executed, the bot should automatically trigger the Hall of Fame generation. This process should utilize the tournament ID of the recently concluded tournament to fetch and process relevant data for the Hall of Fame.
+>
+> ### Technic …(truncated)
+
+Implemented in `4898c3d`. Files: `README.md`, `docs/TOURNEY_OVERVIEW.md`, `features/tourney/tourney_commands.py`
+
+✅ Reviewed against the diff: implementation matches the filed spec.
+
+📝 Review note: The `/hall-of-fame` slash command was refactored into a shared `post_hall_of_fame(guild, tournament_id)` helper returning `(success, message)`, called by both the slash command and `!endtourney`. Auto-post is skipped when the session has no `matcherino_id`, and any failure is caught and reported to the command channel without blocking the rest of `!endtourney`.
+
+#### #377 — Bug: Previous booster drops sometimes remain after new drop (Bug)
+
+> ### Overview
+> The system is failing to consistently expire previous booster drops in the booster channel when a new drop occurs. This results in multiple active drops being visible simultaneously.
+>
+> ### Acceptance Criteria
+> How do we know it's done?
+> - [ ] Verify that when a new booster drop is initiated, any previous unclaimed drop in the same channel is correctly expired.
+> - [ ] Confirm that only one active booster drop is present in the booster channel at any given time.
+>
+> ### Steps to Reproduce Bug
+> - [ ] Monitor the booster channel for drops.
+> - [ ] Observe instances where a new drop occurs, but a previous, unclaimed drop still remains active.
+> - [ ] Test initiating multiple drops in quick succe …(truncated)
+
+Implemented in `163d999`. Files: `features/economy.py`
+
+✅ Reviewed against the diff: implementation matches the filed spec.
+
+📝 Review note: `_expire_previous_booster_drop()` now returns a bool that gates the new drop. Transient Discord `HTTPException`s while fetching or editing the previous drop return `False`, so the new drop is skipped and retried next cycle instead of posting on top of an un-expired one; a missing message or invalid stored ID clears the setting and lets the drop proceed. This guarantees at most one live drop at a time.
+
+#### #379 — Enhancement: Move documentation files to `docs/logs/` (Enhancement)
+
+> ### Overview
+> This enhancement aims to reorganize the project's documentation by moving `CHANGELOG.md` and `SPECS.md` from the `logs/` directory to a new `docs/logs/` directory. This improves clarity and consistency for documentation location.
+>
+> ### Current Behavior
+> The `CHANGELOG.md` and `SPECS.md` files are currently located in the `logs/` directory, which is inconsistent with general documentation practices and can make them less discoverable.
+>
+> ### Proposed Behavior
+> The `logs/` directory containing `CHANGELOG.md` and `SPECS.md` will be moved inside `docs/`, resulting in the files being located at `docs/logs/CHANGELOG.md` and `docs/logs/SPECS.md`.
+>
+> ### Technical Requirements
+> - [ ] Create `do …(truncated)
+
+Implemented in `75f0916`. Files: `docs/logs/CHANGELOG.md`, `docs/logs/SPECS.md`, `scripts/generate_specs.py`
+
+✅ Reviewed against the diff: implementation matches the filed spec.
+
+📝 Review note: The move also updated the `SPECS_PATH` and `CHANGELOG_PATH` constants in `scripts/generate_specs.py` to point at `docs/logs/`.
+
+#### #381 — Enhancement: Bump project version to v1.11.1 in pyproject.toml (Enhancement)
+
+> ### Overview
+> This enhancement updates the project version in `pyproject.toml` to `v1.11.1`, reflecting recent changes or a new release. It modifies the existing version tracking mechanism.
+>
+> ### Current Behavior
+> The project's declared version in `pyproject.toml` is currently `v1.11.0`.
+>
+> ### Proposed Behavior
+> The project's declared version in `pyproject.toml` should be updated to `v1.11.1`.
+>
+> ### Technical Requirements
+> - [ ] Modify the `version` field in `pyproject.toml` to `1.11.1`.
+>
+> ### Acceptance Criteria
+> - [ ] The `pyproject.toml` file contains `version = "1.11.1"`.
+>
+> ### Benefit/Impact
+> Ensures the project's version accurately reflects its current state, providing clear version tracking for …(truncated)
+
+Implemented in `3fce9b0`. Files: `pyproject.toml`
+
+✅ Reviewed against the diff: implementation matches the filed spec.
+

@@ -1304,3 +1304,18 @@ https://github.com/RemainingDelta/Remaining7-Discord-Bot/compare/v1.9.2...v1.10.
   * Updated README and shop docs to match the v1.11.0 feature set and fixed stale figures/examples
 
 ---
+
+## v1.11.1 — 2026-07-20
+
+# 🚀 Release Notes v1.11.1
+
+## 🐛 Bug Fixes & Improvements
+- `!endtourney` now automatically posts the Hall of Fame for the tournament that just ended, using the session's Matcherino ID
+- Fixed booster supply drops occasionally stacking up — old unclaimed drops now expire properly, so only one drop is ever active in the booster channel at a time
+
+## 📝 Documentation
+- Added persistent development history under `docs/logs/` — `SPECS.md` (chronological as-implemented spec record) and `CHANGELOG.md` (release notes + PR descriptions), so history survives outside of GitHub
+
+**Full Changelog**: https://github.com/RemainingDelta/Remaining7-Discord-Bot/compare/v1.11.0...v1.11.1
+
+---

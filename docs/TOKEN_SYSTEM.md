@@ -72,7 +72,7 @@ The `booster_drop_task` in `features/economy.py` posts automatic supply drops of
 1. Sleeps a uniform random 0–14400 seconds between drops (average ~2 hours, hard 4-hour pity cap)
 2. Posts an embed with a claim button (`DropView`) — first booster to click gets the tokens; staff cannot claim
 3. Stores the active drop's message ID in the `settings` collection under `booster_drop_message_id`; claiming clears it
-4. When a new drop fires, the previous **unclaimed** drop message is edited to an EXPIRED state with the button removed; claimed drops keep their CLAIMED state
+4. When a new drop fires, it first expires the previous drop: the previous **unclaimed** drop message is edited to an EXPIRED state with the button removed (claimed drops keep their CLAIMED state). If the previous message is gone or its stored ID is invalid, the ID is cleared and the new drop proceeds. If Discord returns a transient error while fetching or editing the previous drop, the new drop is **skipped for this cycle** and retried on the next one — guaranteeing at most one live drop at a time rather than posting a second before the first is expired
 
 Channel access is restricted to the Server Booster role via manual Discord permission setup — the bot only needs the channel ID.
 
