@@ -1028,6 +1028,18 @@ async def reset_tourney_session_start_time(session_id):
         return False
 
 
+async def update_tourney_runtime_state(session_id, **fields):
+    """Persist recovery fields on the active session so runtime state can be
+    rehydrated after a bot restart (region, admin_role_original_name,
+    slowmode_ends_at, lock_reopens_at). SILENT FAIL enabled."""
+    if db is None or not fields:
+        return
+    try:
+        await db.tourney_sessions.update_one({"_id": session_id}, {"$set": fields})
+    except Exception as e:
+        print(f"⚠️ DB Error (Runtime State): {e}")
+
+
 async def increment_tourney_message_count(session_id):
     """Increments the global message counter. SILENT FAIL enabled."""
     if db is None:
