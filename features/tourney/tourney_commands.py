@@ -27,6 +27,7 @@ from database.mongo import (
     get_active_tourney_session,
     end_tourney_session,
     reset_tourney_session_start_time,
+    update_tourney_runtime_state,
     increment_tourney_message_count,
     update_matcherino_id,
     update_tourney_queue,
@@ -66,6 +67,7 @@ from features.config import (
 from .tourney_utils import (
     close_ticket_via_command,
     reset_ticket_counter,
+    set_ticket_counter,
     delete_ticket_with_transcript,
     delete_ticket_via_command,
     reopen_ticket_via_command,
@@ -346,7 +348,9 @@ class QueueDashboard(commands.Cog):
         content = f"# {stage_title}\n" + "\n".join(match_lines)
 
         # Cross-check recent messages so duplicated scheduler invocations don't post twice.
-        async for recent in channel.history(limit=8):
+        # A wide window lets a post-restart resume re-adopt an existing message rather
+        # than duplicating it (the updates channel is near-silent after tourney start).
+        async for recent in channel.history(limit=30):
             if recent.author == self.bot.user and recent.content == content:
                 stage_state["message_id"] = recent.id
                 stage_state["signature"] = signature
@@ -395,7 +399,7 @@ class QueueDashboard(commands.Cog):
 
         content = f"# GGs!\n{winner_team} won !! {TOURNEY_MATCHERINO_WIN_EMOJI}"
 
-        async for recent in channel.history(limit=10):
+        async for recent in channel.history(limit=30):
             if recent.author == self.bot.user and recent.content == content:
                 winner_state["winner"] = winner_team
                 winner_state["message_id"] = recent.id
@@ -1314,11 +1318,13 @@ def setup_tourney_commands(bot: commands.Bot):
             )
 
     @bot.command(name="starttourney")
-    async def start_tourney_command(ctx: commands.Context, region: str = None):
+    async def start_tourney_command(ctx: commands.Context, *args: str):
         import features.config as config
 
         """
         Start a tourney with an optional region (e.g., !starttourney SA).
+        Pass `force` to restart setup over an already-active session
+        (e.g., !starttourney SA force).
         """
         if not isinstance(ctx.author, discord.Member) or not is_staff(ctx.author):
             await ctx.reply("You don't have permission to start the tourney.")
@@ -1334,7 +1340,24 @@ def setup_tourney_commands(bot: commands.Bot):
         if not guild:
             return
 
+        tokens = [a.lower() for a in args]
+        force = "force" in tokens
+        region = next((t for t in tokens if t != "force"), None)
         normalized_region = region.upper() if isinstance(region, str) else None
+
+        # Guard against a destructive re-run. After a restart the bot auto-resumes the
+        # running tourney, so re-running setup is almost never what you want — it purges
+        # channels, deletes pre-tourney tickets, and resets the session clock.
+        existing_session = await get_active_tourney_session()
+        if existing_session and not force:
+            await ctx.reply(
+                "⚠️ A tourney session is already **active** (if the bot just restarted, it "
+                "auto-resumed the running tourney). Re-running `!starttourney` will **purge "
+                "channels, delete all pre-tourney tickets, and reset the session clock**.\n"
+                "If you really want to restart setup from scratch, run "
+                "`!starttourney [region] force`."
+            )
+            return
 
         # Enable sticky redirect notices while tournament mode is active.
         sticky_redirect_state["enabled"] = True
@@ -1342,11 +1365,17 @@ def setup_tourney_commands(bot: commands.Bot):
 
         # Standard Startup Logic
         reset_ticket_counter()
-        existing_session = await get_active_tourney_session()
         if not existing_session:
             await create_tourney_session()
         else:
             await reset_tourney_session_start_time(existing_session["_id"])
+
+        # Establish the active session id and persist the region so a restart can
+        # restore the sticky-redirect state.
+        active_session = await get_active_tourney_session()
+        session_id = active_session["_id"] if active_session else None
+        if session_id:
+            await update_tourney_runtime_state(session_id, region=normalized_region)
 
         # Auto-detect Matcherino ID from #tourney-schedule (±1 day of today)
         auto_matcherino_id = None
@@ -1398,12 +1427,19 @@ def setup_tourney_commands(bot: commands.Bot):
             except Exception as e:
                 auto_detect_error = f"⚠️ Auto-detect error: `{e}`"
 
-        if auto_matcherino_id:
-            active_session = await get_active_tourney_session()
-            if active_session:
-                await update_matcherino_id(active_session["_id"], auto_matcherino_id)
+        if auto_matcherino_id and session_id:
+            await update_matcherino_id(session_id, auto_matcherino_id)
 
         await lock_command(ctx)
+
+        # Persist the lock auto-reopen deadline so a restart can re-arm the timer
+        # (or reopen immediately if it already elapsed while the bot was down).
+        if session_id:
+            await update_tourney_runtime_state(
+                session_id,
+                lock_reopens_at=datetime.datetime.utcnow()
+                + datetime.timedelta(hours=LOCK_DURATION_HOURS),
+            )
 
         # --- SA REGION LOGIC ---
         if normalized_region == "SA":
@@ -1568,7 +1604,16 @@ def setup_tourney_commands(bot: commands.Bot):
         # Rename Admin role to indicate it is not a Tourney Admin.
         admin_role = guild.get_role(ADMIN_ROLE_ID)
         if admin_role:
-            admin_role_original_name[0] = admin_role.name
+            # Don't capture the already-renamed sentinel as the "original" (guards a
+            # forced re-run while the role is still renamed from a prior start).
+            if admin_role.name != "[NOT TOURNEY ADMIN] Admin":
+                admin_role_original_name[0] = admin_role.name
+
+            # Persist so a restart can restore the correct name on !endtourney.
+            if session_id:
+                await update_tourney_runtime_state(
+                    session_id, admin_role_original_name=admin_role_original_name[0]
+                )
 
             async def _rename_admin_role():
                 try:
@@ -1614,6 +1659,15 @@ def setup_tourney_commands(bot: commands.Bot):
                 )
             except Exception as e:
                 print(f"Failed to set slow mode on general channel: {e}")
+
+        # Persist the slowmode auto-disable deadline so a restart can re-arm the timer
+        # (or clear slowmode immediately if it already elapsed while the bot was down).
+        if session_id:
+            await update_tourney_runtime_state(
+                session_id,
+                slowmode_ends_at=datetime.datetime.utcnow()
+                + datetime.timedelta(hours=1),
+            )
 
         # Cancel any existing auto-disable timer before starting a new one.
         if slowmode_auto_disable_task[0] and not slowmode_auto_disable_task[0].done():
@@ -2580,7 +2634,7 @@ def setup_tourney_commands(bot: commands.Bot):
 
         # --- 1. Session & Channel Management ---
         session_text = (
-            "`!starttourney [region]` - Wipes old tickets, locks general support, and posts the live panel. Use `!starttourney SA` for South America mode.\n"
+            "`!starttourney [region]` - Wipes old tickets, locks general support, and posts the live panel. Use `!starttourney SA` for South America mode. The bot auto-resumes after a restart, so add `force` (`!starttourney [region] force`) only to intentionally restart setup over an active session.\n"
             "`!endtourney` - Closes all active tickets, generates staff stats, posts the Pre-Tourney panel, and unlocks general support.\n"
             "`/tourney-panel` - Post the live tourney support button.\n"
             "`/pre-tourney-panel` - Post the pre-tourney support button.\n"
@@ -3131,6 +3185,129 @@ def setup_tourney_commands(bot: commands.Bot):
         print("✅ Queue Dashboard task started.")
     else:
         print("ℹ️ QueueDashboard already loaded; skipping duplicate add.")
+
+    async def resume_tourney_if_active():
+        """After a restart, non-destructively rehydrate runtime state for an
+        in-progress tourney so it continues without staff intervention. No-op if
+        there is no active session."""
+        try:
+            session = await get_active_tourney_session()
+        except Exception as e:
+            print(f"⚠️ Tourney resume: failed to read session: {e}")
+            return
+        if not session:
+            return
+
+        print("♻️ Active tourney session detected — resuming runtime state...")
+
+        # 1. Restart dashboard loops (wait briefly for the cog to finish loading,
+        #    since it is added via create_task above).
+        dashboard_cog = None
+        for _ in range(20):
+            dashboard_cog = bot.get_cog("QueueDashboard")
+            if dashboard_cog:
+                break
+            await asyncio.sleep(0.5)
+        if dashboard_cog:
+            try:
+                await dashboard_cog.start_dashboard()
+                print("♻️ Tourney dashboards resumed.")
+            except Exception as e:
+                print(f"⚠️ Tourney resume: dashboard restart failed: {e}")
+
+        # 2. Restore sticky-redirect state (SA region redirect).
+        sticky_redirect_state["enabled"] = True
+        sticky_redirect_state["region"] = session.get("region")
+
+        # 3. Restore the Admin role original name for a correct !endtourney restore.
+        stored_name = session.get("admin_role_original_name")
+        if stored_name:
+            admin_role_original_name[0] = stored_name
+
+        # 4. Rebuild the live ticket counter from existing ticket channels so new
+        #    tickets continue from the highest number instead of colliding at 1.
+        try:
+            highest = 0
+            for cat_id in (TOURNEY_CATEGORY_ID, TOURNEY_CLOSED_CATEGORY_ID):
+                category = bot.get_channel(cat_id)
+                if isinstance(category, discord.CategoryChannel):
+                    for ch in category.channels:
+                        match = re.search(r"ticket-(\d+)", ch.name)
+                        if match:
+                            highest = max(highest, int(match.group(1)))
+            if highest:
+                set_ticket_counter(highest + 1)
+                print(f"♻️ Ticket counter resumed at {highest + 1}.")
+        except Exception as e:
+            print(f"⚠️ Tourney resume: ticket counter rebuild failed: {e}")
+
+        now = datetime.datetime.utcnow()
+
+        # 5. Re-arm (or immediately clear) the slowmode auto-disable.
+        slowmode_ends_at = session.get("slowmode_ends_at")
+        if slowmode_ends_at:
+            remaining = (slowmode_ends_at - now).total_seconds()
+
+            async def _resume_disable_slowmode(delay: float):
+                try:
+                    if delay > 0:
+                        await asyncio.sleep(delay)
+                except asyncio.CancelledError:
+                    return
+                channel = bot.get_channel(GENERAL_CHANNEL_ID)
+                if isinstance(channel, discord.TextChannel):
+                    try:
+                        await channel.edit(slowmode_delay=0)
+                        print("♻️ Slowmode auto-disabled after resume.")
+                    except Exception as e:
+                        print(f"⚠️ Tourney resume: slowmode clear failed: {e}")
+
+            if (
+                slowmode_auto_disable_task[0]
+                and not slowmode_auto_disable_task[0].done()
+            ):
+                slowmode_auto_disable_task[0].cancel()
+            slowmode_auto_disable_task[0] = asyncio.create_task(
+                _resume_disable_slowmode(remaining)
+            )
+
+        # 6. Re-arm (or immediately reopen) the locked OTHER ticket channel.
+        lock_reopens_at = session.get("lock_reopens_at")
+        if lock_reopens_at:
+            remaining = (lock_reopens_at - now).total_seconds()
+            channel = bot.get_channel(OTHER_TICKET_CHANNEL_ID)
+            if isinstance(channel, discord.TextChannel):
+                member_role = (
+                    channel.guild.default_role
+                    if MEMBER_ROLE_ID is None
+                    else channel.guild.get_role(MEMBER_ROLE_ID)
+                )
+
+                async def _resume_reopen_lock(delay: float, role):
+                    try:
+                        if delay > 0:
+                            await asyncio.sleep(delay)
+                    except asyncio.CancelledError:
+                        return
+                    ch = bot.get_channel(OTHER_TICKET_CHANNEL_ID)
+                    if isinstance(ch, discord.TextChannel) and role:
+                        try:
+                            await ch.set_permissions(role, view_channel=True)
+                            print("♻️ Locked ticket channel reopened after resume.")
+                        except Exception as e:
+                            print(f"⚠️ Tourney resume: lock reopen failed: {e}")
+
+                if member_role:
+                    old = lock_tasks.get(channel.id)
+                    if old and not old.done():
+                        old.cancel()
+                    lock_tasks[channel.id] = asyncio.create_task(
+                        _resume_reopen_lock(remaining, member_role)
+                    )
+
+        print("✅ Tourney resume complete.")
+
+    asyncio.create_task(resume_tourney_if_active())
 
     bot.tree.add_command(tourney_panel)
     bot.tree.add_command(pre_tourney_panel)
