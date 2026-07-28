@@ -282,6 +282,29 @@ This bot requires **Python 3.10+** and a **MongoDB Atlas** database.
 
 ---
 
+## Hosting
+
+The bot runs 24/7 on **RamNaym Cloud** (Nano plan, the lowest paid tier), deployed via GitHub zip download.
+
+| | |
+|---|---|
+| **Host** | RamNaym Cloud |
+| **Plan** | Nano (lowest paid tier) |
+| **Plan specs** | 0.10 CPU · 256 MB RAM · 2 GB disk |
+| **Cost** | 4 EUR/year (≈ $4.55 USD as of now; paid $4.75) |
+
+**Current usage** (refresh if the plan or load changes materially):
+
+| Resource | Usage |
+|---|---|
+| vCPU load | 0.5% |
+| Memory | 126.6 / 256.0 MB |
+| Project storage | 2.1 MB / 2.00 GB |
+
+See [`docs/HOSTING.md`](docs/HOSTING.md) for the full hosting history and the reasoning behind the migration from the previous host.
+
+---
+
 ## Database
 
 Uses MongoDB database `r7_bot_db` with the following collections:

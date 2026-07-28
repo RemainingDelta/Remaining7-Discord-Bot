@@ -12,7 +12,7 @@ load_dotenv()
 MONGO_URI = os.getenv("MONGO_URI")
 
 if not MONGO_URI:
-    print("⚠️ CRITICAL: MONGO_URI missing in .env or Pella variables.")
+    print("⚠️ CRITICAL: MONGO_URI missing in .env or RamNaym Cloud variables.")
     db = None
 else:
     try:
