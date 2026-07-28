@@ -1655,7 +1655,7 @@ def setup_tourney_commands(bot: commands.Bot):
                     f"🐢 Slow mode (60s) has been enabled in {general_channel.mention}."
                 )
                 await general_channel.send(
-                    "🐢 Slow mode has been enabled for the duration of the tournament. It will be automatically removed after 1 hour."
+                    "🐢 Slow mode has been enabled to help manage tournament traffic. It will be automatically removed after 1 hour."
                 )
             except Exception as e:
                 print(f"Failed to set slow mode on general channel: {e}")
