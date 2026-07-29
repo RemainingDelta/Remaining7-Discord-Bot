@@ -10,6 +10,7 @@ from database.mongo import (
     set_sticky,
     update_sticky_message_id,
 )
+from features.config import EVENT_STAFF_ROLE_ID
 
 
 DEBOUNCE_SECONDS = 1.5
@@ -19,6 +20,12 @@ class StickyMessages(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self._pending: dict[int, asyncio.Task] = {}
+
+    def _has_permission(self, member: discord.Member) -> bool:
+        return bool(
+            member.guild_permissions.administrator
+            or member.get_role(EVENT_STAFF_ROLE_ID)
+        )
 
     async def _post_sticky(
         self, channel: discord.TextChannel, sticky_doc: dict
@@ -40,9 +47,9 @@ class StickyMessages(commands.Cog):
 
     @commands.command(name="sticky")
     async def sticky(self, ctx: commands.Context):
-        if not ctx.author.guild_permissions.administrator:
+        if not self._has_permission(ctx.author):
             await ctx.send(
-                "❌ You need Administrator permissions to use this command.",
+                "❌ You need Administrator or Event Staff permissions to use this command.",
                 delete_after=5,
             )
             return
@@ -92,9 +99,9 @@ class StickyMessages(commands.Cog):
 
     @commands.command(name="unsticky")
     async def unsticky(self, ctx: commands.Context):
-        if not ctx.author.guild_permissions.administrator:
+        if not self._has_permission(ctx.author):
             await ctx.send(
-                "❌ You need Administrator permissions to use this command.",
+                "❌ You need Administrator or Event Staff permissions to use this command.",
                 delete_after=5,
             )
             return
