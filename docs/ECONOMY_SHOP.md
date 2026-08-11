@@ -1,7 +1,11 @@
 # Economy Shop
 
 ## Overview
-The shop lets members spend R7 Tokens on real-world rewards. Redemptions open a private ticket channel where staff fulfill the order. Each fulfilled redemption reduces the monthly USD budget. Open (pending) tickets also reserve budget: the available budget is `monthly_budget − spent − pending`, so redemptions can never collectively exceed the cap. Requests that don't fit the available budget can be queued for the next month instead. The budget auto-resets on the first of each calendar month by detecting a month key change.
+The shop lets members spend R7 Tokens on real-world rewards. `/buy` deducts the tokens and
+grants the item in a **single atomic document update** (`purchase_item()` in
+`database/mongo.py`), guarded by `balance >= price` — so a crash can never leave a member
+debited with no item, and a concurrent balance write (e.g. a drop claim) can't double-charge
+or drive the balance negative. Redemptions open a private ticket channel where staff fulfill the order. Each fulfilled redemption reduces the monthly USD budget. Open (pending) tickets also reserve budget: the available budget is `monthly_budget − spent − pending`, so redemptions can never collectively exceed the cap. Requests that don't fit the available budget can be queued for the next month instead. The budget auto-resets on the first of each calendar month by detecting a month key change.
 
 ---
 
@@ -45,7 +49,7 @@ Server Boosters get a **10% token discount on one shop purchase per calendar mon
 
 Mechanics:
 - Discounted price is `_discounted_price(price)` = `int(price * 0.9)`. The discount is skipped when it would save less than 1 token (e.g. free items), so it can't be burned for nothing.
-- `booster_discount_month` is only stamped **after** a completed purchase — a failed balance check doesn't consume the month's discount. No reset logic is needed: a stale month key simply stops matching after rollover.
+- `booster_discount_month` is stamped **in the same atomic write** as the deduct/grant (passed to `purchase_item()`), so it's consumed only on a completed purchase — a failed balance check doesn't burn the month's discount, and a crash can't consume the discount without granting the item. No reset logic is needed: a stale month key simply stops matching after rollover.
 - `/shop` previews the discount for eligible viewers: `~~18000~~ **16200** R7 tokens (10% booster discount)`.
 - The **USD redemption budget is unaffected**: the discount only reduces the token price at `/buy`; redemption still consumes the full `REDEMPTION_BUDGET_COSTS` cost.
 

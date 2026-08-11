@@ -530,3 +530,53 @@ async def test_begin_pending_redemption_returns_none_when_not_owned(monkeypatch)
     monkeypatch.setattr(mongo, "db", fake_db)
 
     assert await mongo.begin_pending_redemption("42", "brawl pass", 9.0) is None
+
+
+# --- purchase_item (atomic deduct + grant) ---
+
+
+async def test_purchase_item_atomic_query_shape(monkeypatch):
+    from database import mongo
+
+    fake_db = MagicMock()
+    fake_db.users.update_one = AsyncMock(return_value=MagicMock(modified_count=1))
+    monkeypatch.setattr(mongo, "db", fake_db)
+
+    ok = await mongo.purchase_item("42", "brawl pass", 18000)
+
+    assert ok is True
+    call = fake_db.users.update_one.await_args
+    query, update = call.args[0], call.args[1]
+    # Conditional deduct: only matches when the balance still covers the price.
+    assert query == {"_id": "42", "balance": {"$gte": 18000}}
+    # Deduct + grant happen in one atomic $inc on the same document.
+    assert update["$inc"] == {"balance": -18000, "inventory.brawl pass": 1}
+    # No discount stamp requested -> no $set.
+    assert "$set" not in update
+
+
+async def test_purchase_item_returns_false_when_insufficient(monkeypatch):
+    from database import mongo
+
+    fake_db = MagicMock()
+    fake_db.users.update_one = AsyncMock(return_value=MagicMock(modified_count=0))
+    monkeypatch.setattr(mongo, "db", fake_db)
+
+    # modified_count == 0 -> balance no longer covers the price -> no-op.
+    assert await mongo.purchase_item("42", "brawl pass", 18000) is False
+
+
+async def test_purchase_item_stamps_discount_month(monkeypatch):
+    from database import mongo
+
+    fake_db = MagicMock()
+    fake_db.users.update_one = AsyncMock(return_value=MagicMock(modified_count=1))
+    monkeypatch.setattr(mongo, "db", fake_db)
+
+    ok = await mongo.purchase_item("42", "brawl pass", 16200, discount_month="2026-08")
+
+    assert ok is True
+    update = fake_db.users.update_one.await_args.args[1]
+    # The booster-discount month is stamped in the same atomic write.
+    assert update["$set"] == {"booster_discount_month": "2026-08"}
+    assert update["$inc"] == {"balance": -16200, "inventory.brawl pass": 1}

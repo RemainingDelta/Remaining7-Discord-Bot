@@ -197,6 +197,28 @@ async def remove_item_token(user_id: str, item_name: str, quantity: int = 1):
     )
 
 
+async def purchase_item(
+    user_id: str, item_name: str, price: int, discount_month: str | None = None
+) -> bool:
+    """Atomically deduct `price` tokens and grant one `item_name`, only if the
+    balance still covers the price. Optionally stamp the booster-discount month in
+    the same write. All three fields live on the one users doc, so a single
+    update_one is atomic — a crash can never deduct without granting (or vice
+    versa), and the `balance >= price` guard blocks double-spend / negative
+    balances under concurrency. Returns False (no-op) if the balance no longer
+    covers the price."""
+    if db is None:
+        return False
+    update = {"$inc": {"balance": -price, f"inventory.{item_name}": 1}}
+    if discount_month is not None:
+        update["$set"] = {"booster_discount_month": discount_month}
+    result = await db.users.update_one(
+        {"_id": user_id, "balance": {"$gte": price}},
+        update,
+    )
+    return result.modified_count > 0
+
+
 # --- PENDING REDEMPTION HELPERS ---
 # Crash-safety for /redeem: a durable marker written atomically with the token
 # removal, reconciled once at startup so a hard crash mid-redeem can never lose
