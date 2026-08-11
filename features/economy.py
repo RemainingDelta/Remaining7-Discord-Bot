@@ -16,9 +16,9 @@ from database.mongo import (
     update_leveling_data,
     add_item_token,
     get_booster_discount_month,
-    set_booster_discount_month,
     get_item_count,
     remove_item_token,
+    purchase_item,
     get_setting,
     set_setting,
     get_leaderboard_page,
@@ -1444,13 +1444,27 @@ class Economy(commands.Cog):
             await interaction.response.send_message(embed=embed, ephemeral=True)
             return
 
-        new_balance = balance - price
-        await update_user_balance(user_id, new_balance)
-        await add_item_token(user_id, item)
-        if discount_applied:
-            # Marked only after a completed purchase, so a failed balance
-            # check doesn't consume the monthly discount.
-            await set_booster_discount_month(user_id, _budget_month_key())
+        # Deduct tokens, grant the item, and (for boosters) stamp the monthly
+        # discount in a single atomic document update. Both effects live on the
+        # one users doc, so a crash can never leave the tokens gone without the
+        # item. The `balance >= price` guard also blocks a concurrent balance
+        # write (e.g. a drop claim) from letting the purchase go through twice or
+        # drive the balance negative.
+        discount_month = _budget_month_key() if discount_applied else None
+        purchased = await purchase_item(user_id, item, price, discount_month)
+        if not purchased:
+            # Lost a race: the balance dropped below the price between the check
+            # and the commit. No tokens were spent and no item was granted.
+            fresh = await get_user_balance(user_id)
+            embed = discord.Embed(
+                title="❌ **Insufficient Balance**",
+                description=f"You need **{int(price - fresh)} more R7 tokens** to purchase **{item_info['display']}**.",
+                color=discord.Color.red(),
+            )
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+            return
+
+        new_balance = await get_user_balance(user_id)
 
         description = (
             f"You have purchased **{item_info['display']}**!\n"
