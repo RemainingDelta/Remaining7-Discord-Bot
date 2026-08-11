@@ -197,6 +197,84 @@ async def remove_item_token(user_id: str, item_name: str, quantity: int = 1):
     )
 
 
+# --- PENDING REDEMPTION HELPERS ---
+# Crash-safety for /redeem: a durable marker written atomically with the token
+# removal, reconciled once at startup so a hard crash mid-redeem can never lose
+# the item silently (see reconcile_pending_redemptions in features/economy.py).
+
+
+async def begin_pending_redemption(
+    user_id: str, item: str, budget_usd: float
+) -> str | None:
+    """Atomically consume one item token and record a pending-redemption marker.
+
+    The decrement and the marker are a single-document update, so there is no
+    window where the token is gone without a durable marker (or vice versa). The
+    conditional match also prevents two concurrent /redeem calls from driving the
+    inventory below zero. Returns the pending id, or None if the user no longer
+    owns the item (caller should abort).
+    """
+    if db is None:
+        return None
+    pending_id = str(ObjectId())
+    result = await db.users.update_one(
+        {"_id": user_id, f"inventory.{item}": {"$gte": 1}},
+        {
+            "$inc": {f"inventory.{item}": -1},
+            "$push": {
+                "pending_redemptions": {
+                    "id": pending_id,
+                    "item": item,
+                    "budget_usd": budget_usd,
+                    "channel_id": None,
+                    "created_at": datetime.utcnow(),
+                }
+            },
+        },
+    )
+    return pending_id if result.modified_count else None
+
+
+async def set_pending_redemption_channel(
+    user_id: str, pending_id: str, channel_id: int
+):
+    """Record the created ticket's channel id on the pending marker, so a crash
+    after ticket creation is decidable on reconcile (ticket exists → no refund)."""
+    if db is None:
+        return
+    await db.users.update_one(
+        {"_id": user_id},
+        {"$set": {"pending_redemptions.$[e].channel_id": channel_id}},
+        array_filters=[{"e.id": pending_id}],
+    )
+
+
+async def clear_pending_redemption(user_id: str, pending_id: str):
+    """Remove a pending-redemption marker by id (happy-path cleanup or reconcile)."""
+    if db is None:
+        return
+    await db.users.update_one(
+        {"_id": user_id},
+        {"$pull": {"pending_redemptions": {"id": pending_id}}},
+    )
+
+
+async def get_all_pending_redemptions() -> list[dict]:
+    """Returns every outstanding pending-redemption marker, flattened to rows of
+    {user_id, id, item, budget_usd, channel_id, created_at}."""
+    if db is None:
+        return []
+    rows: list[dict] = []
+    cursor = db.users.find(
+        {"pending_redemptions": {"$exists": True, "$ne": []}},
+        {"pending_redemptions": 1},
+    )
+    async for doc in cursor:
+        for entry in doc.get("pending_redemptions", []):
+            rows.append({"user_id": doc["_id"], **entry})
+    return rows
+
+
 async def get_setting(key: str, default: str = None):
     if db is None:
         return default

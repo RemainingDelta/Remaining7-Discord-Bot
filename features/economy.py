@@ -29,6 +29,10 @@ from database.mongo import (
     add_redemption_queue_entry,
     get_redemption_queue,
     remove_redemption_queue_entry,
+    begin_pending_redemption,
+    set_pending_redemption_channel,
+    clear_pending_redemption,
+    get_all_pending_redemptions,
 )
 
 # --- CONFIGURATION ---
@@ -1006,6 +1010,7 @@ class Economy(commands.Cog):
         self.supply_drop_task.start()
         self.booster_drop_task.start()
         self.redemption_queue_task.start()
+        self.pending_redemption_reconcile_task.start()
 
     async def cog_load(self):
         self.bot.add_view(RedemptionClosedOptionsView())
@@ -1014,6 +1019,7 @@ class Economy(commands.Cog):
         self.supply_drop_task.cancel()
         self.booster_drop_task.cancel()
         self.redemption_queue_task.cancel()
+        self.pending_redemption_reconcile_task.cancel()
 
     # --- REDEMPTION QUEUE PROCESSING ---
     @tasks.loop(hours=1)
@@ -1033,6 +1039,79 @@ class Economy(commands.Cog):
             return
 
         await set_setting("redemption_queue_processed_month", current_key)
+
+    # --- PENDING REDEMPTION RECONCILE (crash recovery) ---
+    @tasks.loop(count=1)
+    async def pending_redemption_reconcile_task(self):
+        """Runs once per process, after the bot is ready. A cog is loaded once
+        and not re-added on gateway reconnect, so this is cold-boot-only — there
+        are no in-flight redemptions to race, hence no stale-age gate is needed."""
+        await self.bot.wait_until_ready()
+        try:
+            await self.reconcile_pending_redemptions()
+        except Exception as e:
+            print(f"❌ Pending redemption reconcile failed: {e}")
+
+    async def reconcile_pending_redemptions(self):
+        """Resolve pending-redemption markers left over from a crash.
+
+        Decidable per marker so it never both keeps a ticket and refunds
+        (double value), nor does neither (silent loss):
+        - has channel_id  -> the ticket was created -> clear, no refund.
+        - no channel_id   -> scan the redemption category by topic; if a matching
+          ticket exists (crash landed in the create->persist window) adopt it with
+          no refund, otherwise refund the item and clear.
+        """
+        pending = await get_all_pending_redemptions()
+        if not pending:
+            return
+
+        category = self.bot.get_channel(REDEMPTION_TICKET_CATEGORY_ID)
+        open_tickets = (
+            list(category.text_channels)
+            if isinstance(category, discord.CategoryChannel)
+            else None
+        )
+
+        for row in pending:
+            user_id = row["user_id"]
+            pending_id = row["id"]
+            item = row["item"]
+
+            # Ticket was created (channel_id persisted) -> item already delivered
+            # to a ticket. Never refund, whether or not the channel still exists.
+            if row.get("channel_id") is not None:
+                await clear_pending_redemption(user_id, pending_id)
+                continue
+
+            # No channel_id: the ticket may still have been created just before
+            # the crash. Can't verify without the category -> leave the marker for
+            # a later reconcile rather than risk a double refund.
+            if open_tickets is None:
+                print(
+                    "⚠️ Redemption reconcile: category unavailable, deferring "
+                    f"pending redemption {pending_id} for {user_id}."
+                )
+                continue
+
+            ticket_exists = any(
+                _extract_topic_value(ch.topic, "redemption-opener") == str(user_id)
+                and _extract_topic_value(ch.topic, "item") == item
+                for ch in open_tickets
+            )
+
+            if ticket_exists:
+                # Crash in the create->persist window; ticket is real, no refund.
+                await clear_pending_redemption(user_id, pending_id)
+            else:
+                # Crash before/at ticket creation; the token was consumed with no
+                # ticket ever made -> refund it.
+                await add_item_token(user_id, item, quantity=1)
+                await clear_pending_redemption(user_id, pending_id)
+                print(
+                    f"↩️ Redemption reconcile: refunded {item} to {user_id} "
+                    "(no ticket found for crashed redemption)."
+                )
 
     async def process_redemption_queue(self):
         """Fulfills queued redemptions FIFO against the new month's budget.
@@ -1454,6 +1533,8 @@ class Economy(commands.Cog):
 
         await interaction.response.defer()
 
+        pending_id = None
+        ticket_created = False
         try:
             # Re-check after defer in case a concurrent redemption claimed
             # the remaining budget.
@@ -1467,12 +1548,29 @@ class Economy(commands.Cog):
                     )
                     return
 
-            await remove_item_token(user_id, item)
-            await _increment_redeem_counter(item)
+            # Consume the token and write a durable pending marker in one atomic
+            # op, so a hard crash before the ticket exists is recoverable on
+            # startup (reconcile_pending_redemptions). None => the item was
+            # claimed by a concurrent redemption; abort without side effects.
+            pending_id = await begin_pending_redemption(user_id, item, budget_cost)
+            if pending_id is None:
+                await interaction.followup.send(
+                    "❌ That item is no longer available on your account. "
+                    "Please run `/redeem` again.",
+                    ephemeral=True,
+                )
+                return
 
             ch = await create_redemption_ticket(
                 interaction.guild, interaction.user, item, budget_cost
             )
+            ticket_created = True
+
+            # Record the ticket so a crash after this point is decidable on
+            # reconcile (ticket exists → no refund), then finish bookkeeping.
+            await set_pending_redemption_channel(user_id, pending_id, ch.id)
+            await _increment_redeem_counter(item)
+            await clear_pending_redemption(user_id, pending_id)
 
             instructions = _redemption_instructions(item)
             embed = discord.Embed(
@@ -1483,7 +1581,14 @@ class Economy(commands.Cog):
             await interaction.followup.send(embed=embed)
 
         except Exception as e:
-            await add_item_token(user_id, item, quantity=1)
+            # In-process failure: self-heal now. (A hard crash skips this handler;
+            # the startup reconcile covers that case.) Refund only when no ticket
+            # was created — if one was, the token was delivered, so just drop the
+            # marker to avoid a double (ticket + refund).
+            if pending_id is not None:
+                if not ticket_created:
+                    await add_item_token(user_id, item, quantity=1)
+                await clear_pending_redemption(user_id, pending_id)
             await interaction.followup.send(
                 f"❌ **Error** Failed to create ticket: {e}", ephemeral=True
             )
