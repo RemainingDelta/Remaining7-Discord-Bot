@@ -388,3 +388,145 @@ async def test_queue_processing_raises_without_category(monkeypatch):
 
     with pytest.raises(RuntimeError):
         await cog.process_redemption_queue()
+
+
+# --- reconcile_pending_redemptions (crash recovery) ---
+
+
+def _make_category_with_ticket_topics(topics):
+    category = MagicMock(spec=discord.CategoryChannel)
+    category.text_channels = [_fake_ticket_channel(t) for t in topics]
+    return category
+
+
+def _patch_reconcile_helpers(monkeypatch, pending_rows):
+    """Patches the reconcile collaborators; returns (refund, clear) mocks."""
+    refund = AsyncMock()
+    clear = AsyncMock()
+    monkeypatch.setattr(
+        "features.economy.get_all_pending_redemptions",
+        AsyncMock(return_value=pending_rows),
+    )
+    monkeypatch.setattr("features.economy.add_item_token", refund)
+    monkeypatch.setattr("features.economy.clear_pending_redemption", clear)
+    return refund, clear
+
+
+async def test_reconcile_noop_when_nothing_pending(monkeypatch):
+    cog, _ = _make_economy_cog(_make_category_with_ticket_topics([]))
+    refund, clear = _patch_reconcile_helpers(monkeypatch, [])
+
+    await cog.reconcile_pending_redemptions()
+
+    refund.assert_not_awaited()
+    clear.assert_not_awaited()
+
+
+async def test_reconcile_with_channel_id_clears_without_refund(monkeypatch):
+    # Ticket was created (channel_id persisted) -> never refund.
+    cog, _ = _make_economy_cog(_make_category_with_ticket_topics([]))
+    rows = [
+        {"user_id": "1", "id": "p1", "item": "brawl pass", "channel_id": 999},
+    ]
+    refund, clear = _patch_reconcile_helpers(monkeypatch, rows)
+
+    await cog.reconcile_pending_redemptions()
+
+    refund.assert_not_awaited()
+    clear.assert_awaited_once_with("1", "p1")
+
+
+async def test_reconcile_no_channel_no_ticket_refunds(monkeypatch):
+    # Crash before/at ticket creation, no matching ticket exists -> refund.
+    cog, _ = _make_economy_cog(_make_category_with_ticket_topics([]))
+    rows = [
+        {"user_id": "1", "id": "p1", "item": "brawl pass", "channel_id": None},
+    ]
+    refund, clear = _patch_reconcile_helpers(monkeypatch, rows)
+
+    await cog.reconcile_pending_redemptions()
+
+    refund.assert_awaited_once_with("1", "brawl pass", quantity=1)
+    clear.assert_awaited_once_with("1", "p1")
+
+
+async def test_reconcile_no_channel_matching_ticket_adopts_without_refund(monkeypatch):
+    # Crash in the create->persist window: a ticket exists for this user+item.
+    category = _make_category_with_ticket_topics(
+        ["redemption-opener:1|item:brawl pass|budget_usd:9.00"]
+    )
+    cog, _ = _make_economy_cog(category)
+    rows = [
+        {"user_id": "1", "id": "p1", "item": "brawl pass", "channel_id": None},
+    ]
+    refund, clear = _patch_reconcile_helpers(monkeypatch, rows)
+
+    await cog.reconcile_pending_redemptions()
+
+    refund.assert_not_awaited()
+    clear.assert_awaited_once_with("1", "p1")
+
+
+async def test_reconcile_ticket_match_requires_same_item(monkeypatch):
+    # A ticket for a different item must not be adopted -> still refunds.
+    category = _make_category_with_ticket_topics(
+        ["redemption-opener:1|item:nitro|budget_usd:10.00"]
+    )
+    cog, _ = _make_economy_cog(category)
+    rows = [
+        {"user_id": "1", "id": "p1", "item": "brawl pass", "channel_id": None},
+    ]
+    refund, clear = _patch_reconcile_helpers(monkeypatch, rows)
+
+    await cog.reconcile_pending_redemptions()
+
+    refund.assert_awaited_once_with("1", "brawl pass", quantity=1)
+    clear.assert_awaited_once_with("1", "p1")
+
+
+async def test_reconcile_defers_when_category_unavailable(monkeypatch):
+    # Without the category we cannot verify a ticket -> leave marker, no refund.
+    cog, _ = _make_economy_cog(None)
+    rows = [
+        {"user_id": "1", "id": "p1", "item": "brawl pass", "channel_id": None},
+    ]
+    refund, clear = _patch_reconcile_helpers(monkeypatch, rows)
+
+    await cog.reconcile_pending_redemptions()
+
+    refund.assert_not_awaited()
+    clear.assert_not_awaited()
+
+
+# --- begin_pending_redemption (atomic token consume + marker) ---
+
+
+async def test_begin_pending_redemption_atomic_query_shape(monkeypatch):
+    from database import mongo
+
+    fake_db = MagicMock()
+    fake_db.users.update_one = AsyncMock(return_value=MagicMock(modified_count=1))
+    monkeypatch.setattr(mongo, "db", fake_db)
+
+    pending_id = await mongo.begin_pending_redemption("42", "brawl pass", 9.0)
+
+    assert isinstance(pending_id, str) and pending_id
+    call = fake_db.users.update_one.await_args
+    query, update = call.args[0], call.args[1]
+    # Conditional decrement: only matches when the user still owns the item.
+    assert query == {"_id": "42", "inventory.brawl pass": {"$gte": 1}}
+    assert update["$inc"] == {"inventory.brawl pass": -1}
+    pushed = update["$push"]["pending_redemptions"]
+    assert pushed["id"] == pending_id
+    assert pushed["item"] == "brawl pass"
+    assert pushed["channel_id"] is None
+
+
+async def test_begin_pending_redemption_returns_none_when_not_owned(monkeypatch):
+    from database import mongo
+
+    fake_db = MagicMock()
+    fake_db.users.update_one = AsyncMock(return_value=MagicMock(modified_count=0))
+    monkeypatch.setattr(mongo, "db", fake_db)
+
+    assert await mongo.begin_pending_redemption("42", "brawl pass", 9.0) is None
