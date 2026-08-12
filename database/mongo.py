@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 import os
 import re
 import uuid
@@ -122,6 +122,86 @@ async def mark_poll_reward_processed(
             "total_distributed": amount * voter_count,
             "processed_at": datetime.utcnow(),
         }
+    )
+
+
+# --- EVENT REWARD LEDGER (per-recipient, two-state, crash-safe) ---
+
+
+async def claim_event_reward_payout(
+    message_id: str, user_id: str, amount: int, admin_id: str
+) -> bool:
+    """Atomically claim one recipient's payout, writing paid:False before payment.
+
+    Returns True if this call newly claimed the payout (caller should pay now).
+    Returns False if a doc already exists for this message+user (already paid, or
+    claimed-but-stuck) — the caller should skip it. Keyed message_id+user_id so a
+    re-run after a crash skips already-handled users instead of double-paying.
+    """
+    if db is None:
+        return False
+    key = f"{message_id}:{user_id}"
+    result = await db.event_reward_payouts.find_one_and_update(
+        {"_id": key},
+        {
+            "$setOnInsert": {
+                "_id": key,
+                "message_id": str(message_id),
+                "user_id": str(user_id),
+                "amount": int(amount),
+                "admin_id": str(admin_id),
+                "paid": False,
+                "claimed_at": datetime.utcnow(),
+            }
+        },
+        upsert=True,
+        return_document=False,
+    )
+    return result is None  # None = doc didn't exist before — we own this payout
+
+
+async def mark_event_reward_paid(message_id: str, user_id: str):
+    """Commit point: flag the recipient's tokens as confirmed paid."""
+    if db is None:
+        return
+    await db.event_reward_payouts.update_one(
+        {"_id": f"{message_id}:{user_id}"},
+        {"$set": {"paid": True, "paid_at": datetime.utcnow()}},
+    )
+
+
+async def get_stuck_event_reward_payouts(older_than_seconds: int = 60) -> list:
+    """Rows claimed but never confirmed paid — a crash between the claim and the
+    balance $inc. The age gate skips in-flight payouts so an on-demand check run
+    during a live payout doesn't false-positive on a row about to be committed.
+    """
+    if db is None:
+        return []
+    cutoff = datetime.utcnow() - timedelta(seconds=older_than_seconds)
+    cursor = db.event_reward_payouts.find(
+        {"paid": False, "claimed_at": {"$lt": cutoff}}
+    )
+    return await cursor.to_list(length=None)
+
+
+async def resolve_stuck_event_reward_payout(
+    message_id: str, user_id: str, resolver_id: str
+):
+    """Marks a stuck row resolved after a staff manual /give, so it stops being
+    reported. Records who resolved it for audit — does NOT move any tokens.
+    """
+    if db is None:
+        return
+    await db.event_reward_payouts.update_one(
+        {"_id": f"{message_id}:{user_id}", "paid": False},
+        {
+            "$set": {
+                "paid": True,
+                "manually_resolved": True,
+                "resolved_by": str(resolver_id),
+                "paid_at": datetime.utcnow(),
+            }
+        },
     )
 
 

@@ -5,11 +5,13 @@ from datetime import datetime, time
 import zoneinfo
 import re
 from database.mongo import (
-    get_user_balance,
+    claim_event_reward_payout,
+    get_stuck_event_reward_payouts,
     increment_user_balance,
     is_poll_reward_processed,
+    mark_event_reward_paid,
     mark_poll_reward_processed,
-    update_user_balance,
+    resolve_stuck_event_reward_payout,
 )
 
 from features.config import (
@@ -149,18 +151,29 @@ class PayoutConfirmView(discord.ui.View):
 
         await interaction.response.defer()
 
-        processed_log = []
+        paid_log = []
+        skipped = 0
         total_distributed = 0
+        mid = str(self.original_msg.id)
+        admin = str(self.interaction_user.id)
 
         # --- EXECUTE PAYOUTS ---
+        # Claim -> pay -> commit, per recipient. The claim writes a paid:False
+        # ledger row before the $inc; a pre-existing row (already paid, or a
+        # crashed prior run) makes the claim skip, so re-running after a crash
+        # only pays recipients who were never claimed — never a double payout.
         for user_id_str, amount_str in self.matches:
             user_id = str(user_id_str)
             amount = int(amount_str)
 
-            current_bal = await get_user_balance(user_id)
-            await update_user_balance(user_id, current_bal + amount)
+            if not await claim_event_reward_payout(mid, user_id, amount, admin):
+                skipped += 1
+                continue
 
-            processed_log.append(f"<@{user_id}>: +{amount}")
+            await increment_user_balance(user_id, amount)
+            await mark_event_reward_paid(mid, user_id)  # commit point
+
+            paid_log.append(f"<@{user_id}>: +{amount}")
             total_distributed += amount
 
         # Mark original message with a checkmark
@@ -174,9 +187,14 @@ class PayoutConfirmView(discord.ui.View):
         embed.title = "✅ Payouts Complete"
         embed.color = discord.Color.green()
         embed.clear_fields()
+        summary = (
+            f"Distributed **{total_distributed}** tokens to **{len(paid_log)}** users."
+        )
+        if skipped:
+            summary += f"\nSkipped **{skipped}** already-processed recipients."
         embed.add_field(
             name="Summary",
-            value=f"Distributed **{total_distributed}** tokens to **{len(self.matches)}** users.",
+            value=summary,
             inline=False,
         )
 
@@ -298,9 +316,11 @@ class Events(commands.Cog):
         self.bot = bot
         self._warning_msg_ids: dict[int, int] = {}  # channel_id → warning message_id
         self.cleanup_check_task.start()
+        self.event_reward_reconcile_task.start()
 
     def cog_unload(self):
         self.cleanup_check_task.cancel()
+        self.event_reward_reconcile_task.cancel()
 
     async def has_event_permission(self, interaction: discord.Interaction):
         if isinstance(interaction.user, discord.Member):
@@ -433,6 +453,58 @@ class Events(commands.Cog):
             except Exception as e:
                 print(f"Error checking history for #{name}-event: {e}")
 
+    # --- EVENT REWARD CRASH RECOVERY ---
+
+    @tasks.loop(count=1)
+    async def event_reward_reconcile_task(self):
+        """Runs once per process, after the bot is ready. A cog is loaded once
+        and not re-added on gateway reconnect, so this is cold-boot-only."""
+        await self.bot.wait_until_ready()
+        try:
+            await self.reconcile_event_rewards()
+        except Exception as e:
+            print(f"❌ Event reward reconcile failed: {e}")
+
+    async def reconcile_event_rewards(self):
+        """Reports (does NOT re-pay) any recipient left claimed-but-unpaid by a
+        crash between the ledger claim and the balance $inc. Re-paying can't be
+        safe here: a paid:False row can't tell 'crashed before the $inc' from
+        'crashed after it', so an auto-repay could double-pay. Staff recover with
+        a manual /give and clear the row via /check-stuck-payouts."""
+        stuck = await get_stuck_event_reward_payouts()
+        if not stuck:
+            return
+
+        staff_channel = self.bot.get_channel(EVENT_STAFF_CHANNEL_ID)
+        if not staff_channel:
+            print("❌ Event reward reconcile: staff channel not found.")
+            return
+
+        lines = [
+            f"• <@{row['user_id']}> — **{row.get('amount', 0)}** tokens "
+            f"(msg `{row.get('message_id', '?')}`)"
+            for row in stuck
+        ]
+        text = "\n".join(lines)
+        if len(text) > 1024:
+            text = text[:960] + "\n... (more hidden)"
+
+        embed = discord.Embed(
+            title="⚠️ Stuck Event Payouts Detected",
+            description=(
+                f"**{len(stuck)}** recipient(s) were claimed for an event payout "
+                "but their tokens were never confirmed (likely a crash mid-payout).\n"
+                "These were **not** auto-paid to avoid double-paying. Pay each with "
+                "`/give`, then run `/check-stuck-payouts resolve:True` to clear them."
+            ),
+            color=discord.Color.orange(),
+        )
+        embed.add_field(name="Unconfirmed Recipients", value=text, inline=False)
+        try:
+            await staff_channel.send(embed=embed)
+        except Exception as e:
+            print(f"❌ Event reward reconcile: failed to post report: {e}")
+
     @app_commands.command(
         name="event-rewards",
         description="ADMIN ONLY: Distribute tokens from an announcement.",
@@ -512,6 +584,77 @@ class Events(commands.Cog):
 
         view = PayoutConfirmView(target_message, matches, interaction.user)
         await interaction.followup.send(embed=embed, view=view)
+
+    @app_commands.command(
+        name="check-stuck-payouts",
+        description="ADMIN ONLY: List event payouts claimed but never confirmed paid.",
+    )
+    @app_commands.describe(
+        resolve="Mark the listed rows resolved (only after you've paid them via /give)."
+    )
+    async def check_stuck_payouts(
+        self, interaction: discord.Interaction, resolve: bool = False
+    ):
+        # 1. Permission Check - STRICTLY ADMIN ONLY
+        if not interaction.user.get_role(ADMIN_ROLE_ID):
+            await interaction.response.send_message(
+                "❌ Permission Denied: Only Admins can check payouts.", ephemeral=True
+            )
+            return
+
+        # 2. Channel Check
+        if interaction.channel_id != EVENT_STAFF_CHANNEL_ID:
+            await interaction.response.send_message(
+                f"❌ Please use this command in <#{EVENT_STAFF_CHANNEL_ID}>.",
+                ephemeral=True,
+            )
+            return
+
+        await interaction.response.defer(ephemeral=True)
+
+        stuck = await get_stuck_event_reward_payouts()
+        if not stuck:
+            await interaction.followup.send(
+                "✅ No stuck payouts — every claimed recipient was confirmed paid."
+            )
+            return
+
+        lines = []
+        for row in stuck:
+            lines.append(
+                f"• <@{row['user_id']}> — **{row.get('amount', 0)}** tokens "
+                f"(msg `{row.get('message_id', '?')}`)"
+            )
+        text = "\n".join(lines)
+        if len(text) > 1024:
+            text = text[:960] + "\n... (more hidden)"
+
+        if resolve:
+            for row in stuck:
+                await resolve_stuck_event_reward_payout(
+                    row.get("message_id", ""),
+                    row.get("user_id", ""),
+                    str(interaction.user.id),
+                )
+            title = "🧹 Stuck Payouts Resolved"
+            description = (
+                f"Marked **{len(stuck)}** row(s) resolved. Make sure you paid each "
+                "with `/give` first — this only clears the report, it moves no tokens."
+            )
+            color = discord.Color.green()
+        else:
+            title = "⚠️ Stuck Event Payouts"
+            description = (
+                f"**{len(stuck)}** recipient(s) were claimed but never confirmed "
+                "paid (likely a crash mid-payout). Pay each with `/give`, then run "
+                "`/check-stuck-payouts resolve:True` to clear them. Nothing is "
+                "auto-paid — re-paying could double-pay."
+            )
+            color = discord.Color.orange()
+
+        embed = discord.Embed(title=title, description=description, color=color)
+        embed.add_field(name="Recipients", value=text, inline=False)
+        await interaction.followup.send(embed=embed)
 
     @app_commands.command(
         name="poll-rewards",
@@ -670,7 +813,9 @@ class Events(commands.Cog):
             "`/event-rewards <message_id>` - Process token distribution from an announcement message.\n"
             "*(Message must use `@User 500` format. Admin only.)*\n\n"
             "`/poll-rewards <message_id> <answer> <amount>` - Distribute tokens to all voters of a poll option.\n"
-            "*(Poll must be finalized. Case-insensitive option match. Admin only.)*"
+            "*(Poll must be finalized. Case-insensitive option match. Admin only.)*\n\n"
+            "`/check-stuck-payouts [resolve]` - List event payouts claimed but never confirmed paid.\n"
+            "*(Pay each with `/give`, then re-run with `resolve:True` to clear. Admin only.)*"
         )
         embed.add_field(name="🏆 Reward Distribution", value=reward_text, inline=False)
 
