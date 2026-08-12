@@ -1016,6 +1016,7 @@ async def assign_random_quest(user_id: str, q_key: str, is_booster: bool = False
         "reward_exp": quest.get("reward_exp", 0),
         "progress": 0,
         "completed": False,
+        "rewarded": False,
         "booster_reduced": is_booster,
         "date_assigned": datetime.utcnow(),
     }
@@ -1048,7 +1049,13 @@ async def update_quest_progress(user_id: str, q_key: str, amount: int = 1):
 
     quest = user_q[q_key]
     if quest["completed"]:
-        return False, None
+        # Legacy completed quests (assigned before the rewarded field existed)
+        # default to paid, so they are never re-granted. Only an explicit
+        # rewarded:False — a crash between the completed write and the payout —
+        # re-signals a payout so the caller can retry it.
+        if quest.get("rewarded", True):
+            return False, None
+        return True, quest
 
     new_progress = quest["progress"] + amount
     target = quest["target_count"]
@@ -1064,6 +1071,57 @@ async def update_quest_progress(user_id: str, q_key: str, amount: int = 1):
             {"_id": user_id}, {"$inc": {f"{q_key}.progress": amount}}
         )
         return False, None
+
+
+QUEST_KEYS = ("daily_message", "weekly_message", "daily_megabox", "weekly_megabox")
+
+
+async def add_quest_reward(user_id: str, tokens: int, exp: int):
+    """Atomically grant a quest's tokens + XP in a single users-doc $inc.
+
+    balance and exp both live on the one users doc, so this can never pay tokens
+    without XP (or vice versa). Paid before the rewarded flag is set so a crash
+    leaves the quest re-payable rather than losing the reward.
+    """
+    if db is None:
+        return
+    inc = {}
+    if tokens:
+        inc["balance"] = tokens
+    if exp:
+        inc["exp"] = exp
+    if not inc:
+        return
+    await db.users.update_one({"_id": str(user_id)}, {"$inc": inc}, upsert=True)
+
+
+async def mark_quest_rewarded(user_id: str, q_key: str):
+    """Flags a completed quest's reward as paid out (commit point of the payout)."""
+    if db is None:
+        return
+    await db.user_quests.update_one(
+        {"_id": user_id}, {"$set": {f"{q_key}.rewarded": True}}
+    )
+
+
+async def get_unrewarded_completed_quests():
+    """Returns [(user_id, q_key, quest_entry), ...] for quests flagged completed
+    whose reward never landed — a crash between the completed write and the
+    payout. Matching rewarded:False (not $ne True) excludes legacy quests that
+    predate the field and were already paid under the old code path.
+    """
+    if db is None:
+        return []
+    query = {
+        "$or": [{f"{k}.completed": True, f"{k}.rewarded": False} for k in QUEST_KEYS]
+    }
+    out = []
+    async for doc in db.user_quests.find(query):
+        for k in QUEST_KEYS:
+            q = doc.get(k)
+            if q and q.get("completed") and q.get("rewarded") is False:
+                out.append((doc["_id"], k, q))
+    return out
 
 
 # --- TOURNAMENT STATS HELPERS ---

@@ -55,10 +55,41 @@ For each relevant quest slot (`daily_message` + `weekly_message` for messages; `
 2. If no quest exists, `assign_random_quest(user_id, q_key)` randomly picks one from the `quests` collection matching the slot's frequency+category, assigns it, and returns it
 3. `update_quest_progress(user_id, q_key)` — increments the progress counter by 1 and returns `(completed: bool, quest_data: dict)`
 4. If completed:
-   - Token reward added via `update_user_balance()`
-   - XP reward added via `update_leveling_data()`
+   - Token + XP reward paid in a **single atomic `$inc`** via `add_quest_reward()` (`balance`, `level`, and `exp` all live on the one `users` doc, so tokens and XP can never split)
+   - The quest is then flagged paid via `mark_quest_rewarded()` (sets `rewarded: True`)
    - A "Quest Completed!" embed is sent in the channel where the completion trigger occurred
    - A new quest is auto-assigned for the same slot (the `update_quest_progress` function handles the reassignment internally)
+
+---
+
+## Crash-Safe Reward Payout
+
+Completion and payout are tracked by **two separate flags** on each `user_quests`
+slot: `completed: True` (target reached) and `rewarded: True` (reward paid). They
+are distinct because the reward lands on the `users` doc while the flags live on
+the `user_quests` doc — a single write can't span both, so payout is ordered as:
+
+1. `update_quest_progress` sets `completed: True` (leaving `rewarded: False`)
+2. `add_quest_reward` pays tokens + XP (one atomic `$inc`)
+3. `mark_quest_rewarded` sets `rewarded: True`
+
+Because the reward is paid **before** the `rewarded` flag, a crash never loses it
+(**at-least-once**): the quest is simply left `completed: True, rewarded: False`
+and re-paid on retry. The only cost is a vanishingly small double-pay window if
+the crash lands between steps 2 and 3 — an accepted tradeoff vs. permanent loss.
+
+**Two independent retry paths** re-pay a `completed: True, rewarded: False` quest:
+- **Next-message retry** — `update_quest_progress` returns `(True, quest)` for a
+  completed-but-unrewarded quest, so the user's next qualifying message re-runs
+  the payout block. Covers active chatters.
+- **Startup reconcile** — `quest_reward_reconcile_task` (a `@tasks.loop(count=1)`
+  in the `Quests` cog) scans `get_unrewarded_completed_quests()` once on boot and
+  pays any leftovers silently. Backstops anyone who never chats again.
+
+**Backward-compat:** quests assigned before the `rewarded` field existed have no
+such field. The retry gate treats an **absent** field as already-paid (only an
+explicit `rewarded: False` triggers a retry, and the reconcile query matches
+`rewarded: False`, not `$ne: True`), so legacy completed quests are never re-paid.
 
 ---
 
@@ -86,4 +117,4 @@ Shows 4 progress bars, one per slot. Each bar renders as a sequence of filled/em
 ---
 
 ## Source File
-`features/quests.py` — `Quests` cog with `process_quest_update()`
+`features/quests.py` — `Quests` cog with `process_quest_update()` and `quest_reward_reconcile_task`. Quest DB helpers (including `add_quest_reward`, `mark_quest_rewarded`, `get_unrewarded_completed_quests`) live in `database/mongo.py`.
