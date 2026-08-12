@@ -147,6 +147,27 @@ Audit log for poll reward distributions. Tracks `message_id` of processed polls 
 
 ---
 
+### `event_reward_payouts`
+Per-recipient, two-state ledger for `/event-rewards` — prevents double-paying when the command is re-run after a crash/restart. One document per recipient per announcement message.
+
+`_id = "{message_id}:{user_id}"` (composite key; each user appears at most once per announcement).
+
+| Field | Type | Purpose |
+|-------|------|---------|
+| `message_id` | str | Source announcement message |
+| `user_id` | str | Recipient |
+| `amount` | int | Tokens owed on this line |
+| `admin_id` | str | Admin who ran the payout |
+| `paid` | bool | `False` at claim (before the balance `$inc`), flipped `True` after it lands |
+| `claimed_at` | datetime | When the row was claimed |
+| `paid_at` | datetime | When confirmed paid (or resolved) |
+| `manually_resolved` | bool | Set when a stuck row was cleared via `/check-stuck-payouts resolve:True` |
+| `resolved_by` | str | Admin who manually resolved it |
+
+The payout loop **claims → pays → commits** per recipient: the claim writes a `paid:False` row atomically (`find_one_and_update` + `$setOnInsert`); a pre-existing row makes the claim skip, so a re-run only pays never-claimed recipients. Rows stuck at `paid:False` (a crash between claim and `$inc`) are **never auto-repaid** — a `paid:False` row can't distinguish "crashed before the `$inc`" from "crashed after it". They are surfaced to staff by a cold-boot reconcile report and the `/check-stuck-payouts` command, and recovered manually via `/give`.
+
+---
+
 ### `sticky`
 Sticky message data per channel. `_id = str(channel_id)`.
 
