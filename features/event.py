@@ -5,13 +5,13 @@ from datetime import datetime, time
 import zoneinfo
 import re
 from database.mongo import (
-    claim_event_reward_payout,
-    get_stuck_event_reward_payouts,
+    claim_reward_payout,
+    get_stuck_reward_payouts,
     increment_user_balance,
     is_poll_reward_processed,
-    mark_event_reward_paid,
     mark_poll_reward_processed,
-    resolve_stuck_event_reward_payout,
+    mark_reward_paid,
+    resolve_stuck_reward_payout,
 )
 
 from features.config import (
@@ -166,12 +166,14 @@ class PayoutConfirmView(discord.ui.View):
             user_id = str(user_id_str)
             amount = int(amount_str)
 
-            if not await claim_event_reward_payout(mid, user_id, amount, admin):
+            if not await claim_reward_payout(
+                mid, user_id, amount, admin, source="event"
+            ):
                 skipped += 1
                 continue
 
             await increment_user_balance(user_id, amount)
-            await mark_event_reward_paid(mid, user_id)  # commit point
+            await mark_reward_paid(mid, user_id)  # commit point
 
             paid_log.append(f"<@{user_id}>: +{amount}")
             total_distributed += amount
@@ -261,14 +263,30 @@ class PollPayoutConfirmView(discord.ui.View):
             await interaction.edit_original_response(embed=embed, view=self)
             return
 
-        # Distribute tokens atomically
+        # Distribute tokens via the crash-safe reward ledger: claim -> pay ->
+        # commit, per voter. The claim writes a paid:False row before the $inc;
+        # a pre-existing row (already paid, or a crashed prior run) makes the
+        # claim skip, so re-running after a crash only pays never-claimed voters.
+        mid = str(self.original_msg.id)
+        admin = str(interaction.user.id)
+        paid_count = 0
+        skipped = 0
         for voter in self.voters:
-            await increment_user_balance(str(voter.id), self.amount)
+            uid = str(voter.id)
+            if not await claim_reward_payout(
+                mid, uid, self.amount, admin, source="poll"
+            ):
+                skipped += 1
+                continue
+            await increment_user_balance(uid, self.amount)
+            await mark_reward_paid(mid, uid)  # commit point
+            paid_count += 1
 
-        # Record in DB
+        # Record whole-message completion — a fast-path idempotency gate + audit
+        # record above the ledger; a clean re-run short-circuits before iterating.
         await mark_poll_reward_processed(
-            message_id=str(self.original_msg.id),
-            admin_id=str(interaction.user.id),
+            message_id=mid,
+            admin_id=admin,
             answer_text=self.answer_text,
             amount=self.amount,
             voter_count=len(self.voters),
@@ -281,17 +299,20 @@ class PollPayoutConfirmView(discord.ui.View):
             pass
 
         # Update confirmation embed
-        total = self.amount * len(self.voters)
+        total = self.amount * paid_count
         embed = interaction.message.embeds[0]
         embed.title = "✅ Poll Rewards Complete"
         embed.color = discord.Color.green()
         embed.clear_fields()
+        summary = (
+            f"Distributed **{total}** tokens to **{paid_count}** voters.\n"
+            f"(**{self.amount}** tokens each for option: *{self.answer_text}*)"
+        )
+        if skipped:
+            summary += f"\nSkipped **{skipped}** already-processed voters."
         embed.add_field(
             name="Summary",
-            value=(
-                f"Distributed **{total}** tokens to **{len(self.voters)}** voters.\n"
-                f"(**{self.amount}** tokens each for option: *{self.answer_text}*)"
-            ),
+            value=summary,
             inline=False,
         )
         for child in self.children:
@@ -316,11 +337,11 @@ class Events(commands.Cog):
         self.bot = bot
         self._warning_msg_ids: dict[int, int] = {}  # channel_id → warning message_id
         self.cleanup_check_task.start()
-        self.event_reward_reconcile_task.start()
+        self.reward_reconcile_task.start()
 
     def cog_unload(self):
         self.cleanup_check_task.cancel()
-        self.event_reward_reconcile_task.cancel()
+        self.reward_reconcile_task.cancel()
 
     async def has_event_permission(self, interaction: discord.Interaction):
         if isinstance(interaction.user, discord.Member):
@@ -453,36 +474,36 @@ class Events(commands.Cog):
             except Exception as e:
                 print(f"Error checking history for #{name}-event: {e}")
 
-    # --- EVENT REWARD CRASH RECOVERY ---
+    # --- REWARD PAYOUT CRASH RECOVERY ---
 
     @tasks.loop(count=1)
-    async def event_reward_reconcile_task(self):
+    async def reward_reconcile_task(self):
         """Runs once per process, after the bot is ready. A cog is loaded once
         and not re-added on gateway reconnect, so this is cold-boot-only."""
         await self.bot.wait_until_ready()
         try:
-            await self.reconcile_event_rewards()
+            await self.reconcile_reward_payouts()
         except Exception as e:
-            print(f"❌ Event reward reconcile failed: {e}")
+            print(f"❌ Reward payout reconcile failed: {e}")
 
-    async def reconcile_event_rewards(self):
+    async def reconcile_reward_payouts(self):
         """Reports (does NOT re-pay) any recipient left claimed-but-unpaid by a
         crash between the ledger claim and the balance $inc. Re-paying can't be
         safe here: a paid:False row can't tell 'crashed before the $inc' from
         'crashed after it', so an auto-repay could double-pay. Staff recover with
         a manual /give and clear the row via /check-stuck-payouts."""
-        stuck = await get_stuck_event_reward_payouts()
+        stuck = await get_stuck_reward_payouts()
         if not stuck:
             return
 
         staff_channel = self.bot.get_channel(EVENT_STAFF_CHANNEL_ID)
         if not staff_channel:
-            print("❌ Event reward reconcile: staff channel not found.")
+            print("❌ Reward payout reconcile: staff channel not found.")
             return
 
         lines = [
             f"• <@{row['user_id']}> — **{row.get('amount', 0)}** tokens "
-            f"(msg `{row.get('message_id', '?')}`)"
+            f"({row.get('source', 'event')}, msg `{row.get('message_id', '?')}`)"
             for row in stuck
         ]
         text = "\n".join(lines)
@@ -490,9 +511,9 @@ class Events(commands.Cog):
             text = text[:960] + "\n... (more hidden)"
 
         embed = discord.Embed(
-            title="⚠️ Stuck Event Payouts Detected",
+            title="⚠️ Stuck Reward Payouts Detected",
             description=(
-                f"**{len(stuck)}** recipient(s) were claimed for an event payout "
+                f"**{len(stuck)}** recipient(s) were claimed for a reward payout "
                 "but their tokens were never confirmed (likely a crash mid-payout).\n"
                 "These were **not** auto-paid to avoid double-paying. Pay each with "
                 "`/give`, then run `/check-stuck-payouts resolve:True` to clear them."
@@ -503,7 +524,7 @@ class Events(commands.Cog):
         try:
             await staff_channel.send(embed=embed)
         except Exception as e:
-            print(f"❌ Event reward reconcile: failed to post report: {e}")
+            print(f"❌ Reward payout reconcile: failed to post report: {e}")
 
     @app_commands.command(
         name="event-rewards",
@@ -612,7 +633,7 @@ class Events(commands.Cog):
 
         await interaction.response.defer(ephemeral=True)
 
-        stuck = await get_stuck_event_reward_payouts()
+        stuck = await get_stuck_reward_payouts()
         if not stuck:
             await interaction.followup.send(
                 "✅ No stuck payouts — every claimed recipient was confirmed paid."
@@ -623,7 +644,7 @@ class Events(commands.Cog):
         for row in stuck:
             lines.append(
                 f"• <@{row['user_id']}> — **{row.get('amount', 0)}** tokens "
-                f"(msg `{row.get('message_id', '?')}`)"
+                f"({row.get('source', 'event')}, msg `{row.get('message_id', '?')}`)"
             )
         text = "\n".join(lines)
         if len(text) > 1024:
@@ -631,7 +652,7 @@ class Events(commands.Cog):
 
         if resolve:
             for row in stuck:
-                await resolve_stuck_event_reward_payout(
+                await resolve_stuck_reward_payout(
                     row.get("message_id", ""),
                     row.get("user_id", ""),
                     str(interaction.user.id),
@@ -643,7 +664,7 @@ class Events(commands.Cog):
             )
             color = discord.Color.green()
         else:
-            title = "⚠️ Stuck Event Payouts"
+            title = "⚠️ Stuck Reward Payouts"
             description = (
                 f"**{len(stuck)}** recipient(s) were claimed but never confirmed "
                 "paid (likely a crash mid-payout). Pay each with `/give`, then run "

@@ -143,21 +143,22 @@ Key entries:
 ---
 
 ### `processed_poll_rewards`
-Audit log for poll reward distributions. Tracks `message_id` of processed polls to prevent double-paying.
+Audit log for poll reward distributions. Tracks `message_id` of processed polls to prevent double-paying. This is the fast-path whole-message gate; the per-voter `reward_payouts` ledger sits **beneath** it for crash-safety when a run dies mid-loop before this gate is written.
 
 ---
 
-### `event_reward_payouts`
-Per-recipient, two-state ledger for `/event-rewards` — prevents double-paying when the command is re-run after a crash/restart. One document per recipient per announcement message.
+### `reward_payouts`
+Per-recipient, two-state ledger **shared by `/event-rewards` and `/poll-rewards`** — prevents double-paying when either command is re-run after a crash/restart. One document per recipient per source message. (Message IDs are globally-unique Discord snowflakes, so event and poll rows never collide on the composite key.)
 
-`_id = "{message_id}:{user_id}"` (composite key; each user appears at most once per announcement).
+`_id = "{message_id}:{user_id}"` (composite key; each user appears at most once per source message).
 
 | Field | Type | Purpose |
 |-------|------|---------|
-| `message_id` | str | Source announcement message |
+| `message_id` | str | Source announcement or poll message |
 | `user_id` | str | Recipient |
 | `amount` | int | Tokens owed on this line |
 | `admin_id` | str | Admin who ran the payout |
+| `source` | str | `"event"` or `"poll"` — which command claimed the row (informational; recovery is `/give` either way) |
 | `paid` | bool | `False` at claim (before the balance `$inc`), flipped `True` after it lands |
 | `claimed_at` | datetime | When the row was claimed |
 | `paid_at` | datetime | When confirmed paid (or resolved) |
