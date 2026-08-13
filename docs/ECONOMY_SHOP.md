@@ -132,7 +132,7 @@ When a `/redeem` request exceeds the available budget, the member gets an epheme
 `redemption_queue_task` is an hourly `tasks.loop` on the Economy cog. Each tick it compares `redemption_queue_processed_month` with the current month key; if they differ (new month, or bot was offline on the 1st), it runs `process_redemption_queue()` and stamps the key only on success (a failed run retries next hour).
 
 `process_redemption_queue()` walks the queue in FIFO order:
-- **Member left the server** → entry is dropped, the item's token price is refunded to their balance, and a note is posted to `REDEMPTION_TRANSCRIPT_CHANNEL_ID`.
+- **Member left the server** → entry is dropped, the item's token price is refunded to their balance, and a note is posted to `REDEMPTION_TRANSCRIPT_CHANNEL_ID`. A departure is only concluded after confirming against the API: on a `get_member` cache miss (e.g. right after a restart, when the member cache is cold) the code calls `fetch_member` and treats **only** a `discord.NotFound` as "left". A transient `discord.HTTPException` leaves the entry queued for the next cycle rather than wrongly refunding an active member.
 - **Cost > available budget** (recomputed every iteration, so tickets opened earlier in the run count as pending) → entry is skipped and carries over to the next month; cheaper later entries may still be fulfilled.
 - **Otherwise** → a ticket is created via `create_redemption_ticket()` (pinging the member) and the entry is removed — only after the channel is successfully created, so failures leave the entry queued.
 

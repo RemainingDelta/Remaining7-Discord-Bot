@@ -1131,6 +1131,21 @@ class Economy(commands.Cog):
 
             member = guild.get_member(int(user_id))
             if member is None:
+                # A cache miss (e.g. right after a restart) does NOT mean the
+                # user left. Confirm against the API before dropping/refunding.
+                try:
+                    member = await guild.fetch_member(int(user_id))
+                except discord.NotFound:
+                    member = None  # Genuinely left — fall through to refund.
+                except discord.HTTPException as e:
+                    # Transient error — leave the entry queued, retry next cycle.
+                    print(
+                        f"⚠️ Redemption queue: fetch_member failed for "
+                        f"{user_id}, retrying next cycle: {e}"
+                    )
+                    continue
+
+            if member is None:
                 # Opener left the server — drop the entry and refund tokens.
                 await remove_redemption_queue_entry(str(entry["_id"]))
                 refund = _token_price_for_item(item)

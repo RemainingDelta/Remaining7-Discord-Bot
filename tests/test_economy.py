@@ -282,11 +282,20 @@ def _make_economy_cog(category):
     return cog, transcript_channel
 
 
-def _make_category_with_members(member_ids):
+def _http_error(exc_type, status):
+    """Builds a discord HTTP exception without a real aiohttp response."""
+    return exc_type(MagicMock(status=status), "boom")
+
+
+def _make_category_with_members(member_ids, fetch_member=None):
     category = MagicMock(spec=discord.CategoryChannel)
     guild = MagicMock(spec=discord.Guild)
     members = {mid: MagicMock(spec=discord.Member) for mid in member_ids}
     guild.get_member = MagicMock(side_effect=members.get)
+    # A cache miss falls back to fetch_member; default to "genuinely gone".
+    guild.fetch_member = fetch_member or AsyncMock(
+        side_effect=_http_error(discord.NotFound, 404)
+    )
     category.guild = guild
     return category
 
@@ -362,6 +371,47 @@ async def test_queue_processing_refunds_when_member_left(monkeypatch):
     remove_entry.assert_awaited_once_with("a1")
     refund.assert_awaited_once_with("1", _token_price_for_item("brawl pass"))
     transcript_channel.send.assert_awaited_once()
+
+
+async def test_queue_processing_keeps_entry_on_cache_miss_when_member_present(
+    monkeypatch,
+):
+    # get_member misses (cold cache) but the user is still in the server, so
+    # fetch_member resolves them — the redemption must proceed, not refund.
+    fetch_member = AsyncMock(return_value=MagicMock(spec=discord.Member))
+    category = _make_category_with_members([], fetch_member=fetch_member)
+    cog, transcript_channel = _make_economy_cog(category)
+    entries = [{"_id": "a1", "user_id": "1", "item": "brawl pass"}]
+    create_ticket, remove_entry, refund = _patch_queue_helpers(
+        monkeypatch, entries, budgets=[50.0]
+    )
+
+    await cog.process_redemption_queue()
+
+    fetch_member.assert_awaited_once_with(1)
+    create_ticket.assert_awaited_once()
+    remove_entry.assert_awaited_once_with("a1")
+    refund.assert_not_awaited()
+    transcript_channel.send.assert_not_awaited()
+
+
+async def test_queue_processing_skips_entry_on_transient_fetch_error(monkeypatch):
+    # A transient API error must NOT be treated as "user left" — leave the entry
+    # queued for the next cycle without refunding or dropping it.
+    fetch_member = AsyncMock(side_effect=_http_error(discord.HTTPException, 503))
+    category = _make_category_with_members([], fetch_member=fetch_member)
+    cog, transcript_channel = _make_economy_cog(category)
+    entries = [{"_id": "a1", "user_id": "1", "item": "brawl pass"}]
+    create_ticket, remove_entry, refund = _patch_queue_helpers(
+        monkeypatch, entries, budgets=[50.0]
+    )
+
+    await cog.process_redemption_queue()
+
+    create_ticket.assert_not_awaited()
+    remove_entry.assert_not_awaited()
+    refund.assert_not_awaited()
+    transcript_channel.send.assert_not_awaited()
 
 
 async def test_queue_entry_kept_when_ticket_creation_fails(monkeypatch):
