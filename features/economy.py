@@ -29,6 +29,9 @@ from database.mongo import (
     add_redemption_queue_entry,
     get_redemption_queue,
     remove_redemption_queue_entry,
+    claim_redemption_queue_entry,
+    set_redemption_queue_entry_channel,
+    get_stuck_redemption_queue_entries,
     begin_pending_redemption,
     set_pending_redemption_channel,
     clear_pending_redemption,
@@ -1047,10 +1050,16 @@ class Economy(commands.Cog):
         and not re-added on gateway reconnect, so this is cold-boot-only — there
         are no in-flight redemptions to race, hence no stale-age gate is needed."""
         await self.bot.wait_until_ready()
+        # Independent try/except so a failure in one reconcile can't skip the
+        # other on a given boot.
         try:
             await self.reconcile_pending_redemptions()
         except Exception as e:
             print(f"❌ Pending redemption reconcile failed: {e}")
+        try:
+            await self.reconcile_redemption_queue()
+        except Exception as e:
+            print(f"❌ Redemption queue reconcile failed: {e}")
 
     async def reconcile_pending_redemptions(self):
         """Resolve pending-redemption markers left over from a crash.
@@ -1113,6 +1122,74 @@ class Economy(commands.Cog):
                     "(no ticket found for crashed redemption)."
                 )
 
+    async def reconcile_redemption_queue(self):
+        """Resolve redemption-queue entries claimed for ticket creation but never
+        removed — a crash between the claim and the removal in
+        process_redemption_queue.
+
+        Decidable per entry so it never both keeps a ticket and refunds (double
+        value), nor does neither (silent loss):
+        - has channel_id  -> the ticket was created -> drop the entry, no refund.
+        - no channel_id   -> scan the redemption category by topic; if a matching
+          ticket exists (crash landed in the create->persist window) drop it with
+          no refund, otherwise return the item and drop the entry.
+        """
+        entries = await get_stuck_redemption_queue_entries()
+        if not entries:
+            return
+
+        category = self.bot.get_channel(REDEMPTION_TICKET_CATEGORY_ID)
+        open_tickets = (
+            list(category.text_channels)
+            if isinstance(category, discord.CategoryChannel)
+            else None
+        )
+
+        for entry in entries:
+            entry_id = str(entry["_id"])
+            user_id = entry["user_id"]
+            item = entry["item"]
+
+            # Channel recorded -> the ticket was created. Never refund, whether or
+            # not the channel still exists.
+            if entry.get("channel_id") is not None:
+                await remove_redemption_queue_entry(entry_id)
+                continue
+
+            # No channel_id: the ticket may still have been created just before
+            # the crash. Can't verify without the category -> leave the entry for
+            # a later reconcile rather than risk a double (ticket + refund).
+            if open_tickets is None:
+                print(
+                    "⚠️ Redemption queue reconcile: category unavailable, "
+                    f"deferring entry {entry_id} for {user_id}."
+                )
+                continue
+
+            ticket_exists = any(
+                _extract_topic_value(ch.topic, "redemption-opener") == str(user_id)
+                and _extract_topic_value(ch.topic, "item") == item
+                for ch in open_tickets
+            )
+
+            if ticket_exists:
+                # Crash in the create->persist window; ticket is real, no refund.
+                await remove_redemption_queue_entry(entry_id)
+            else:
+                # Crash before/at ticket creation; the queued item was consumed
+                # with no ticket ever made -> return it to the member's inventory.
+                await add_item_token(user_id, item, quantity=1)
+                await remove_redemption_queue_entry(entry_id)
+                transcript_channel = self.bot.get_channel(
+                    REDEMPTION_TRANSCRIPT_CHANNEL_ID
+                )
+                if transcript_channel:
+                    await transcript_channel.send(
+                        f"↩️ Queued **{item}** redemption for <@{user_id}> could not "
+                        "be completed (bot restarted before the ticket opened) — the "
+                        "item was returned to their inventory."
+                    )
+
     async def process_redemption_queue(self):
         """Fulfills queued redemptions FIFO against the new month's budget.
 
@@ -1128,6 +1205,11 @@ class Economy(commands.Cog):
             item = entry["item"]
             user_id = entry["user_id"]
             cost = _budget_cost_for_item(item)
+
+            # A claimed entry is a crash leftover (ticket may already exist) — it
+            # belongs to the cold-boot reconcile, never reprocess it here.
+            if entry.get("claimed_at") is not None:
+                continue
 
             member = guild.get_member(int(user_id))
             if member is None:
@@ -1167,12 +1249,21 @@ class Economy(commands.Cog):
             if cost > available:
                 continue
 
+            # Claim before creating so a crash between the ticket creation and
+            # the entry removal can't double-create on the next run: the claimed
+            # entry is skipped above and resolved by the cold-boot reconcile.
+            if not await claim_redemption_queue_entry(str(entry["_id"])):
+                continue
+
             try:
-                await create_redemption_ticket(guild, member, item, cost)
+                ch = await create_redemption_ticket(guild, member, item, cost)
                 await _increment_redeem_counter(item)
+                # Record the channel so a crash after this point is decidable on
+                # reconcile (channel present → ticket exists → no refund).
+                await set_redemption_queue_entry_channel(str(entry["_id"]), ch.id)
             except Exception as e:
                 print(f"❌ Failed to open queued redemption for {user_id}: {e}")
-                continue
+                continue  # leave it claimed; cold-boot reconcile resolves it
 
             await remove_redemption_queue_entry(str(entry["_id"]))
 
