@@ -140,6 +140,11 @@ Key entries:
 | `monthly_budget` | Budget cap as float string |
 | `manual_total_spent` | Cumulative USD spent this month |
 | `brawlpass_redeemed_count` | Legacy per-item counter |
+| `booster_drop_message_id` | Message ID of the live booster-channel drop; cleared on claim/expiry |
+| `last_message_{user_id}` | Epoch-seconds of the user's last passive token award (20s cooldown) |
+| `pending_winner_announcement` | JSON marker (`matcherino_id`, `updates_channel_id`, `expires_at`) driving the crash-safe `!endtourney` winner retry |
+| `last_monthly_report_month` | `"YYYY-MM"` of the last month a tournament report was generated for (idempotent gate + catch-up) |
+| `last_event_cleanup_day` | `"YYYY-MM-DD"` (ET) of the last event-channel cleanup run (missed-run logging) |
 
 ---
 
@@ -167,6 +172,20 @@ Per-recipient, two-state ledger **shared by `/event-rewards` and `/poll-rewards`
 | `resolved_by` | str | Admin who manually resolved it |
 
 The payout loop **claims → pays → commits** per recipient: the claim writes a `paid:False` row atomically (`find_one_and_update` + `$setOnInsert`); a pre-existing row makes the claim skip, so a re-run only pays never-claimed recipients. Rows stuck at `paid:False` (a crash between claim and `$inc`) are **never auto-repaid** — a `paid:False` row can't distinguish "crashed before the `$inc`" from "crashed after it". They are surfaced to staff by a cold-boot reconcile report and the `/check-stuck-payouts` command, and recovered manually via `/give`.
+
+---
+
+### `drop_claims`
+Atomic single-claim guard for token supply/booster/admin drops. One document per drop **message**, keyed by the drop message's ID, recording the first (and only) claimer. Replaces the old in-memory `DropView.claimed` flag so the guard survives a restart and serializes two near-simultaneous clicks.
+
+`_id = "{message_id}"`.
+
+| Field | Type | Purpose |
+|-------|------|---------|
+| `claimed_by` | str | User ID of the winning claimer |
+| `ts` | datetime | Claim time; a TTL index (`expireAfterSeconds=604800`) auto-expires the record after 7 days |
+
+`claim_drop(message_id, user_id)` does a `find_one_and_update` + `$setOnInsert`: `None` returned means no prior record (this caller won and gets paid via `increment_user_balance`); a returned doc means it was already claimed. `ensure_drop_claims_ttl_index()` (called from `Economy.cog_load`) creates the TTL index.
 
 ---
 

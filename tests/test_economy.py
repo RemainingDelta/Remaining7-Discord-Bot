@@ -1040,3 +1040,45 @@ async def test_apply_queue_refund_returns_false_on_replay(monkeypatch):
     monkeypatch.setattr(mongo, "db", fake_db)
 
     assert await mongo.apply_queue_refund("1", "a1", tokens=9) is False
+
+
+# --- claim_drop (atomic, restart-safe per-drop single-claim guard) ---
+
+
+async def test_claim_drop_won_when_new(monkeypatch):
+    # find_one_and_update returns None -> no prior record -> this caller claimed it.
+    from database import mongo
+
+    fake_db = MagicMock()
+    fake_db.drop_claims.find_one_and_update = AsyncMock(return_value=None)
+    monkeypatch.setattr(mongo, "db", fake_db)
+
+    assert await mongo.claim_drop("msg1", "u1") is True
+
+
+async def test_claim_drop_lost_when_already_claimed(monkeypatch):
+    # A pre-existing record (someone else, possibly before a restart) -> reject.
+    from database import mongo
+
+    fake_db = MagicMock()
+    fake_db.drop_claims.find_one_and_update = AsyncMock(
+        return_value={"_id": "msg1", "claimed_by": "u2"}
+    )
+    monkeypatch.setattr(mongo, "db", fake_db)
+
+    assert await mongo.claim_drop("msg1", "u1") is False
+
+
+async def test_claim_drop_records_claimer_via_setoninsert(monkeypatch):
+    from database import mongo
+
+    fake_db = MagicMock()
+    fake_db.drop_claims.find_one_and_update = AsyncMock(return_value=None)
+    monkeypatch.setattr(mongo, "db", fake_db)
+
+    await mongo.claim_drop("msg1", "u1")
+
+    _, update = fake_db.drop_claims.find_one_and_update.call_args.args
+    kwargs = fake_db.drop_claims.find_one_and_update.call_args.kwargs
+    assert update["$setOnInsert"]["claimed_by"] == "u1"
+    assert kwargs["upsert"] is True

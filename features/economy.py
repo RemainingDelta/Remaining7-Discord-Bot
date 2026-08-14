@@ -24,6 +24,8 @@ from database.mongo import (
     purchase_item,
     get_setting,
     set_setting,
+    claim_drop,
+    ensure_drop_claims_ttl_index,
     get_leaderboard_page,
     get_total_users,
     get_user_rank,
@@ -967,19 +969,35 @@ class ShopPaginationView(discord.ui.View):
         await interaction.response.edit_message(embed=self.create_embed(), view=self)
 
 
-class DropView(discord.ui.View):
-    def __init__(self, amount, on_claim=None):
-        super().__init__(timeout=None)
-        self.amount = amount
-        self.claimed = False
-        self.on_claim = on_claim
+class DropClaimButton(
+    discord.ui.DynamicItem[discord.ui.Button],
+    template=r"drop_claim:(?P<amount>\d+)",
+):
+    """Persistent claim button for supply/booster/admin drops.
 
-    @discord.ui.button(
-        label="Claim Supply Drop", style=discord.ButtonStyle.green, emoji="🎁"
-    )
-    async def claim_callback(
-        self, interaction: discord.Interaction, button: discord.ui.Button
-    ):
+    The token amount rides in the custom_id (`drop_claim:{amount}`) so the button
+    survives a restart: registered once via `bot.add_dynamic_items(DropClaimButton)`
+    in Economy.cog_load, discord.py rebuilds it from the custom_id for interactions
+    on drop messages sent before the restart — which the old plain View (no custom_id,
+    never re-registered) could not do, leaving outstanding drops permanently dead.
+    """
+
+    def __init__(self, amount: int):
+        self.amount = amount
+        super().__init__(
+            discord.ui.Button(
+                label="Claim Supply Drop",
+                style=discord.ButtonStyle.green,
+                emoji="🎁",
+                custom_id=f"drop_claim:{amount}",
+            )
+        )
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match):
+        return cls(int(match["amount"]))
+
+    async def callback(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
 
         if any(role.id == MODERATOR_ROLE_ID for role in interaction.user.roles):
@@ -988,34 +1006,46 @@ class DropView(discord.ui.View):
             )
             return
 
-        if self.claimed:
+        # Atomic, restart-safe single-claim guard (replaces the in-memory `claimed`
+        # flag, which reset on restart and raced across the defer() above).
+        message = interaction.message
+        if not await claim_drop(str(message.id), str(interaction.user.id)):
             await interaction.followup.send("❌ Already claimed!", ephemeral=True)
             return
 
-        self.claimed = True
+        # 1. Pay atomically ($inc) — no read-modify-write.
+        await increment_user_balance(str(interaction.user.id), self.amount)
 
-        # 1. Update Database
-        uid = str(interaction.user.id)
-        current_bal = await get_user_balance(uid)
-        await update_user_balance(uid, current_bal + self.amount)
+        # 2. Clear the booster-drop marker if this was the live booster drop. The
+        #    persistent button has no on_claim closure, so do it here directly.
+        if message.channel.id == BOOSTER_CHANNEL_ID:
+            if await get_setting("booster_drop_message_id") == str(message.id):
+                await set_setting("booster_drop_message_id", "")
 
-        # 2. Update Button to "Claimed"
-        button.disabled = True
-        button.label = f"Claimed by {interaction.user.display_name}"
-        button.style = discord.ButtonStyle.secondary
+        # 3. Update the button to "Claimed" and edit the message.
+        self.item.disabled = True
+        self.item.label = f"Claimed by {interaction.user.display_name}"
+        self.item.style = discord.ButtonStyle.secondary
+        view = discord.ui.View(timeout=None)
+        view.add_item(self)
 
-        # 3. Edit Message
-        embed = interaction.message.embeds[0]
+        embed = message.embeds[0]
         embed.color = discord.Color.light_grey()
-        embed.description = f"**📦 CLAIMED!**\n\n**{interaction.user.mention}** grabbed **{self.amount} Tokens**!"
-
-        await interaction.edit_original_response(embed=embed, view=self)
+        embed.description = (
+            f"**📦 CLAIMED!**\n\n**{interaction.user.mention}** grabbed "
+            f"**{self.amount} Tokens**!"
+        )
+        await interaction.edit_original_response(embed=embed, view=view)
         await interaction.followup.send(
             f"🎉 **+{self.amount} Tokens** added to your account!", ephemeral=True
         )
 
-        if self.on_claim:
-            await self.on_claim(interaction)
+
+def build_drop_view(amount: int) -> discord.ui.View:
+    """A persistent (timeout=None) view carrying one DropClaimButton."""
+    view = discord.ui.View(timeout=None)
+    view.add_item(DropClaimButton(amount))
+    return view
 
 
 # --- COG ---
@@ -1028,15 +1058,41 @@ class Economy(commands.Cog):
         self.booster_drop_task.start()
         self.redemption_queue_task.start()
         self.pending_redemption_reconcile_task.start()
+        self.booster_drop_reconcile_task.start()
 
     async def cog_load(self):
         self.bot.add_view(RedemptionClosedOptionsView())
+        # Persistent drop-claim button: re-registered so outstanding supply/booster/
+        # admin drops stay claimable after a restart (the amount rides in the
+        # custom_id). Without this every pre-restart drop button is inert.
+        self.bot.add_dynamic_items(DropClaimButton)
+        try:
+            await ensure_drop_claims_ttl_index()
+        except Exception as e:
+            print(f"⚠️ Economy: could not create drop_claims TTL index: {e}")
 
     def cog_unload(self):
         self.supply_drop_task.cancel()
         self.booster_drop_task.cancel()
         self.redemption_queue_task.cancel()
         self.pending_redemption_reconcile_task.cancel()
+        self.booster_drop_reconcile_task.cancel()
+
+    # --- BOOSTER DROP MARKER RECONCILE (crash recovery) ---
+    @tasks.loop(count=1)
+    async def booster_drop_reconcile_task(self):
+        """Cold-boot-only. If a crash left a booster_drop_message_id marker set,
+        resolve it immediately instead of waiting up to ~4h for the next drop to
+        expire it lazily. _expire_previous_booster_drop edits the stale drop to
+        EXPIRED (or clears the marker if the message is gone)."""
+        await self.bot.wait_until_ready()
+        channel = self.bot.get_channel(BOOSTER_CHANNEL_ID)
+        if not channel:
+            return
+        try:
+            await self._expire_previous_booster_drop(channel)
+        except Exception as e:
+            print(f"❌ Booster drop marker reconcile failed: {e}")
 
     # --- REDEMPTION QUEUE PROCESSING ---
     @tasks.loop(hours=1)
@@ -1393,9 +1449,15 @@ class Economy(commands.Cog):
                 if is_booster and random.random() < 0.35:
                     earned_tokens += 1
 
-                current_balance = await get_user_balance(user_id)
-                await update_user_balance(user_id, current_balance + earned_tokens)
+                # Stamp the cooldown BEFORE granting so a crash between the two
+                # writes loses a tiny 2-6 token reward rather than re-awarding on
+                # the next message. (Balance lives on the user doc and the cooldown
+                # in settings, so they can't be one atomic write — stamp-first is the
+                # crash-safe ordering.) Grant via atomic $inc, no read-modify-write.
+                # NOTE: this deliberately reverses #412's paid-first choice; there the
+                # reward was large enough to prioritize never-lose over never-double.
                 await set_setting(f"last_message_{user_id}", str(current_timestamp))
+                await increment_user_balance(user_id, earned_tokens)
 
             # --- PART 2: XP & LEVELING ---
             EXP_PER_MESSAGE = 10
@@ -1445,7 +1507,7 @@ class Economy(commands.Cog):
             description=f"A crate containing **{amount} R7 Tokens** has landed!\n\n**Click FAST to claim it!**",
             color=discord.Color.red(),
         )
-        await channel.send(embed=embed, view=DropView(amount))
+        await channel.send(embed=embed, view=build_drop_view(amount))
         print(f"🪂 Auto-Drop sent: {amount} tokens")
 
     # --- BOOSTER CHANNEL DROP TASK ---
@@ -1474,12 +1536,10 @@ class Economy(commands.Cog):
             color=discord.Color.fuchsia(),
         )
 
-        async def on_claim(interaction: discord.Interaction):
-            stored_id = await get_setting("booster_drop_message_id")
-            if stored_id == str(interaction.message.id):
-                await set_setting("booster_drop_message_id", "")
-
-        msg = await channel.send(embed=embed, view=DropView(amount, on_claim=on_claim))
+        # The claim button clears booster_drop_message_id itself (see
+        # DropClaimButton.callback) — no on_claim closure needed, which is what
+        # lets the button survive a restart as a persistent dynamic item.
+        msg = await channel.send(embed=embed, view=build_drop_view(amount))
         await set_setting("booster_drop_message_id", str(msg.id))
         print(f"🚀 Booster drop sent: {amount} tokens")
 
@@ -1533,7 +1593,7 @@ class Economy(commands.Cog):
             description=f"Admin summoned **{amount} R7 Tokens**!",
             color=discord.Color.gold(),
         )
-        view = DropView(amount)
+        view = build_drop_view(amount)
         await target_channel.send(embed=embed, view=view)
         await interaction.response.send_message(
             f"✅ Drop sent to {target_channel.mention}!", ephemeral=True

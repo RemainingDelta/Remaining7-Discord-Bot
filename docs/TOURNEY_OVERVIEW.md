@@ -59,7 +59,7 @@ Because the bot auto-resumes, re-running `!starttourney` while a session is acti
 ### What it does (in order)
 
 1. **Forces a final announcement sync**: calls `fetch_bracket_progress()` and `announce_high_stakes_matches()` one last time so the winner post doesn't depend on the 5-minute loop timing
-2. **Schedules a winner retry** if the winner isn't yet available (Matcherino API lag) — retries after 5 minutes via `asyncio.create_task`
+2. **Arms a crash-safe winner retry** if the winner isn't yet available (Matcherino API lag). Instead of a fire-and-forget `asyncio.create_task` (lost on a restart, and the session is already `finished` so `resume_tourney_if_active` can't recover it), it persists a `pending_winner_announcement` marker in `settings` (`matcherino_id`, `updates_channel_id`, and a ~1h deadline) and starts a retry loop that re-checks every 5 minutes until the winner is posted or the deadline passes. On boot, `QueueDashboard.winner_reconcile_task` (a `count=1` loop) re-arms the loop from the marker, so a restart mid-wait no longer drops the announcement. Posting is idempotent (it scans the updates channel for the exact `# GGs!` message before sending).
 3. **Stops dashboard loops** and deletes dashboard messages from the admin channel
 4. **Disables sticky redirects** and cleans up any redirect messages posted during the tournament
 5. **Revokes Tourney Admin** `moderate_members` permission

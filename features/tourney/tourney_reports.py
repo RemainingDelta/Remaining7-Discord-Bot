@@ -6,10 +6,17 @@ import discord
 from discord import app_commands
 from discord.ext import commands, tasks
 
+from database.mongo import get_setting, set_setting
 from features.config import (
     ALLOWED_STAFF_ROLES,
     TOURNEY_REPORT_CHANNEL_ID,
 )
+
+# Settings key recording the "YYYY-MM" of the last month a report was generated for.
+# Gates the scheduled run so it's idempotent, and lets a cold-boot catch-up detect a
+# run missed because the bot was down at 06:00 UTC on the 1st (a time= loop silently
+# skips missed firings — no back-fill).
+LAST_MONTHLY_REPORT_KEY = "last_monthly_report_month"
 
 
 def is_staff(member: discord.Member) -> bool:
@@ -177,27 +184,52 @@ class TourneyReports(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self.monthly_report_task.start()
+        self.monthly_report_catchup_task.start()
 
     def cog_unload(self):
         self.monthly_report_task.cancel()
+        self.monthly_report_catchup_task.cancel()
 
-    # ⚠️ FOR TESTING: Change to @tasks.loop(seconds=30) and comment out the day != 1 guard
+    async def _maybe_run_monthly_report(self):
+        """Generate the previous month's report unless it's already been recorded.
+
+        Idempotent via LAST_MONTHLY_REPORT_KEY, so the daily 06:00 firing runs it at
+        most once per month and — crucially — a firing on any day after downtime that
+        spanned the 1st still catches the missed month. Only stamps on success; a
+        ValueError (e.g. report channel missing) or unexpected error leaves the marker
+        unset so the next firing or boot retries.
+        """
+        now = datetime.datetime.now(datetime.timezone.utc)
+        py, pm = _prev_month(now.year, now.month)
+        target_key = f"{py:04d}-{pm:02d}"
+        if await get_setting(LAST_MONTHLY_REPORT_KEY) == target_key:
+            return
+
+        try:
+            result = await _run_monthly_report(self.bot, py, pm)
+            print(f"✅ Auto monthly report: {result}")
+            await set_setting(LAST_MONTHLY_REPORT_KEY, target_key)
+        except ValueError as e:
+            print(f"❌ Auto monthly report failed (will retry): {e}")
+        except Exception as e:
+            print(f"❌ Auto monthly report unexpected error (will retry): {e}")
+
+    # ⚠️ FOR TESTING: Change to @tasks.loop(seconds=30)
     @tasks.loop(time=datetime.time(hour=6, minute=0, tzinfo=zoneinfo.ZoneInfo("UTC")))
     async def monthly_report_task(self):
         if not self.bot.is_ready():
             return
-        now = datetime.datetime.now(datetime.timezone.utc)
-        if now.day != 1:
-            return
+        await self._maybe_run_monthly_report()
 
-        py, pm = _prev_month(now.year, now.month)
+    # Cold-boot catch-up: a time= loop only fires at the next matching wall-clock
+    # instant, so a bot down at 06:00 UTC on the 1st silently loses that month's run.
+    @tasks.loop(count=1)
+    async def monthly_report_catchup_task(self):
+        await self.bot.wait_until_ready()
         try:
-            result = await _run_monthly_report(self.bot, py, pm)
-            print(f"✅ Auto monthly report: {result}")
-        except ValueError as e:
-            print(f"❌ Auto monthly report failed: {e}")
+            await self._maybe_run_monthly_report()
         except Exception as e:
-            print(f"❌ Auto monthly report unexpected error: {e}")
+            print(f"❌ Monthly report catch-up failed: {e}")
 
     @app_commands.command(
         name="monthly-report",

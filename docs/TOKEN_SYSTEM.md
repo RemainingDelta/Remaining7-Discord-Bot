@@ -12,13 +12,13 @@ R7 Tokens are the primary server currency. Members earn them passively through c
 The `on_message` listener in `features/economy.py` fires on every message. Token earning, XP earning, daily message count tracking, and quest progress apply identically in the general channel (`GENERAL_CHANNEL_ID`) and the booster-only channel (`BOOSTER_CHANNEL_ID`, `#general-plus`) — no rewards are granted outside these two channels:
 
 1. Ignores bots, DMs, and channels in `PASSIVE_REWARD_EXCLUDED_CHANNEL_IDS`
-2. Enforces a **20-second cooldown** per user via `_cooldowns: dict[int, float]` mapping `user_id → last_earn_timestamp`
+2. Enforces a **20-second cooldown** per user via the `settings` key `last_message_{user_id}` (an epoch-seconds float), compared against `time.time()`
 3. Awards a random amount of `2–5 tokens` (`random.randint(2, 5)`)
 4. If the member has the **Server Booster** role (`SERVER_BOOSTER_ROLE_ID`), there is a 35% chance of +1 bonus token (~10% average increase). Boosters also roll a separate 35% chance of +1 bonus XP on every general/booster-channel message, independent of the token cooldown.
-5. Updates balance in MongoDB via `update_user_balance()`
+5. **Stamps the cooldown first, then grants** the tokens with the atomic `increment_user_balance()` (`$inc`) — never a read-modify-write. Because the balance lives on the user doc and the cooldown in `settings`, the two can't be one atomic write; stamping first means a crash between them loses a tiny 2–6 token reward rather than re-awarding on the next message. (This deliberately reverses #412's paid-first choice, where the reward was large enough to prioritize never-lose over never-double.)
 6. Fires the quest listener (`process_quest_update()`) for the message action
 
-The cooldown is checked against `time.time()` — no database reads involved, making this path very fast.
+The cooldown lives in the `settings` collection, so the check is one small DB read. A residual same-20s-window concurrency race (two messages both passing the check before either stamps) remains — it's pre-existing and worth only ~2–6 tokens, so it's left as-is.
 
 ---
 
@@ -72,11 +72,17 @@ Admin command. Distributes tokens to members active in the general channel:
 The `booster_drop_task` in `features/economy.py` posts automatic supply drops of **10–25 tokens** into the booster-only channel (`BOOSTER_CHANNEL_ID`, `#general-plus`):
 
 1. Sleeps a uniform random 0–14400 seconds between drops (average ~2 hours, hard 4-hour pity cap)
-2. Posts an embed with a claim button (`DropView`) — first booster to click gets the tokens; staff cannot claim
+2. Posts an embed with a persistent claim button (`DropClaimButton`) — first booster to click gets the tokens; staff cannot claim
 3. Stores the active drop's message ID in the `settings` collection under `booster_drop_message_id`; claiming clears it
 4. When a new drop fires, it first expires the previous drop: the previous **unclaimed** drop message is edited to an EXPIRED state with the button removed (claimed drops keep their CLAIMED state). If the previous message is gone or its stored ID is invalid, the ID is cleared and the new drop proceeds. If Discord returns a transient error while fetching or editing the previous drop, the new drop is **skipped for this cycle** and retried on the next one — guaranteeing at most one live drop at a time rather than posting a second before the first is expired
 
+On cold boot, `booster_drop_reconcile_task` (a `count=1` loop) runs `_expire_previous_booster_drop` once so a `booster_drop_message_id` left set by a crash is resolved immediately, instead of waiting up to ~4h for the next drop to expire it lazily.
+
 Channel access is restricted to the Server Booster role via manual Discord permission setup — the bot only needs the channel ID.
+
+### Persistent claim button (all drop types)
+
+The supply (`/drop` and the auto `supply_drop_task`), booster, and admin drops all share one claim button, `DropClaimButton` — a `discord.ui.DynamicItem` whose `custom_id` is `drop_claim:{amount}`. It's re-registered once in `Economy.cog_load` via `bot.add_dynamic_items(DropClaimButton)`, so a drop message posted **before** a restart stays claimable (the token amount is recovered from the `custom_id`; the old plain `DropView` had no `custom_id` and was never re-added, leaving pre-restart buttons dead). The single-claim guard is the atomic `claim_drop(message_id, user_id)` (a `$setOnInsert` on the `drop_claims` collection, TTL-expired after 7 days), which replaces the old in-memory `claimed` flag — so it survives restarts and serializes two near-simultaneous clicks. Payout is the atomic `increment_user_balance()` (`$inc`).
 
 ---
 

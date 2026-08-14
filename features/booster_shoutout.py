@@ -6,7 +6,7 @@ import re
 from datetime import datetime
 
 from database.mongo import (
-    get_booster_shoutout_month,
+    claim_booster_shoutout_month,
     get_next_support_ticket_number,
     set_booster_shoutout_month,
 )
@@ -503,7 +503,13 @@ class BoosterShoutout(commands.Cog):
 
         month_key = _current_month_key()
         user_id = str(after.id)
-        if await get_booster_shoutout_month(user_id) == month_key:
+
+        # Atomically claim this month's slot BEFORE creating the channel, so two
+        # rapid on_member_update boost events can't both pass the check and each
+        # open a ticket. On failure we roll the marker back to `previous` so a later
+        # boost this month can still retry (the intent the old set-after-success had).
+        won, previous = await claim_booster_shoutout_month(user_id, month_key)
+        if not won:
             return
 
         try:
@@ -512,12 +518,11 @@ class BoosterShoutout(commands.Cog):
             )
         except discord.HTTPException as e:
             print(f"⚠️ Failed to create booster shoutout ticket for {after.id}: {e}")
+            await set_booster_shoutout_month(user_id, previous)
             return
 
-        # Marker is set only after successful creation so a failed attempt
-        # (e.g. category full) can retry on a later boost this month.
-        if channel is not None:
-            await set_booster_shoutout_month(user_id, month_key)
+        if channel is None:
+            await set_booster_shoutout_month(user_id, previous)
 
 
 async def setup(bot: commands.Bot):
