@@ -185,6 +185,25 @@ Monthly processing is **crash-safe** (claim → create ticket → record `channe
 
 ---
 
+### `scam_purge_sessions`
+Crash-safety record for the scam-image cross-channel purge (`features/scam_detection.py`). One document per purge job; `_id` is an ObjectId. See `docs/SCAM_DETECTION.md` → **Crash-Safe Purge**.
+
+| Field | Type | Purpose |
+|-------|------|---------|
+| `guild_id` | int | Guild being purged |
+| `author_id` | int | Poster whose copies are removed |
+| `image_md5` | str | MD5 the purge matches on |
+| `image_size` | int | Attachment size pre-filter |
+| `skip_message_id` | int | The already-deleted flagged message (skipped during purge) |
+| `cutoff` | datetime | Persisted lookback window, reused on resume so a restart doesn't shift it |
+| `channels` | list[int] | Immutable target list (text channels + threads) captured at session start |
+| `completed` | list[int] | **Cursor** — channel ids already processed |
+| `created_at` | datetime | Session creation time |
+
+The purge writes this doc **before any deletes**, `$addToSet`s each channel into `completed` as it finishes, and deletes the doc once every channel is done. Leftovers (a crash mid-purge) are resumed once at cold boot by `scam_purge_reconcile_task` from the `completed` cursor; re-runs are safe because MD5 deletes are idempotent. **No TTL** — an unfinished session must persist until resolved.
+
+---
+
 ### `sticky`
 Sticky message data per channel. `_id = str(channel_id)`.
 

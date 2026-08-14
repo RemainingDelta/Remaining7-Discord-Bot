@@ -31,7 +31,7 @@ The pHash/ORB indexes are built in memory at cog load (`_reload_index()`) from t
 1. Skip bots, DMs, messages older than 10s (prevents re-processing on reconnect backfill), and anything starting with `!scam` (otherwise `!scam-add`/`!scam-test` with a blacklisted image attached would delete the mod's own command message and time them out).
 2. For each allowed attachment (`.png .jpg .jpeg .webp`): in-memory dedup check on `(author_id, filename, size)`, then download via the shared `aiohttp` session, then run the detection pipeline in the executor.
 3. On match, claim the **atomic detection lock** (see below). The lock loser still **deletes its copy of the message** but skips the alert/timeout/purge.
-4. Lock winner: delete the message → purge other copies across all channels/threads (`_PURGE_LOOKBACK_MINUTES = 30`, newest-first, MD5-verified by size pre-filter then download) → 10-minute timeout → mod alert to `MODERATOR_LOGS_CHANNEL_ID` with the image re-uploaded (so it survives the deletion) and a `ScamAlertView`.
+4. Lock winner: delete the message → purge other copies across all channels/threads (`_PURGE_LOOKBACK_MINUTES = 30`, newest-first, MD5-verified by size pre-filter then download; see **Crash-Safe Purge** below) → 10-minute timeout → mod alert to `MODERATOR_LOGS_CHANNEL_ID` with the image re-uploaded (so it survives the deletion) and a `ScamAlertView`.
 
 ### Duplicate-Alert Prevention (the hard-won part)
 When the same image lands in 5 channels simultaneously, 5 `on_message` coroutines race. In-memory sets alone do **not** fix this reliably (tried twice — coroutine interleaving and key-expiry races both produced duplicate alerts). The working solution is a MongoDB atomic lock:
@@ -42,6 +42,19 @@ acquire_scam_detection_lock(author_id, image_md5)
 ```
 
 Locks live in `scam_detection_locks` and expire via a **TTL index on `ts` (60s)**, created at cog load by `ensure_scam_lock_ttl_index()`. Without that index locks never expire and re-posts of the same image by the same user are ignored forever. Mongo's TTL monitor runs every ~60s, so real expiry is 60–120s.
+
+### Crash-Safe Purge
+The cross-channel purge is a long sequential loop over every text channel + thread. If the bot crashed partway through, the remaining channels used to be abandoned silently — the 10s freshness guard and the 60s detection lock both suppress re-detection, so it was never retried, leaving scam copies live indefinitely.
+
+The purge is now backed by a **`scam_purge_sessions`** doc that survives restarts:
+
+1. Before any deletes, the lock winner writes a session with the full target channel list (`channels`), an empty `completed` cursor, and the original lookback `cutoff` (persisted so a resumed run reuses the *same* 30-minute window, not a fresh one from restart time).
+2. `_run_purge_session` processes each channel and `$addToSet`s its id into `completed` the instant it finishes (a deleted or permission-less channel counts as done so the session always reaches completion). The doc is deleted only once every channel is processed.
+3. `scam_purge_reconcile_task` (`@tasks.loop(count=1)`, cold-boot only, after `wait_until_ready()`) picks up any leftover session and resumes it from its `completed` cursor. If the guild isn't cached yet the session is deferred untouched for a later boot.
+
+Resuming is safe to run twice because MD5 deletes are idempotent (a copy already gone → caught exception), so no per-session lock is needed. A resumed purge that actually removed copies posts a distinct **"Scam Purge Completed After Restart"** embed to `MODERATOR_LOGS_CHANNEL_ID` (separate from the original detection alert), and every resumed session prints a console audit line.
+
+If the DB is down, `create_scam_purge_session` returns `None` and the purge still runs in memory (just not crash-safe) — behaviour is otherwise unchanged.
 
 ---
 
@@ -87,6 +100,21 @@ Early versions keyed on filename — two different images both named `image.png`
 ```js
 { _id: "<author_id>:<image_md5>", ts: ISODate(...) }  // TTL-indexed, 60s
 ```
+
+### `scam_purge_sessions`
+```js
+{
+  _id: ObjectId(...),
+  guild_id: 123, author_id: 456,
+  image_md5: "<md5>", image_size: 12345,
+  skip_message_id: 789,      // the already-deleted flagged message
+  cutoff: ISODate(...),      // persisted lookback window (reused on resume)
+  channels: [1, 2, 3],       // immutable target list captured at session start
+  completed: [1, 2],         // cursor: channel ids already processed
+  created_at: ISODate(...)
+}
+```
+Crash-safety record for the cross-channel purge (see **Crash-Safe Purge** above). Written before any deletes, its `completed` cursor grows per channel, and it is deleted once the purge finishes. Leftover docs are resumed once at cold boot by `scam_purge_reconcile_task`. **No TTL** — an unfinished session must persist until it is resolved.
 
 ---
 
