@@ -57,7 +57,7 @@ Brawlers are fetched from `users.brawlers` in the DB. The full roster order is d
 2. Determines the Credits cost based on rarity (cost table defined in the command or config)
 3. Checks the user has enough Credits (`get_credits(user_id)`)
 4. Checks the user doesn't already own the brawler (`get_user_data()`)
-5. Deducts credits and calls `add_brawler_to_user()` with `status="new"` expected
+5. `purchase_brawler()` deducts the Credits **and** grants the brawler in a **single atomic `update_one`** (mirroring `upgrade_brawler_level`), so a crash can never spend Credits without granting the brawler. It returns `"new"` normally, or `"duplicate"` (grants 15 Power Points instead, matching `add_brawler_to_user`) if the brawler is somehow already owned
 6. Replies with a confirmation embed
 
 ---

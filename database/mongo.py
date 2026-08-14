@@ -1006,6 +1006,75 @@ async def deduct_coins(user_id, amount):
     return False
 
 
+async def purchase_brawler_ability(
+    user_id: str, brawler_id: str, item_type: str, item_name: str, cost: int
+) -> bool:
+    """
+    Atomically deducts Coins and grants a gadget / star power / hypercharge in a
+    single update_one, mirroring upgrade_brawler_level. Returns True on success,
+    False if the ability type is unknown or the user can't afford it.
+    """
+    if db is None:
+        return False
+
+    user_data = await get_user_data(user_id)
+    current_coins = user_data.get("currencies", {}).get("coins", 0)
+    if current_coins < cost:
+        return False
+
+    # Deduct + grant fold into one update document; the currency $inc and the
+    # ability grant touch different field paths, so MongoDB applies both atomically.
+    update = {"$inc": {"currencies.coins": -cost}}
+    if item_type == "gadget":
+        update["$addToSet"] = {f"brawlers.{brawler_id}.gadgets": item_name}
+    elif item_type == "star_power":
+        update["$addToSet"] = {f"brawlers.{brawler_id}.star_powers": item_name}
+    elif item_type == "hypercharge":
+        update["$set"] = {f"brawlers.{brawler_id}.hypercharge": item_name}
+    else:
+        return False
+
+    await db.users.update_one({"_id": str(user_id)}, update)
+    return True
+
+
+async def purchase_brawler(user_id: str, brawler_id: str, price: int):
+    """
+    Atomically deducts Credits and grants the brawler in a single update_one,
+    mirroring upgrade_brawler_level. Preserves add_brawler_to_user's semantics:
+    a duplicate purchase grants 15 Power Points instead of the brawler.
+
+    Returns "new" or "duplicate" on success, or False if the user can't afford it.
+    """
+    if db is None:
+        return False
+
+    user_data = await get_user_data(user_id)
+    current_credits = user_data.get("currencies", {}).get("credits", 0)
+    if current_credits < price:
+        return False
+
+    if brawler_id in user_data.get("brawlers", {}):
+        # Duplicate: deduct Credits and grant 15 Power Points in one write.
+        await db.users.update_one(
+            {"_id": str(user_id)},
+            {"$inc": {"currencies.credits": -price, "currencies.power_points": 15}},
+        )
+        return "duplicate"
+
+    # New brawler: deduct Credits and set the brawler entry in one write.
+    await db.users.update_one(
+        {"_id": str(user_id)},
+        {
+            "$inc": {"currencies.credits": -price},
+            "$set": {
+                f"brawlers.{brawler_id}": {"level": 1, "obtained_at": datetime.utcnow()}
+            },
+        },
+    )
+    return "new"
+
+
 async def upgrade_brawler_level(user_id: str, brawler_id: str):
     """
     Attempts to upgrade a brawler.

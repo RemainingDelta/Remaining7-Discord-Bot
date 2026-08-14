@@ -42,7 +42,7 @@ These thresholds are enforced in both `process_reward()` (drop eligibility) and 
 2. Cross-references against the user's currently owned abilities for that brawler
 3. Checks brawler level meets the unlock threshold
 4. Lists purchasable abilities with their Credits/Gems cost
-5. On selection: deducts currency and calls `add_gadget_to_user()`, `add_star_power_to_user()`, or `add_hypercharge_to_user()`
+5. On selection (after confirmation): `purchase_brawler_ability()` deducts the Coins **and** grants the gadget / star power / hypercharge in a **single atomic `update_one`** (mirroring `upgrade_brawler_level`), so a crash can never spend currency without granting the ability
 
 ---
 

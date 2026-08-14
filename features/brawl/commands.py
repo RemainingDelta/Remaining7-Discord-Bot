@@ -143,16 +143,14 @@ class BrawlerShopSelect(discord.ui.Select):
             )
 
         brawler_id = self.values[0]
-        from database.mongo import deduct_credits, add_brawler_to_user
+        from database.mongo import purchase_brawler
 
-        # Double check credits and deduct
-        success = await deduct_credits(self.user_id, self.price)
-        if not success:
+        # Atomically deduct Credits and grant the brawler in one write.
+        result = await purchase_brawler(self.user_id, brawler_id, self.price)
+        if not result:
             return await interaction.response.send_message(
                 f"❌ You need {self.price} Credits to buy this brawler!", ephemeral=True
             )
-
-        await add_brawler_to_user(self.user_id, brawler_id)
 
         # Find brawler name for the success message
         b_name = next(b.name for b in BRAWLER_ROSTER if b.id == brawler_id)
@@ -425,29 +423,18 @@ class ConfirmPurchaseView(discord.ui.View):
         if str(interaction.user.id) != self.user_id:
             return
 
-        from database.mongo import (
-            deduct_coins,
-            add_gadget_to_user,
-            add_star_power_to_user,
-            add_hypercharge_to_user,
-        )
+        from database.mongo import purchase_brawler_ability
 
-        # 1. Try to pay
-        success = await deduct_coins(self.user_id, self.cost)
+        # Atomically deduct Coins and grant the ability in one write.
+        success = await purchase_brawler_ability(
+            self.user_id, self.brawler_id, self.item_type, self.item_name, self.cost
+        )
         if not success:
             return await interaction.response.send_message(
                 "❌ Insufficient Coins!", ephemeral=True
             )
 
-        # 2. Add the Item
-        if self.item_type == "gadget":
-            await add_gadget_to_user(self.user_id, self.brawler_id, self.item_name)
-        elif self.item_type == "star_power":
-            await add_star_power_to_user(self.user_id, self.brawler_id, self.item_name)
-        elif self.item_type == "hypercharge":
-            await add_hypercharge_to_user(self.user_id, self.brawler_id, self.item_name)
-
-        # 3. Refresh the Shop (Go back to main view)
+        # Refresh the Shop (Go back to main view)
         await interaction.response.send_message(
             f"✅ Successfully bought **{self.item_name}**!", ephemeral=True
         )
