@@ -3,6 +3,7 @@ from discord import app_commands
 from discord.ext import commands, tasks
 import asyncio
 import functools
+import json
 import re
 import datetime
 from .matcherino import (
@@ -37,6 +38,8 @@ from database.mongo import (
     set_tourney_collect_data,
     insert_tourney_snapshot,
     get_last_tourney_snapshot,
+    get_setting,
+    set_setting,
 )
 
 # Import Config and Utils
@@ -169,6 +172,87 @@ async def _write_snapshot(data: dict, session: dict):
     await insert_tourney_snapshot(snapshot)
 
 
+# Settings key for the crash-safe winner-announcement retry (Item 3). !endtourney
+# schedules a retry when the winner isn't yet available from Matcherino; persisting
+# it here lets the retry survive a restart (the old asyncio.create_task was lost on
+# crash, and the session is already "finished" so resume_tourney_if_active skips it).
+PENDING_WINNER_KEY = "pending_winner_announcement"
+
+
+def _now_ts() -> float:
+    return datetime.datetime.now(datetime.timezone.utc).timestamp()
+
+
+async def _post_pending_winner(
+    bot, matcherino_id: str, updates_channel_id: int
+) -> bool:
+    """Fetch the winner and post it once, idempotently. Returns True if a winner
+    was posted (or is already present), False if it's still unavailable."""
+    retry_url = f"https://matcherino.com/tournaments/{matcherino_id}/bracket"
+    retry_data = fetch_bracket_progress(retry_url)
+    winner = (
+        retry_data.get("winner_team") if retry_data.get("status") == "success" else None
+    )
+    if isinstance(winner, str):
+        winner = winner.strip()
+    if not (winner and winner.upper() not in {"UNKNOWN", "TBD", "BYE", ""}):
+        return False
+
+    channel = bot.get_channel(updates_channel_id)
+    if not isinstance(channel, discord.TextChannel):
+        return False
+
+    content = f"# GGs!\n{winner} won !! {TOURNEY_MATCHERINO_WIN_EMOJI}"
+    # Don't double-post if it's already there (e.g. posted, then crashed before the
+    # marker cleared) — same self-heal check _sync_winner_announcement uses.
+    async for recent in channel.history(limit=30):
+        if recent.author == bot.user and recent.content == content:
+            return True
+
+    await channel.send(content)
+    print(f"[ENDTOURNEY] posted winner: {winner}")
+    return True
+
+
+async def _winner_retry_loop(
+    bot, matcherino_id: str, updates_channel_id: int, deadline_ts: float
+):
+    """Retry posting the winner every 5 min until it's available or the deadline
+    passes, clearing the persisted marker on success/give-up. The marker is what a
+    boot reconcile reads to re-arm this loop after a restart."""
+    while True:
+        if _now_ts() >= deadline_ts:
+            await set_setting(PENDING_WINNER_KEY, "")
+            print("[ENDTOURNEY] winner still unavailable at deadline; giving up")
+            return
+        try:
+            if await _post_pending_winner(bot, matcherino_id, updates_channel_id):
+                await set_setting(PENDING_WINNER_KEY, "")
+                return
+        except Exception as e:
+            print(f"[ENDTOURNEY RETRY] error: {e}")
+        await asyncio.sleep(300)
+
+
+async def _arm_winner_retry(
+    bot, matcherino_id: str, updates_channel_id: int, deadline_ts: float
+):
+    """Persist the pending-winner marker and start the retry loop."""
+    await set_setting(
+        PENDING_WINNER_KEY,
+        json.dumps(
+            {
+                "matcherino_id": matcherino_id,
+                "updates_channel_id": updates_channel_id,
+                "expires_at": deadline_ts,
+            }
+        ),
+    )
+    asyncio.create_task(
+        _winner_retry_loop(bot, matcherino_id, updates_channel_id, deadline_ts)
+    )
+
+
 class QueueDashboard(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
@@ -191,11 +275,38 @@ class QueueDashboard(commands.Cog):
         # The dashboard_task is still manually started via !starttourney
         # The match_refresher starts automatically to monitor any active tickets
         self.match_refresher_task.start()
+        self.winner_reconcile_task.start()
 
     def cog_unload(self):
         self.dashboard_task.cancel()
         self.progress_dashboard_task.cancel()
         self.match_refresher_task.cancel()
+        self.winner_reconcile_task.cancel()
+
+    # --- WINNER ANNOUNCEMENT RECONCILE (crash recovery) ---
+    @tasks.loop(count=1)
+    async def winner_reconcile_task(self):
+        """Cold-boot-only. If !endtourney armed a winner retry that a restart killed,
+        re-arm it from the persisted marker (unless it already passed its deadline).
+        The session is 'finished' by then, so resume_tourney_if_active never sees it."""
+        await self.bot.wait_until_ready()
+        try:
+            raw = await get_setting(PENDING_WINNER_KEY)
+            if not raw:
+                return
+            data = json.loads(raw)
+            deadline = data.get("expires_at", 0)
+            if _now_ts() >= deadline:
+                await set_setting(PENDING_WINNER_KEY, "")
+                return
+            await _arm_winner_retry(
+                self.bot,
+                data["matcherino_id"],
+                data["updates_channel_id"],
+                deadline,
+            )
+        except Exception as e:
+            print(f"❌ Winner announcement reconcile failed: {e}")
 
     async def start_dashboard(self):
         """Starts dashboard loops if not already running."""
@@ -1751,40 +1862,20 @@ def setup_tourney_commands(bot: commands.Bot):
         if dashboard_cog:
             await dashboard_cog.stop_dashboard()
 
-        # If the winner hasn't been announced yet (API hasn't updated), schedule a retry.
+        # If the winner hasn't been announced yet (API hasn't updated), arm a
+        # crash-safe retry: a persisted marker (PENDING_WINNER_KEY) drives a retry
+        # loop that survives a restart via the boot reconcile below, instead of the
+        # old fire-and-forget asyncio.create_task that a restart silently dropped.
         if not winner_was_posted and endtourney_matcherino_id:
             await ctx.send(
-                "⏳ Winner not yet available from Matcherino. Will retry in 5 minutes and post automatically."
+                "⏳ Winner not yet available from Matcherino. Will retry automatically and post when ready."
             )
-
-            async def _retry_winner_post():
-                await asyncio.sleep(300)
-                try:
-                    retry_url = f"https://matcherino.com/tournaments/{endtourney_matcherino_id}/bracket"
-                    retry_data = fetch_bracket_progress(retry_url)
-                    winner = (
-                        retry_data.get("winner_team")
-                        if retry_data.get("status") == "success"
-                        else None
-                    )
-                    if isinstance(winner, str):
-                        winner = winner.strip()
-                    if winner and winner.upper() not in {"UNKNOWN", "TBD", "BYE", ""}:
-                        updates_channel = bot.get_channel(TOURNEY_UPDATES_CHANNEL_ID)
-                        if updates_channel and isinstance(
-                            updates_channel, discord.TextChannel
-                        ):
-                            content = f"# GGs!\n{winner} won !! {TOURNEY_MATCHERINO_WIN_EMOJI}"
-                            await updates_channel.send(content)
-                            print(f"[ENDTOURNEY RETRY] posted winner: {winner}")
-                    else:
-                        print(
-                            "[ENDTOURNEY RETRY] winner still unavailable after 5-minute retry"
-                        )
-                except Exception as e:
-                    print(f"[ENDTOURNEY RETRY] error: {e}")
-
-            asyncio.create_task(_retry_winner_post())
+            await _arm_winner_retry(
+                bot,
+                endtourney_matcherino_id,
+                TOURNEY_UPDATES_CHANNEL_ID,
+                _now_ts() + 3600,  # give up after ~1h of Matcherino lag
+            )
 
         # Disable sticky redirect notices immediately when tournament ends.
         sticky_redirect_state["enabled"] = False

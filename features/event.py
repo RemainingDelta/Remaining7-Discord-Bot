@@ -6,12 +6,14 @@ import zoneinfo
 import re
 from database.mongo import (
     claim_reward_payout,
+    get_setting,
     get_stuck_reward_payouts,
     increment_user_balance,
     is_poll_reward_processed,
     mark_poll_reward_processed,
     mark_reward_paid,
     resolve_stuck_reward_payout,
+    set_setting,
 )
 
 from features.config import (
@@ -374,10 +376,46 @@ class Events(commands.Cog):
         self._warning_msg_ids: dict[int, int] = {}  # channel_id → warning message_id
         self.cleanup_check_task.start()
         self.reward_reconcile_task.start()
+        self.cleanup_schedule_check_task.start()
 
     def cog_unload(self):
         self.cleanup_check_task.cancel()
         self.reward_reconcile_task.cancel()
+        self.cleanup_schedule_check_task.cancel()
+
+    @staticmethod
+    def _et_today_key() -> str:
+        return datetime.now(zoneinfo.ZoneInfo("America/New_York")).strftime("%Y-%m-%d")
+
+    async def _log_cleanup_schedule_gap(self, today_key: str):
+        """Log — but don't back-fill — any midnight cleanup runs missed to downtime.
+        The cleanup is low-stakes (it only refreshes a staff warning embed), so per the
+        plan we surface a clear log line rather than auto-running a missed occurrence."""
+        last = await get_setting("last_event_cleanup_day")
+        if not last or last >= today_key:
+            return
+        try:
+            last_dt = datetime.strptime(last, "%Y-%m-%d").date()
+            today_dt = datetime.strptime(today_key, "%Y-%m-%d").date()
+            missed = (today_dt - last_dt).days - 1
+        except ValueError:
+            missed = 0
+        if missed > 0:
+            print(
+                f"⚠️ Event cleanup: {missed} scheduled midnight run(s) missed while "
+                f"the bot was down (last ran {last}). Not auto-run; the next midnight "
+                f"run will refresh any cleanup warnings."
+            )
+
+    # Cold-boot check: a time= loop only fires at the next matching wall-clock instant,
+    # so a bot down at midnight ET silently skips that run. Log it (don't auto-run).
+    @tasks.loop(count=1)
+    async def cleanup_schedule_check_task(self):
+        await self.bot.wait_until_ready()
+        try:
+            await self._log_cleanup_schedule_gap(self._et_today_key())
+        except Exception as e:
+            print(f"❌ Event cleanup schedule check failed: {e}")
 
     async def has_event_permission(self, interaction: discord.Interaction):
         if isinstance(interaction.user, discord.Member):
@@ -509,6 +547,10 @@ class Events(commands.Cog):
                     break
             except Exception as e:
                 print(f"Error checking history for #{name}-event: {e}")
+
+        # Record that today's midnight run happened, so a boot after downtime can
+        # tell (and log) that one or more scheduled runs were missed.
+        await set_setting("last_event_cleanup_day", self._et_today_key())
 
     # --- REWARD PAYOUT CRASH RECOVERY ---
 

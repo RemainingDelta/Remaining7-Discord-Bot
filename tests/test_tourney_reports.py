@@ -215,6 +215,70 @@ def test_matcherino_url_in_full_announcement():
     assert m.group(1) == "208611"
 
 
+# ---------------------------------------------------------------------------
+# Monthly report catch-up gating (Item 6 — missed scheduled run)
+# ---------------------------------------------------------------------------
+
+from unittest.mock import AsyncMock, MagicMock  # noqa: E402
+
+from features.tourney import tourney_reports as tr  # noqa: E402
+
+
+def _prev_month_key():
+    now = datetime.datetime.now(datetime.timezone.utc)
+    py, pm = _prev_month(now.year, now.month)
+    return f"{py:04d}-{pm:02d}"
+
+
+def _bare_cog():
+    # Bypass __init__ so we don't start the scheduled/catch-up loops in a test.
+    cog = tr.TourneyReports.__new__(tr.TourneyReports)
+    cog.bot = MagicMock()
+    return cog
+
+
+async def test_monthly_report_skips_when_already_recorded(monkeypatch):
+    monkeypatch.setattr(tr, "get_setting", AsyncMock(return_value=_prev_month_key()))
+    ran = AsyncMock()
+    stamp = AsyncMock()
+    monkeypatch.setattr(tr, "_run_monthly_report", ran)
+    monkeypatch.setattr(tr, "set_setting", stamp)
+
+    await _bare_cog()._maybe_run_monthly_report()
+
+    ran.assert_not_awaited()
+    stamp.assert_not_awaited()
+
+
+async def test_monthly_report_runs_and_stamps_when_new(monkeypatch):
+    monkeypatch.setattr(tr, "get_setting", AsyncMock(return_value=None))
+    monkeypatch.setattr(tr, "_run_monthly_report", AsyncMock(return_value="ok"))
+    stamp = AsyncMock()
+    monkeypatch.setattr(tr, "set_setting", stamp)
+
+    await _bare_cog()._maybe_run_monthly_report()
+
+    stamp.assert_awaited_once()
+    key, value = stamp.call_args.args
+    assert key == tr.LAST_MONTHLY_REPORT_KEY
+    assert value == _prev_month_key()
+
+
+async def test_monthly_report_does_not_stamp_on_error(monkeypatch):
+    # A ValueError (e.g. report channel missing) must leave the marker unset so a
+    # later firing or the next boot retries — never a silently-lost month.
+    monkeypatch.setattr(tr, "get_setting", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        tr, "_run_monthly_report", AsyncMock(side_effect=ValueError("no channel"))
+    )
+    stamp = AsyncMock()
+    monkeypatch.setattr(tr, "set_setting", stamp)
+
+    await _bare_cog()._maybe_run_monthly_report()
+
+    stamp.assert_not_awaited()
+
+
 def test_matcherino_url_no_match_for_wrong_domain():
     content = "https://otherdomain.com/supercell/tournaments/12345"
     m = MATCHERINO_URL_REGEX.search(content)

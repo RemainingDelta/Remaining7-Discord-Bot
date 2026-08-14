@@ -328,6 +328,33 @@ async def set_booster_shoutout_month(user_id: str, month_key: str):
     )
 
 
+async def claim_booster_shoutout_month(user_id: str, month_key: str):
+    """Atomically claim this month's booster-shoutout slot for the user.
+
+    Returns (won, previous): `won` is True if this caller set the marker (the doc
+    was not already at month_key), False if another concurrent boost event already
+    claimed it. `previous` is the marker's prior value, so the caller can roll it
+    back with set_booster_shoutout_month if the channel creation then fails —
+    preserving the "retry later this month" intent the old set-after-success code had.
+
+    Closes the check-then-set race in on_member_update where two rapid boost events
+    both read no marker and each create a ticket. The user doc is ensured first
+    (get_user_data upserts it) because the $ne filter would make an upsert here try
+    to insert a duplicate _id.
+    """
+    if db is None:
+        return True, None
+    await get_user_data(user_id)  # ensure the doc exists (upsert-unsafe filter below)
+    before = await db.users.find_one_and_update(
+        {"_id": str(user_id), "booster_shoutout_month": {"$ne": month_key}},
+        {"$set": {"booster_shoutout_month": month_key}},
+        return_document=False,  # BEFORE — None means the predicate excluded the doc
+    )
+    if before is None:
+        return False, None  # already claimed this month
+    return True, before.get("booster_shoutout_month")
+
+
 async def get_item_count(user_id: str, item_name: str) -> int:
     """Checks how many of an item a user has."""
     doc = await get_user_data(user_id)
@@ -455,6 +482,42 @@ async def set_setting(key: str, value: str):
     if db is None:
         return
     await db.settings.update_one({"_id": key}, {"$set": {"value": value}}, upsert=True)
+
+
+async def ensure_drop_claims_ttl_index():
+    """TTL index so per-drop claim records auto-expire ~7 days after creation.
+    Drops are single-claim and infrequent, but without this the records would
+    accumulate forever; 7 days is far longer than any drop stays live."""
+    if db is None:
+        return
+    await db.drop_claims.create_index("ts", expireAfterSeconds=604800)
+
+
+async def claim_drop(message_id: str, user_id: str) -> bool:
+    """Atomically record the first claimer of a supply/booster/admin drop.
+
+    Returns True if this caller won the claim (should be paid), False if the drop
+    was already claimed. Keyed by the drop's message id, so it survives a restart —
+    unlike the in-memory DropView.claimed flag it replaces — and serializes the
+    race between two near-simultaneous clicks (both pass the old in-memory guard
+    because the claim callback awaits a defer before checking it). Same
+    find_one_and_update / $setOnInsert pattern as acquire_scam_detection_lock.
+    """
+    if db is None:
+        return True  # DB down: nothing persists anyway, let the click through
+    before = await db.drop_claims.find_one_and_update(
+        {"_id": str(message_id)},
+        {
+            "$setOnInsert": {
+                "_id": str(message_id),
+                "claimed_by": str(user_id),
+                "ts": datetime.utcnow(),
+            }
+        },
+        upsert=True,
+        return_document=False,
+    )
+    return before is None  # None means it didn't exist before — we claimed it
 
 
 # --- REDEMPTION QUEUE HELPERS ---

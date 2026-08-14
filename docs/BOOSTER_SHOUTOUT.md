@@ -22,8 +22,9 @@ The `Server Members` intent (already enabled in `main.py`) is required for this 
 A ticket is created at most once per calendar month per user:
 
 - The month key is `datetime.utcnow().strftime("%Y-%m")` (same convention as the booster shop discount).
-- Stored per-user in `users.booster_shoutout_month` via `get_booster_shoutout_month()` / `set_booster_shoutout_month()` in `database/mongo.py`.
-- The marker is set **after** successful channel creation, so a failed creation (e.g. category full, API error) can retry on a later boost in the same month.
+- Stored per-user in `users.booster_shoutout_month`.
+- The slot is claimed **atomically before** channel creation via `claim_booster_shoutout_month()` (`database/mongo.py`) — a `find_one_and_update` with a `booster_shoutout_month != month_key` predicate. Only one caller wins, which closes the race where two rapid `on_member_update` boost events both passed a plain check-then-set and each opened a ticket.
+- To preserve the "retry later this month" behavior, a **failed** channel creation rolls the marker back to its previous value (`set_booster_shoutout_month()` with the value `claim_booster_shoutout_month` returned), so a later boost can retry.
 - The marker is never cleared on close/delete — a ticket opened this month blocks new ones regardless of its current state.
 
 ---
