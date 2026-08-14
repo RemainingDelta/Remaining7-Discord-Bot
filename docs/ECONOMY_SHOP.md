@@ -125,10 +125,13 @@ When a `/redeem` request exceeds the available budget, the member gets an epheme
   "budget_usd": 10.0,        # snapshot at queue time (audit/display only)
   "queued_at": datetime,     # FIFO sort key
   # crash-safety fields, added only once processing claims the entry:
-  "claimed_at": datetime,    # set before ticket creation (two-state marker)
-  "channel_id": 123,         # set after the ticket channel is created (or None)
+  "claimed_at": datetime,    # set before ticket creation OR before a refund (marker)
+  "channel_id": 123,         # ticket path only: set after the channel is created (or None)
+  "refund_kind": "tokens",   # refund path only: "tokens" (member-left) or "item" (staff remove)
 }
 ```
+
+An entry carries **either** `channel_id` (ticket-creation claim) **or** `refund_kind` (refund claim), never both — that is what lets the cold-boot reconcile route each claimed leftover to the right resolution.
 
 `budget_usd` is a snapshot for display; processing always recomputes the cost from `REDEMPTION_BUDGET_COSTS` so a cost change while queued uses the current value.
 
@@ -137,7 +140,7 @@ When a `/redeem` request exceeds the available budget, the member gets an epheme
 `redemption_queue_task` is an hourly `tasks.loop` on the Economy cog. Each tick it compares `redemption_queue_processed_month` with the current month key; if they differ (new month, or bot was offline on the 1st), it runs `process_redemption_queue()` and stamps the key only on success (a failed run retries next hour).
 
 `process_redemption_queue()` walks the queue in FIFO order:
-- **Member left the server** → entry is dropped, the item's token price is refunded to their balance, and a note is posted to `REDEMPTION_TRANSCRIPT_CHANNEL_ID`. A departure is only concluded after confirming against the API: on a `get_member` cache miss (e.g. right after a restart, when the member cache is cold) the code calls `fetch_member` and treats **only** a `discord.NotFound` as "left". A transient `discord.HTTPException` leaves the entry queued for the next cycle rather than wrongly refunding an active member.
+- **Member left the server** → the item's token price is refunded to their balance and the entry is dropped, with a note posted to `REDEMPTION_TRANSCRIPT_CHANNEL_ID`. This is **crash-safe**: the entry is first **claimed for refund** (`claim_redemption_queue_refund(id, "tokens")` stamps `claimed_at`+`refund_kind`), then the refund is applied idempotently (`apply_queue_refund`), then the entry is removed — so a crash between the removal and the payout can't lose the tokens (the claimed entry is skipped by the loop and completed by the cold-boot reconcile). If the claim is lost to a racing staff `/redemption-queue-remove` (or a prior reconcile), this branch just skips the entry — the other path already owns it. A departure is only concluded after confirming against the API: on a `get_member` cache miss (e.g. right after a restart, when the member cache is cold) the code calls `fetch_member` and treats **only** a `discord.NotFound` as "left". A transient `discord.HTTPException` leaves the entry queued for the next cycle rather than wrongly refunding an active member.
 - **Cost > available budget** (recomputed every iteration, so tickets opened earlier in the run count as pending) → entry is skipped and carries over to the next month; cheaper later entries may still be fulfilled.
 - **Otherwise** → the entry is processed **crash-safely** (same two-state pattern as the interactive `/redeem` path): it is **claimed** (`claimed_at` stamped atomically) *before* `create_redemption_ticket()` runs, the created channel's id is recorded on the entry (`channel_id`), and only then is the entry removed. If ticket creation fails, the entry is left claimed (not removed) rather than retried in-loop.
 
@@ -147,6 +150,7 @@ Because the claim precedes ticket creation, a crash anywhere between the ticket 
 
 A claimed leftover is resolved once per process at startup by `reconcile_redemption_queue()` (run alongside `reconcile_pending_redemptions()` in `pending_redemption_reconcile_task`), decidably so it never both keeps a ticket and refunds, nor does neither:
 
+- `refund_kind` set → a claimed **refund** (staff remove or member-left drop that crashed before paying) → pay it idempotently via `apply_queue_refund` (token price for `"tokens"`, one item for `"item"`), drop the entry, and post a note to `REDEMPTION_TRANSCRIPT_CHANNEL_ID`. Checked **first**, before the `channel_id` cases below (a refund entry has no `channel_id`, so those cases would misclassify it). Replaying a refund already applied is a no-op — `apply_queue_refund` records a per-entry receipt (`queue_refunds_done` on the user doc) atomically with the `$inc`.
 - `channel_id` set → the ticket was created → drop the entry, no refund.
 - `channel_id` is `None`, category unavailable → defer to a later reconcile.
 - `channel_id` is `None`, a matching ticket exists in the category (topic `redemption-opener`+`item`) → crash landed in the create→persist window → drop the entry, no refund.
@@ -158,7 +162,7 @@ A claimed leftover is resolved once per process at startup by `reconcile_redempt
 |---------|-----|-------|
 | `/redemption-queue` | Anyone | Your queued redemptions with overall FIFO position (ephemeral) |
 | `/redemption-queue-list` | Admin/Mod | Full queue with entry ids and estimated USD total |
-| `/redemption-queue-remove <entry_id>` | Admin/Mod | Removes an entry and returns the item to the user's inventory |
+| `/redemption-queue-remove <entry_id>` | Admin/Mod | Returns the item to the user's inventory and removes the entry. **Crash-safe**: claims the entry for refund (`refund_kind:"item"`) and applies the grant idempotently *before* deleting, so a crash between the two is completed by the cold-boot reconcile instead of silently losing the item. If the entry is already claimed (a racing member-left drop, or reconcile), replies "already being processed" and no-ops. |
 
 `/check-budget` also shows the pending-ticket total and the queued-entry count/estimate.
 
