@@ -550,6 +550,64 @@ async def get_stuck_redemption_queue_entries() -> list[dict]:
     )
 
 
+async def claim_redemption_queue_refund(entry_id: str, kind: str) -> dict | None:
+    """Atomically claim a queue entry for REFUND (not ticket creation).
+
+    Stamps `claimed_at` + `refund_kind` only if the entry is unclaimed, in one op.
+    Unlike claim_redemption_queue_entry it does NOT set `channel_id`, so the
+    cold-boot reconcile routes it to the refund branch (ahead of the channel_id /
+    topic-scan ticket logic). Returns the updated doc (for its user_id/item) if we
+    newly claimed it, or None if the entry was not found or was already claimed —
+    in which case the caller must not pay (a restart's reconcile, or a racing
+    staff/queue action, owns it).
+    """
+    if db is None:
+        return None
+    try:
+        oid = ObjectId(entry_id)
+    except (InvalidId, TypeError):
+        return None
+    return await db.redemption_queue.find_one_and_update(
+        {"_id": oid, "claimed_at": {"$exists": False}},
+        {"$set": {"claimed_at": datetime.utcnow(), "refund_kind": kind}},
+        return_document=True,  # AFTER — surface user_id/item for the payout
+    )
+
+
+async def apply_queue_refund(
+    user_id: str, entry_id: str, *, item: str | None = None, tokens: int = 0
+) -> bool:
+    """Idempotently pay a claimed queue refund and record its receipt in one write.
+
+    Grants the item and/or tokens AND adds `entry_id` to `queue_refunds_done` in a
+    single atomic update gated by `queue_refunds_done: {$ne: entry_id}`, so a
+    re-run with the same entry_id (a reconcile after a crash between pay and entry
+    removal) is a no-op — the $inc and its receipt land together or not at all.
+    Mirrors claim_daily_reward (atomic $inc + guard on the users doc). Returns True
+    if this call performed the payout, False if it was already applied.
+
+    The user doc is ensured to exist first via get_user_data: upsert is off here
+    (an upsert whose $ne filter excludes an existing doc raises a duplicate-key
+    error on _id), so a missing doc would otherwise make the refund silently
+    no-op. Owning that precondition here keeps callers from having to remember it.
+    """
+    if db is None:
+        return False
+    await get_user_data(str(user_id))  # pre-create so the upsert-off write lands
+    inc = {}
+    if item:
+        inc[f"inventory.{item}"] = 1
+    if tokens:
+        inc["balance"] = tokens
+    update: dict = {"$addToSet": {"queue_refunds_done": entry_id}}
+    if inc:
+        update["$inc"] = inc
+    result = await db.users.update_one(
+        {"_id": str(user_id), "queue_refunds_done": {"$ne": entry_id}}, update
+    )
+    return result.modified_count > 0
+
+
 # --- SCAM PURGE SESSION HELPERS ---
 #
 # Crash-safe cross-channel purge (mirrors the redemption-queue crash-safety

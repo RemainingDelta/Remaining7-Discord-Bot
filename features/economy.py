@@ -33,6 +33,8 @@ from database.mongo import (
     get_redemption_queue,
     remove_redemption_queue_entry,
     claim_redemption_queue_entry,
+    claim_redemption_queue_refund,
+    apply_queue_refund,
     set_redemption_queue_entry_channel,
     get_stuck_redemption_queue_entries,
     begin_pending_redemption,
@@ -1135,12 +1137,15 @@ class Economy(commands.Cog):
                 )
 
     async def reconcile_redemption_queue(self):
-        """Resolve redemption-queue entries claimed for ticket creation but never
-        removed — a crash between the claim and the removal in
-        process_redemption_queue.
+        """Resolve redemption-queue entries claimed but never removed — a crash
+        between the claim and the removal in process_redemption_queue (ticket
+        creation) or in a refund path (staff remove / member-left drop).
 
         Decidable per entry so it never both keeps a ticket and refunds (double
         value), nor does neither (silent loss):
+        - has refund_kind -> a claimed refund -> pay it idempotently (token or
+          item, per kind) and drop the entry; replaying a completed refund is a
+          no-op via the per-entry receipt in apply_queue_refund.
         - has channel_id  -> the ticket was created -> drop the entry, no refund.
         - no channel_id   -> scan the redemption category by topic; if a matching
           ticket exists (crash landed in the create->persist window) drop it with
@@ -1161,6 +1166,32 @@ class Economy(commands.Cog):
             entry_id = str(entry["_id"])
             user_id = entry["user_id"]
             item = entry["item"]
+
+            # Refund claim (staff /redemption-queue-remove or a member-left drop
+            # that crashed before paying). Must be handled BEFORE the channel_id /
+            # topic-scan ticket logic below: a refund entry has no channel_id and
+            # no ticket, so that logic would wrongly return an item — even for a
+            # token refund — and without the idempotency receipt. apply_queue_refund
+            # is idempotent per entry, so replaying a completed refund is a no-op.
+            refund_kind = entry.get("refund_kind")
+            if refund_kind is not None:
+                if refund_kind == "tokens":
+                    refund = _token_price_for_item(item)
+                    await apply_queue_refund(user_id, entry_id, tokens=refund)
+                    note = f"{refund:,} R7 tokens refunded"
+                else:  # "item"
+                    await apply_queue_refund(user_id, entry_id, item=item)
+                    note = "the item was returned to their inventory"
+                await remove_redemption_queue_entry(entry_id)
+                transcript_channel = self.bot.get_channel(
+                    REDEMPTION_TRANSCRIPT_CHANNEL_ID
+                )
+                if transcript_channel:
+                    await transcript_channel.send(
+                        f"↩️ Queued **{item}** redemption refund for <@{user_id}> "
+                        f"was completed after a restart — {note}."
+                    )
+                continue
 
             # Channel recorded -> the ticket was created. Never refund, whether or
             # not the channel still exists.
@@ -1240,11 +1271,17 @@ class Economy(commands.Cog):
                     continue
 
             if member is None:
-                # Opener left the server — drop the entry and refund tokens.
-                await remove_redemption_queue_entry(str(entry["_id"]))
+                # Opener left the server — refund tokens and drop the entry.
+                # Claim first so a crash between the entry removal and the refund
+                # can't lose the tokens: the claimed entry is skipped by the loop
+                # above and resolved (idempotently) by the cold-boot reconcile. A
+                # lost claim means a racing staff-remove or reconcile owns it.
+                eid = str(entry["_id"])
+                if await claim_redemption_queue_refund(eid, "tokens") is None:
+                    continue
                 refund = _token_price_for_item(item)
-                if refund > 0:
-                    await increment_user_balance(user_id, refund)
+                await apply_queue_refund(user_id, eid, tokens=refund)
+                await remove_redemption_queue_entry(eid)
                 transcript_channel = self.bot.get_channel(
                     REDEMPTION_TRANSCRIPT_CHANNEL_ID
                 )
@@ -2026,14 +2063,19 @@ class Economy(commands.Cog):
             )
             return
 
-        doc = await remove_redemption_queue_entry(entry_id)
+        # Claim before paying so a crash between the entry removal and the item
+        # grant can't lose the item: the claimed entry is resolved by the
+        # cold-boot reconcile, and apply_queue_refund is idempotent per entry.
+        doc = await claim_redemption_queue_refund(entry_id, "item")
         if doc is None:
             await interaction.response.send_message(
-                "❌ Queue entry not found.", ephemeral=True
+                "❌ Queue entry not found, or it's already being processed.",
+                ephemeral=True,
             )
             return
 
-        await add_item_token(doc["user_id"], doc["item"])
+        await apply_queue_refund(doc["user_id"], entry_id, item=doc["item"])
+        await remove_redemption_queue_entry(entry_id)
         embed = discord.Embed(
             title="✅ **Queue Entry Removed**",
             description=(

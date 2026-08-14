@@ -43,6 +43,7 @@ Key fields:
 | `credits` | int | Brawl credits |
 | `gems` | int | Brawl gems |
 | `inventory` | list | Shop items purchased |
+| `queue_refunds_done` | list | Entry-id receipts guarding redemption-queue refund idempotency — an id is added atomically with the refund `$inc` (`apply_queue_refund`), so a reconcile replay after a crash is a no-op. Append-only (not pruned). |
 
 **Self-healing**: `get_user_data()` upserts a default document if one doesn't exist, including Shelly at Level 1. This means any command can safely call `get_user_data()` without checking for existence first.
 
@@ -178,10 +179,11 @@ FIFO queue of redemptions deferred to next month when `/redeem` exceeds the avai
 | `item` | str | `SHOP_DATA` key |
 | `budget_usd` | float | USD cost snapshot at queue time (audit/display; processing recomputes) |
 | `queued_at` | datetime | FIFO sort key |
-| `claimed_at` | datetime | **Crash-safety marker** — stamped atomically *before* the ticket is created; absent until then |
-| `channel_id` | int \| null | The created ticket's channel id, recorded after creation (or `null` while claimed) |
+| `claimed_at` | datetime | **Crash-safety marker** — stamped atomically *before* the ticket is created **or** before a refund is paid; absent until then |
+| `channel_id` | int \| null | Ticket path only: the created ticket's channel id, recorded after creation (or `null` while claimed) |
+| `refund_kind` | str | Refund path only: `"tokens"` (member left) or `"item"` (staff `/redemption-queue-remove`). Mutually exclusive with `channel_id`; routes the entry to the reconcile refund branch |
 
-Monthly processing is **crash-safe** (claim → create ticket → record `channel_id` → remove entry), mirroring the `pending_redemptions` markers used by the interactive `/redeem` path. A claimed entry is never reprocessed by later runs, so a crash between ticket creation and entry removal can't create a duplicate ticket or double-spend the budget. Claimed leftovers are resolved once at cold boot by `reconcile_redemption_queue()` (decidably: `channel_id` present → drop; otherwise topic-scan the redemption category → drop if a ticket exists, else return the item to inventory).
+Monthly processing is **crash-safe** (claim → create ticket → record `channel_id` → remove entry), mirroring the `pending_redemptions` markers used by the interactive `/redeem` path. A claimed entry is never reprocessed by later runs, so a crash between ticket creation and entry removal can't create a duplicate ticket or double-spend the budget. The two **refund** paths (member-left drop and staff `/redemption-queue-remove`) are crash-safe the same way — claim (`refund_kind`) → apply refund → remove — but their payout is a bare `$inc` on the user doc (not an observable ticket), so idempotency comes from `apply_queue_refund` recording the entry id in `users.queue_refunds_done` **atomically with the `$inc`**. Claimed leftovers are resolved once at cold boot by `reconcile_redemption_queue()` (decidably: `refund_kind` present → pay the refund idempotently and drop; else `channel_id` present → drop; otherwise topic-scan the redemption category → drop if a ticket exists, else return the item to inventory).
 
 ---
 
