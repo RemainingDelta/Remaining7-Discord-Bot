@@ -3447,3 +3447,359 @@ Implemented in `<pending — set to the 382-Enhancement doc commit sha once comm
 
 📝 Review note: Self-referential — this is the release-doc pass that wrote this very v1.11.1 SPECS section, the CHANGELOG release notes + PR descriptions, the #377 booster-drop expiry update in `TOKEN_SYSTEM.md`, and the README version bump. The commit sha above is a placeholder until the branch is committed and merged.
 
+### v1.12.0 — 2026-08-14
+
+#### #390 — Bug: Slow mode message is contradictory regarding duration (Bug)
+
+> ### Overview
+> The Discord bot displays a slow mode message that indicates the slow mode is for the duration of a tournament but also states it will be automatically removed after 1 hour, which is contradictory.
+>
+> ### Acceptance Criteria
+> How do we know it's done?
+> - [ ] The slow mode message accurately reflects the actual duration or removal conditions.
+> - [ ] The message is no longer contradictory.
+>
+> ### Steps to Reproduce Bug
+> - [ ] Enable slow mode for a tournament using the bot's relevant command.
+> - [ ] Observe the message displayed by the bot regarding slow mode status.
+>
+> ### Impact
+> Users may be confused about the actual duration of the slow mode, leading to misunderstanding or frustration rega …(truncated)
+
+Implemented in `9ad8fea`. Files: `features/tourney/tourney_commands.py`
+
+✅ Reviewed against the diff: implementation matches the filed spec.
+
+#### #391 — Enhancement: Auto-resume tourney state after bot restart (Enhancement)
+
+> ### Overview
+>   Make the tourney system automatically recover its runtime state on boot so an in-progress tournament survives a bot restart.
+>
+>   ### Current Behavior
+>   If the bot restarts mid-tourney, the DB session survives but all runtime state is lost: dashboards stop, slowmode/lock timers vanish (can get stuck forever), region redirect and
+>   admin-role name are forgotten, and the ticket counter resets. The only recovery is re-running `!starttourney`, which is destructive.
+>
+>   ### Proposed Behavior
+>   On boot, detect an active session and non-destructively rehydrate: restart dashboards, re-arm the slowmode/lock timers (or fire immediately if elapsed), restore region + admin-role
+>   name, and r …(truncated)
+
+Implemented in `efa71ea`. Files: `database/mongo.py`, `docs/DATABASE.md`, `docs/TOURNEY_OVERVIEW.md`, `features/tourney/tourney_commands.py`, `features/tourney/tourney_utils.py`
+
+✅ Reviewed against the diff: implementation matches the filed spec.
+
+📝 Review note: Adds the codebase's first boot-time reconcile hook, `resume_tourney_if_active()` on `on_ready` — every crash-safety fix later in this release (#410 onward) hangs its own startup reconcile task alongside it. `!starttourney` now warns on an active session unless `force` is passed, and the milestone-announcement scan was widened so a resume re-adopts existing announcements instead of duplicating them.
+
+#### #395 — Bug: CI lint fails on PR #394 (391-Enhancement) due to unpinned Ruff version (Bug)
+
+> ### Overview
+> CI installs Ruff unpinned (`pip install ruff`) with no `[tool.ruff.lint]` config in the repo. A newer Ruff version released between 07-21 and 07-27 has stricter defaults, now flagging 292 pre-existing issues on PR #394 (branch `391-Enhancement`). Confirmed on the live PR: local Ruff and `make fix` report clean, since the local Ruff install doesn't have these newer rule categories enabled at all. This is a CI tooling issue, not a code issue.
+>
+> ### Acceptance Criteria
+> - [ ] `pyproject.toml` has an explicit `[tool.ruff.lint]` `select` list
+> - [ ] `.github/workflows/lint.yml` pins Ruff to the same version used locally
+> - [ ] PR #394 lint check passes with zero code changes
+>
+> ### Steps t …(truncated)
+
+Implemented in `f2bd1c9`. Files: `.github/workflows/lint.yml`, `pyproject.toml`
+
+✅ Reviewed against the diff: implementation matches the filed spec.
+
+📝 Review note: CI-tooling only, no feature code. Added an explicit `[tool.ruff.lint] select` set to `pyproject.toml` and pinned the CI Ruff version in `lint.yml` so `ruff check` is deterministic across Ruff releases; unblocked PR #394 with zero code changes.
+
+#### #398 — Enhancement: Update docs to reflect migration from Pella to RamNaym Cloud (Enhancement)
+
+> ### Overview
+> The bot has moved hosts from Pella to RamNaym Cloud (Nano plan) after repeated Pella outages, the last straw being the server randomly stopping during a live tournament and needing a manual restart, combined with a lack of transparency and communication from Pella around these issues. RamNaym has been consistent since the switch. Docs, configs, and any references to Pella need to be replaced with the new host, and the reasoning behind the switch should be documented for future reference.
+>
+> ### Current Behavior
+> Docs and any leftover config/deploy references still assume or mention Pella as the host. No record of the new host, its specs, or the reasoning for switching exists anywhe …(truncated)
+
+Implemented in `58f6a21`. Files: `README.md`, `database/mongo.py`, `docs/HOSTING.md`
+
+✅ Reviewed against the diff: implementation matches the filed spec.
+
+📝 Review note: Replaced all Pella references with RamNaym Cloud and added a new `docs/HOSTING.md` capturing the migration history, plan specs, and the reliability reasoning for the switch, plus a Hosting section in the README.
+
+#### #404 — Enhancement: Allow Event Staff to use `!sticky` and `!unsticky` commands (Enhancement)
+
+> ### Overview
+> This enhancement will extend the permission set for the `!sticky` and `!unsticky` commands to include the Event Staff role.
+>
+> ### Current Behavior
+> Currently, the `!sticky` and `!unsticky` commands are only accessible to administrator-level roles or specific moderator roles as configured.
+>
+> ### Proposed Behavior
+> The `!sticky` and `!unsticky` commands should be accessible to users with the 'Event Staff' role in addition to their current permitted roles. The 'Event Staff' role is already defined in the bot's configuration.
+>
+> ### Technical Requirements
+> - [ ] Update the permission check logic for `!sticky` command to include the 'Event Staff' role.
+> - [ ] Update the permission check logi …(truncated)
+
+Implemented in `d65b8a2`. Files: `docs/STICKY_MESSAGES.md`, `features/sticky.py`
+
+✅ Reviewed against the diff: implementation matches the filed spec.
+
+#### #410 — Bug: /redeem can permanently lose a user's item on a mid-operation crash (Bug)
+
+> ### Overview
+> `/redeem` removes the user's item token, then creates a redemption ticket. If the bot crashes or is killed between those two steps, the item is gone and no ticket was ever created. The current try/except rollback only catches in-process exceptions, it does nothing for an OOM kill or forced restart.
+>
+> ### Acceptance Criteria
+> - [ ] A pending-redemption record is written to MongoDB before the item token is removed
+> - [ ] Once `create_redemption_ticket` succeeds, the resulting ticket channel id is written back into the pending record before it is cleared, so a crash between ticket creation and record deletion is decidable on reconcile
+> - [ ] On startup, the bot reconciles any pending r …(truncated)
+
+Implemented in `7c9c05a`. Files: `database/mongo.py`, `features/economy.py`, `tests/test_economy.py`
+
+✅ Reviewed against the diff: implementation matches the filed spec.
+
+📝 Review note: First of the Tier-1 crash-safety epic. Writes a pending-redemption record (with a unique key and stale-age guard so a legitimately in-flight `/redeem` isn't refunded by a concurrent reconcile) before removing the item token, and stamps the ticket channel id back into the record once the ticket exists. A second `on_ready` reconcile task refunds only when no ticket was created — never both keeps a ticket and refunds. Branched from dev: the reconcile would be dead code on main without the #391 boot hook.
+
+#### #411 — Bug: /buy can deduct tokens without granting the item on a mid-operation crash (Bug)
+
+> ### Overview
+> `/buy` deducts tokens from the user's balance, then grants the item token. There is no rollback of any kind between these two writes, so a crash between them leaves the user debited with nothing to show for it.
+>
+> ### Acceptance Criteria
+> - [ ] The deduct and grant steps are wrapped so a crash between them can be safely rolled back or completed on next startup
+> - [ ] A forced restart between the two writes results in either the item being granted or the tokens being refunded, never neither
+>
+> ### Steps to Reproduce Bug
+> - [ ] Run `/buy` for an item
+> - [ ] Kill the bot process between the balance deduction and the item grant
+> - [ ] Restart the bot and confirm tokens are gone with no item …(truncated)
+
+Implemented in `eff6c51`. Files: `database/mongo.py`, `docs/ECONOMY_SHOP.md`, `features/economy.py`, `tests/test_economy.py`
+
+✅ Reviewed against the diff: implementation matches the filed spec.
+
+📝 Review note: `/buy` deduct-then-grant collapsed into a single atomic write so a crash can no longer debit tokens without granting the item.
+
+#### #412 — Bug: Quest rewards can be permanently lost if the bot crashes right after completion is flagged (Bug)
+
+> ### Overview
+> When a quest completes, the quest is flagged `completed: True` in MongoDB before tokens and XP are granted. Re-entry is blocked once a quest is flagged completed. If the bot crashes after the flag is written but before the reward payout runs, the quest shows as done forever and the user never receives tokens or XP, with no retry possible.
+>
+> ### Acceptance Criteria
+> - [ ] Completion and reward payout are tracked separately, e.g. a `rewarded: True` flag distinct from `completed: True`
+> - [ ] Re-grant logic is gated on the reward flag, not the completion flag, so an incomplete payout can be retried without re-granting a reward twice
+> - [ ] A forced restart between the completion flag w …(truncated)
+
+Implemented in `f967f8b`. Files: `database/mongo.py`, `docs/QUEST_SYSTEM.md`, `features/quests.py`, `tests/test_quests.py`
+
+✅ Reviewed against the diff: implementation matches the filed spec.
+
+📝 Review note: Split the single `completed` flag into distinct `completed` and `rewarded` flags; re-grant is gated on `rewarded`, so a crash between marking a quest done and paying it out is retried on next completion check without double-paying.
+
+#### #413 — Bug: /event-rewards has no crash protection and can double-pay everyone on retry (Bug)
+
+> ### Overview
+> `/event-rewards` loops through parsed users and pays each one, then marks the source message with a reaction at the very end. The "processed" state only exists in memory on the view object, it is not persisted anywhere. A crash mid-loop, or simply a bot restart, means re-running the command re-pays every user from scratch, including anyone already paid.
+>
+> ### Acceptance Criteria
+> - [ ] A persisted per-recipient reward ledger tracks who has already been paid for a given event-rewards message
+> - [ ] Payout logic checks the ledger before paying each recipient, skipping anyone already paid
+> - [ ] Re-running the command after a crash results in only unpaid recipients receiving tokens, ne …(truncated)
+
+Implemented in `bbb7e86`. Files: `database/mongo.py`, `docs/DATABASE.md`, `features/event.py`
+
+✅ Reviewed against the diff: implementation matches the filed spec.
+
+📝 Review note: Introduces the shared per-recipient `reward_payouts` ledger (claim-before-pay) that #414 and #432 later reuse. A crash mid-loop and retry pays only recipients not yet claimed for that message.
+
+#### #414 — Bug: /poll-rewards can double-pay voters caught mid-loop during a crash (Bug)
+
+> ### Overview
+> `/poll-rewards` already has a persisted message-level gate (`is_poll_reward_processed`) that prevents a full re-run from re-paying everyone. However the gate is only marked after the entire payout loop finishes, so a crash mid-loop leaves the message unmarked, and a retry re-pays every voter who was already paid before the crash.
+>
+> ### Acceptance Criteria
+> - [ ] Payout tracking moves from a single whole-message gate to a per-voter ledger, sharing the same underlying mechanism as the /event-rewards fix
+> - [ ] Payout logic checks the per-voter ledger before paying each voter, skipping anyone already paid
+> - [ ] Re-running the command after a mid-loop crash results in only unpaid voter …(truncated)
+
+Implemented in `9f99b56`. Files: `database/mongo.py`, `docs/DATABASE.md`, `features/event.py`, `tests/test_reward_payouts.py`
+
+✅ Reviewed against the diff: implementation matches the filed spec.
+
+📝 Review note: Migrates `/poll-rewards` off its whole-message `is_poll_reward_processed` gate onto the per-voter `reward_payouts` ledger from #413, closing the mid-loop double-pay window the message-level gate left open.
+
+#### #415 — Bug: Redemption queue treats any member cache miss as "user left the server" (Bug)
+
+> ### Overview
+> The redemption queue checks `guild.get_member(user_id)` to decide if a queued user has left the server. `get_member` only checks the local cache and returns `None` for any user not yet cached, which includes users who are still in the server but haven't been re-cached since the last bot restart. On a cache miss, the queue immediately deletes the entry and refunds tokens, even if the user never left.
+>
+> ### Acceptance Criteria
+> - [ ] On a `get_member` cache miss, the bot calls `fetch_member` to confirm against the Discord API before concluding the user left
+> - [ ] A `discord.NotFound` result confirms the user genuinely left and the existing refund/remove logic runs
+> - [ ] A `discord.H …(truncated)
+
+Implemented in `2260cd3`. Files: `docs/ECONOMY_SHOP.md`, `features/economy.py`, `tests/test_economy.py`
+
+✅ Reviewed against the diff: implementation matches the filed spec.
+
+📝 Review note: On a `get_member` cache miss the queue now calls `fetch_member` — `NotFound` confirms a genuine leave (refund runs), while a transient `HTTPException` skips the entry for that cycle instead of wrongly refunding an active member across a cold restart. Lands before #416, which depends on this guard.
+
+#### #416 — Bug: Redemption queue can create duplicate tickets and double-spend budget on retry (Bug)
+
+> ### Overview
+> The redemption queue creates a redemption ticket, then removes the queue entry afterward. If the bot crashes after the ticket is created but before the entry is removed, the next scheduled run processes the same entry again, creating a second ticket and spending the item's budget a second time.
+>
+> ### Acceptance Criteria
+> - [ ] Depends on ticket 415 landing first
+> - [ ] Ticket creation and entry removal happen atomically, or the entry is marked in a "processing"/"ticket created" state immediately after ticket creation succeeds
+> - [ ] On startup or next scheduled run, any entry already marked as having a ticket created is not reprocessed
+> - [ ] A forced restart between ticket creation …(truncated)
+
+Implemented in `75f0057`. Files: `database/mongo.py`, `docs/DATABASE.md`, `docs/ECONOMY_SHOP.md`, `features/economy.py`, `tests/test_economy.py`
+
+✅ Reviewed against the diff: implementation matches the filed spec.
+
+📝 Review note: Marks the queue entry with its created ticket channel id immediately after creation, and the cold-boot reconcile skips any already-ticketed entry, so a crash between ticket creation and entry removal no longer double-creates tickets or double-spends budget. Depends on and branched from #415; a stuck reconcile refunds the item rather than leaving it lost.
+
+#### #417 — Bug: Scam image purge leaves remaining channels un-purged forever after a crash (Bug)
+
+> ### Overview
+> When a scam image is detected, the bot purges matching copies of it across every text channel and thread in a sequential loop. If the bot crashes partway through this loop, the remaining channels are never purged. There is no persisted record of which channels were already checked, and the detection's freshness guard prevents this from ever being caught and retried automatically.
+>
+> ### Acceptance Criteria
+> - [ ] The purge operation persists a session doc listing target channels and a cursor of which have been completed
+> - [ ] On startup, any incomplete purge session is detected and resumed from where it left off
+> - [ ] A forced restart mid-purge results in all originally targeted ch …(truncated)
+
+Implemented in `867d799`. Files: `database/mongo.py`, `docs/DATABASE.md`, `docs/SCAM_DETECTION.md`, `features/scam_detection.py`
+
+✅ Reviewed against the diff: implementation matches the filed spec.
+
+📝 Review note: Persists a purge-session doc listing target channels with a completion cursor; an incomplete session is detected and resumed on startup, so a crash mid-purge no longer leaves scam images live in un-visited channels.
+
+#### #418 — Bug: Brawl ability and brawler purchases can deduct currency without granting the item (Bug)
+
+> ### Overview
+> Buying a brawler ability deducts coins then grants the ability; buying a brawler deducts credits then grants the brawler. Both are two separate writes with no atomicity between them. A crash between the deduction and the grant leaves the user's currency spent with nothing received. `upgrade_brawler_level` already handles this correctly elsewhere in the same file and should be used as the reference pattern.
+>
+> ### Acceptance Criteria
+> - [ ] Ability purchases combine the deduct and grant into a single atomic operation, mirroring `upgrade_brawler_level`
+> - [ ] Brawler purchases combine the deduct and grant into a single atomic operation, mirroring `upgrade_brawler_level`
+> - [ ] A forced …(truncated)
+
+Implemented in `1049de4`. Files: `database/mongo.py`, `docs/BRAWL_COLLECTION.md`, `docs/BRAWL_PROGRESSION.md`, `features/brawl/commands.py`, `tests/test_brawl_purchase.py`
+
+✅ Reviewed against the diff: implementation matches the filed spec.
+
+📝 Review note: Brawl ability and brawler purchases now collapse deduct-then-grant into a single atomic operation, mirroring the existing `upgrade_brawler_level` pattern in the same file.
+
+#### #419 — Bug: Ticket close, budget, and daily claim flows can double-refund or double-charge on retry (Bug)
+
+> ### Overview
+> Several lower-severity flows write a destructive or financial step before the final closing action, rather than after. This includes redemption ticket close-with-refund (refund happens before channel delete), close-with-budget-deduction (budget deducted before channel delete), and /daily (tokens granted before the cooldown is stamped). In each case, an interruption between the two steps leaves a persistent button or retryable state that can trigger the first step a second time.
+>
+> ### Acceptance Criteria
+> - [ ] Redemption ticket close-with-refund reorders or guards against a duplicate refund if the close button is clicked again after a crash
+> - [ ] Redemption ticket close-with-budge …(truncated)
+
+Implemented in `39781b1`. Files: `database/mongo.py`, `docs/ECONOMY_SHOP.md`, `docs/TOKEN_SYSTEM.md`, `features/economy.py`
+
+✅ Reviewed against the diff: implementation matches the filed spec.
+
+📝 Review note: Lower-severity tail of the epic — reorders redemption close-with-refund and close-with-budget so the destructive step follows the channel delete (or is guarded against a re-click), and stamps the `/daily` cooldown atomically with the token grant. Deploy-timing (not mid-tourney) and the intentional split-storage of the pending marker are noted caveats carried from the fix's PR.
+
+#### #423 — Feature: Add `make commit` shortcut for git add/commit/push (Feature)
+
+> ### Overview
+> Adds a `make commit` target to the Makefile that runs `git add .`, `git commit -m "<message>"`, and `git push` in sequence, saving the dev from typing all three manually.
+>
+> ### Technical Requirements
+> - [ ] Add a `commit` target to the Makefile
+> - [ ] Accept the commit message via an `m` variable (e.g. `make commit m="fix ci lint"`), since Make can't take a quoted positional argument directly
+> - [ ] Target runs, in order: `git add .`, `git commit -m "$(m)"`, `git push`
+> - [ ] Fail early with a clear error if `m` is not provided (don't let it fall through to `git commit` with no `-m`)
+>
+> ### Acceptance Criteria
+> - [ ] Running `make commit m="some message"` stages all changes, commits wit …(truncated)
+
+Implemented in `91d9433`. Files: `Makefile`
+
+✅ Reviewed against the diff: implementation matches the filed spec.
+
+📝 Review note: Dev tooling only. `make commit m="..."` runs add/commit/push in order and fails early with a clear error if `m` is unset, rather than opening an editor or committing blank.
+
+#### #432 — Bug: Tourney staff payout batches can be silently lost or double-paid on crash (Bug)
+
+> ### Overview
+> `add_payout_batch` (called by `/payout-add`) inserts a `payout_logs` record claiming everyone in the batch was paid, then loops through each user id applying the `$inc`/`$push` to their `payouts` doc. If the bot crashes mid-loop, staff before the crash point get credited and staff after don't, with no trace that anything went wrong, since nothing ever replays `payout_logs` back into `payouts` (it's read-only, used for `/payout-history` display). A retry after a crash also mints a fresh batch id and re-pays the entire list, double-crediting anyone already paid in the failed run. This is the same loop-then-log-completion shape that 413 and 414 already fixed for `/event-rewards` an …(truncated)
+
+Implemented in `8a107f7`. Files: `database/mongo.py`, `features/event.py`, `features/tourney/tourney_commands.py`
+
+✅ Reviewed against the diff: implementation matches the filed spec.
+
+📝 Review note: `/payout-add` now derives a deterministic `batch_id` and claims each recipient in the shared `reward_payouts` ledger before crediting, so a crash-and-retry pays only staff not already credited. This flow was missed by the earlier #409 audit; batch-id collision and stuck-window handling are noted caveats from the fix's PR. Tournament-day flow, prioritized ahead of the next tourney.
+
+#### #433 — Bug: Redemption queue still has two unprotected delete-then-pay crash windows (Bug)
+
+> ### Overview
+> Two remaining paths in the redemption queue still delete a record before paying out, the same class of bug 416 fixed for queue ticket creation, left unprotected here: `/redemption-queue-remove` deletes the queue entry then grants the item token back, and the member-left refund path deletes the queue entry then refunds tokens. In both cases, a crash between the delete and the payout leaves the record gone with nothing granted or refunded, a silent, untraceable loss. Notably, the member-left refund path sits right next to the properly-fixed ticket-creation branch in the same function, 415's `fetch_member` guard hardened the cache check for this branch but didn't touch its delete-t …(truncated)
+
+Implemented in `23008e3`. Files: `database/mongo.py`, `docs/DATABASE.md`, `docs/ECONOMY_SHOP.md`, `features/economy.py`, `tests/test_economy.py`
+
+✅ Reviewed against the diff: implementation matches the filed spec.
+
+📝 Review note: Closes the two remaining delete-then-pay windows in the redemption queue (`/redemption-queue-remove` and the member-left refund path) via a claim plus an on-user-doc refund receipt (`apply_queue_refund`), reconciled by the existing cold-boot task. The reconcile refund branch must order ahead of the delete; refund-accumulation and balance-recompute behavior are noted caveats from the fix's PR.
+
+#### #434 — Bug: Remaining low-severity crash-safety and restart gaps across drops, tourney, and boosters (Bug)
+
+> ### Overview
+> A handful of smaller, non-destructive gaps remain from the crash-safety audit, none of them touch existing balances or cause silent value loss, but each leaves the bot in a degraded or inconsistent state after a restart. Bundled here as one lower-priority cleanup rather than four separate urgent tickets: DropView claim buttons stop working after a restart because they have no `custom_id` and are never re-registered via `add_view` at startup, leaving outstanding supply/booster/admin drops permanently unclaimable; the booster drop's `booster_drop_message_id` marker has no startup reconcile and only self-clears after roughly 4 hours; `!endtourney`'s winner announcement uses an in-m …(truncated)
+
+Implemented in `ac2bb6c`. Files: `database/mongo.py`, `docs/BOOSTER_SHOUTOUT.md`, `docs/DATABASE.md`, `docs/TOKEN_SYSTEM.md`, `docs/TOURNEY_OVERVIEW.md`, `features/booster_shoutout.py`, `features/economy.py`, `features/event.py`, `features/tourney/tourney_commands.py`, `features/tourney/tourney_reports.py`, `tests/test_booster_shoutout.py`, `tests/test_economy.py`, `tests/test_tourney_reports.py`
+
+✅ Reviewed against the diff: implementation matches the filed spec.
+
+📝 Review note: Tier-3 cleanup bundle — DropView given a stable `custom_id` and re-registered via `add_view` at startup so drops stay claimable after a restart; booster-drop marker gains a startup reconcile; `!endtourney`'s winner announcement uses a persisted retry marker instead of an in-memory sleep; the per-message token reward switches to the atomic `$inc` helper and stamps the cooldown first; booster-shoutout ticket creation is guarded against its duplicate window; and `tasks.loop(time=)` jobs catch up / log clearly when a scheduled run is missed to downtime.
+
+#### #435 — Enhancement: Bump project version to v1.12.0 (Enhancement)
+
+> ### Overview
+> This enhancement updates the project version in `pyproject.toml` from v1.11.1 to v1.12.0, preparing for a new release.
+>
+> ### Current Behavior
+> The project's version in `pyproject.toml` is currently set to `v1.11.1`.
+>
+> ### Proposed Behavior
+> The project's version in `pyproject.toml` should be updated to `v1.12.0`.
+>
+> ### Technical Requirements
+> - [ ] Update version string in `pyproject.toml` to `v1.12.0`
+>
+> ### Acceptance Criteria
+> - [ ] The `pyproject.toml` file reflects version `v1.12.0`
+> - [ ] All relevant CI checks pass after the version bump
+>
+> ### Benefit/Impact
+> This ensures the project's metadata accurately reflects the upcoming release version, maintaining proper version control and r …(truncated)
+
+Implemented in `f74ec32`. Files: `pyproject.toml`, `README.md`
+
+✅ Reviewed against the diff: implementation matches the filed spec.
+
+#### #436 — Enhancement: Update documentation for v1.12.0 release (Enhancement)
+
+> ### Overview
+> This enhancement aims to update all relevant documentation to reflect the changes introduced in release v1.12.0, ensuring accuracy and currency for users and developers.
+>
+> ### Current Behavior
+> Documentation may be outdated or incomplete regarding features, commands, or functionalities introduced or modified in v1.12.0.
+>
+> ### Proposed Behavior
+> Review all existing documentation, identify sections affected by the v1.12.0 release, and update them to accurately reflect the current state of the bot's features and commands.
+>
+> ### Technical Requirements
+> - [ ] Identify all changes/features introduced in v1.12.0.
+> - [ ] Review existing documentation (e.g., README, command help, wiki).
+> - [ ] U …(truncated)
+
+Implemented in `<pending — set to the 436-Enhancement doc commit sha once committed>`. Files: `docs/logs/SPECS.md`, `docs/logs/CHANGELOG.md`
+
+✅ Reviewed against the diff: implementation matches the filed spec.
+
+📝 Review note: Self-referential — this is the release-doc pass that wrote this very v1.12.0 SPECS section and the v1.12.0 CHANGELOG release notes + PR descriptions. The README/`pyproject.toml` version bump is handled separately by #435 (PR #440). The commit sha above is a placeholder until this branch is committed and merged.
