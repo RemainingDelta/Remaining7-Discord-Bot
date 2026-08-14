@@ -1340,3 +1340,54 @@ Closes #382
 * Bumped version to v1.11.1
 
 ---
+
+## v1.12.0 — 2026-08-14
+
+# 🚀 Release Notes v1.12.0
+
+## 🎯 Features & Enhancements
+- Tourney state now auto-resumes after a bot restart — dashboards, slowmode/lock timers, region + admin-role, and the ticket counter are rehydrated on boot, and `!starttourney` guards against clobbering an active session unless `force` is passed
+- Event Staff can now use the `!sticky` and `!unsticky` commands
+- Migrated hosting from Pella to RamNaym Cloud after repeated Pella outages; added `docs/HOSTING.md` documenting the migration history, plan specs, and reasoning
+- Added a `make commit m="..."` shortcut that runs `git add`/`commit`/`push` in one step (dev tooling)
+- Pinned the Ruff ruleset and CI Ruff version so `ruff check` is deterministic across Ruff releases (dev tooling)
+
+## 🐛 Bug Fixes & Improvements
+This release is anchored by a crash-safety epic hardening every flow that moves tokens, items, or currency against a mid-operation crash or forced restart:
+- **`/redeem`** no longer permanently loses an item if the bot crashes between removing the token and creating the ticket — a pending record is reconciled on startup to either complete the ticket or refund the item, never both and never neither
+- **`/buy` and Brawl ability/brawler purchases** no longer deduct currency without granting the item — deduct and grant are now a single atomic operation
+- **Quest rewards** are no longer lost if the bot crashes right after a quest is flagged complete — completion and payout are tracked separately so an unpaid quest is retried instead of stuck done
+- **`/event-rewards`, `/poll-rewards`, and `/payout-add`** no longer double-pay recipients on a crash-and-retry — all three now share a per-recipient ledger that claims each recipient before paying
+- **The redemption queue** no longer wrongly refunds active members on a cold member cache (now confirmed via `fetch_member`), no longer double-creates tickets or double-spends budget on retry, and no longer silently loses queued items or refunds in its remove / member-left paths
+- **Scam-image purges** now resume from where they left off after a crash instead of leaving copies live in un-visited channels
+- **Redemption ticket close and `/daily`** no longer double-refund, double-charge budget, or allow a second claim if a crash lands mid-flow
+- **Supply / booster / admin drops** stay claimable after a restart, `!endtourney`'s winner announcement survives a restart during its retry wait, per-message token rewards use an atomic write, and scheduled loop jobs catch up (or log clearly) when a run is missed to downtime
+- Fixed a contradictory tournament slow-mode message that stated both "for the tournament" and "removed after 1 hour"
+
+## 📝 Documentation
+- Added the `v1.12.0` section to `docs/logs/SPECS.md` (every issue in the release) and `docs/logs/CHANGELOG.md` (release notes + PR descriptions)
+- Added `docs/HOSTING.md` capturing the Pella → RamNaym Cloud migration history
+- Feature docs (`DATABASE`, `ECONOMY_SHOP`, `QUEST_SYSTEM`, `SCAM_DETECTION`, `TOKEN_SYSTEM`, `BRAWL_*`, `TOURNEY_OVERVIEW`, `STICKY_MESSAGES`, `BOOSTER_SHOUTOUT`) were updated alongside their respective fixes
+
+**Full Changelog**: https://github.com/RemainingDelta/Remaining7-Discord-Bot/compare/v1.11.1...v1.12.0
+
+
+### PR Descriptions
+
+#### PR #436 — 436-Enhancement update documentation for v1.12.0 release (pending)
+
+### Changes
+* Added the `v1.12.0` section to `docs/logs/SPECS.md`, documenting every issue in the release (#390, #391, #395, #398, #404, #410–#419, #423, #432, #433, #434, #435, #436)
+* Added the `v1.12.0` release notes and these PR descriptions to `docs/logs/CHANGELOG.md`
+
+Closes #436
+
+#### PR #440 — 435-Enhancement update version to v1.12.0 (pending)
+
+### Changes
+* Updated `pyproject.toml` version from `1.11.1` to `1.12.0` for the upcoming release
+* Updated `README.md` version banner to `v1.12.0` to match
+
+Closes #435
+
+---
