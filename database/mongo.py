@@ -484,6 +484,81 @@ async def get_stuck_redemption_queue_entries() -> list[dict]:
     )
 
 
+# --- SCAM PURGE SESSION HELPERS ---
+#
+# Crash-safe cross-channel purge (mirrors the redemption-queue crash-safety
+# idiom above). When a scam image is detected, the purge session records the
+# full target channel list and a `completed` cursor before any deletes start,
+# and marks each channel done as it finishes, so a crash mid-purge is resumable
+# on cold boot instead of silently abandoning the remaining channels. See
+# reconcile_scam_purge_sessions in features/scam_detection.py.
+
+
+async def create_scam_purge_session(
+    guild_id: int,
+    author_id: int,
+    image_md5: str,
+    image_size: int,
+    skip_message_id: int,
+    cutoff: datetime,
+    channel_ids: list[int],
+) -> str | None:
+    """Persist a purge job before any deletes, so an interrupted purge can be
+    resumed. Returns the session id, or None if the DB is unavailable."""
+    if db is None:
+        return None
+    result = await db.scam_purge_sessions.insert_one(
+        {
+            "guild_id": guild_id,
+            "author_id": author_id,
+            "image_md5": image_md5,
+            "image_size": image_size,
+            "skip_message_id": skip_message_id,
+            "cutoff": cutoff,
+            "channels": channel_ids,
+            "completed": [],
+            "created_at": datetime.utcnow(),
+        }
+    )
+    return str(result.inserted_id)
+
+
+async def mark_scam_purge_channel_done(session_id: str, channel_id: int):
+    """Advance the completed cursor by one channel. Idempotent via $addToSet so
+    a resumed run can't record a channel twice."""
+    if db is None:
+        return
+    try:
+        oid = ObjectId(session_id)
+    except (InvalidId, TypeError):
+        return
+    await db.scam_purge_sessions.update_one(
+        {"_id": oid}, {"$addToSet": {"completed": channel_id}}
+    )
+
+
+async def delete_scam_purge_session(session_id: str) -> dict | None:
+    """Remove a purge session once every target channel is done. Returns the
+    removed document, or None."""
+    if db is None:
+        return None
+    try:
+        oid = ObjectId(session_id)
+    except (InvalidId, TypeError):
+        return None
+    return await db.scam_purge_sessions.find_one_and_delete({"_id": oid})
+
+
+async def get_incomplete_scam_purge_sessions() -> list[dict]:
+    """Purge sessions that were never finished — a crash between session
+    creation and its deletion. Resolved once at cold boot by
+    reconcile_scam_purge_sessions. No age gate: the reconcile is cold-boot only,
+    so nothing is in flight, and sessions must persist until resolved."""
+    if db is None:
+        return []
+    return await db.scam_purge_sessions.find({}).to_list(length=None)
+
+
 # --- COUNTING HELPERS ---
 
 

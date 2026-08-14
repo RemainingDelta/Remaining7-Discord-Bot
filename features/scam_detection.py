@@ -2,20 +2,24 @@ import asyncio
 import hashlib
 import io
 from concurrent.futures import ThreadPoolExecutor
-from datetime import timedelta
+from datetime import timedelta, timezone
 
 import aiohttp
 import cv2
 import discord
 import numpy as np
-from discord.ext import commands
+from discord.ext import commands, tasks
 
 from database.mongo import (
     acquire_scam_detection_lock,
     add_hacked_user,
     add_scam_image,
+    create_scam_purge_session,
+    delete_scam_purge_session,
     ensure_scam_lock_ttl_index,
+    get_incomplete_scam_purge_sessions,
     get_scam_images,
+    mark_scam_purge_channel_done,
     remove_scam_image,
     rename_scam_image,
 )
@@ -339,6 +343,8 @@ class ScamDetection(commands.Cog):
         # Tracks (author_id, filename, size) while a detection is in progress
         # so concurrent on_message events for the same image don't send duplicate alerts.
         self._processing: set = set()
+        # Resume any cross-channel purge left unfinished by a crash/restart.
+        self.scam_purge_reconcile_task.start()
 
     async def cog_load(self):
         # Shared HTTP session for all image downloads (detection, purge, commands).
@@ -352,6 +358,7 @@ class ScamDetection(commands.Cog):
         await self._reload_index()
 
     async def cog_unload(self):
+        self.scam_purge_reconcile_task.cancel()
         self._executor.shutdown(wait=False)
         await self._session.close()
 
@@ -383,50 +390,145 @@ class ScamDetection(commands.Cog):
         self._phash_index = phash_index
         self._orb_index = orb_index
 
-    async def _purge_scam_instances(
+    async def _purge_channel(
         self,
-        guild: discord.Guild,
+        channel,
         author_id: int,
         image_md5: str,
         image_size: int,
         skip_message_id: int,
-    ) -> tuple[int, list[str]]:
-        """Delete all other instances of the same image (by MD5) across channels."""
+        cutoff,
+    ) -> tuple[int, bool]:
+        """Delete every MD5-matching copy of the image posted by author_id in one
+        channel/thread. Returns (deleted_count, hit) where hit is True if at
+        least one copy was removed."""
+        deleted = 0
+        try:
+            # newest-first so busy channels don't hide the most recent posts
+            # behind the 200-message limit
+            async for msg in channel.history(
+                after=cutoff, oldest_first=False, limit=200
+            ):
+                if msg.author.id != author_id or msg.id == skip_message_id:
+                    continue
+                for att in msg.attachments:
+                    if not _is_allowed_image(att.filename):
+                        continue
+                    if att.size != image_size:
+                        continue
+                    try:
+                        data = await self._download(att.url)
+                        if hashlib.md5(data).hexdigest() == image_md5:
+                            await msg.delete()
+                            deleted += 1
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+        return deleted, deleted > 0
+
+    async def _run_purge_session(self, session: dict) -> tuple[int, list[str]]:
+        """Drive a purge session to completion, resuming from its `completed`
+        cursor. Marks each channel done as it finishes and deletes the session
+        once every target channel is processed, so a crash mid-run leaves a
+        resumable session behind rather than abandoning channels.
+
+        Returns (deleted, channels_hit). If the guild isn't cached yet the
+        session is deferred untouched (returns (0, [])) for a later boot.
+        """
+        session_id = str(session["_id"])
+        guild = self.bot.get_guild(session["guild_id"])
+        if guild is None:
+            # Can't resolve the guild (not cached) -> leave the session for a
+            # later reconcile rather than dropping unfinished work.
+            return 0, []
+
+        author_id = session["author_id"]
+        image_md5 = session["image_md5"]
+        image_size = session["image_size"]
+        skip_message_id = session["skip_message_id"]
+        # Resume must reuse the ORIGINAL lookback window. Motor returns naive
+        # UTC; make it aware so channel.history() interprets it correctly.
+        cutoff = session["cutoff"]
+        if cutoff.tzinfo is None:
+            cutoff = cutoff.replace(tzinfo=timezone.utc)
+
+        completed = set(session.get("completed", []))
         deleted = 0
         channels_hit = []
-        cutoff = discord.utils.utcnow() - timedelta(minutes=_PURGE_LOOKBACK_MINUTES)
 
-        all_channels = list(guild.text_channels) + list(guild.threads)
-        for channel in all_channels:
-            perms = channel.permissions_for(guild.me)
-            if not perms.read_message_history:
+        for channel_id in session["channels"]:
+            if channel_id in completed:
                 continue
-            try:
-                # newest-first so busy channels don't hide the most recent posts
-                # behind the 200-message limit
-                async for msg in channel.history(
-                    after=cutoff, oldest_first=False, limit=200
-                ):
-                    if msg.author.id != author_id or msg.id == skip_message_id:
-                        continue
-                    for att in msg.attachments:
-                        if not _is_allowed_image(att.filename):
-                            continue
-                        if att.size != image_size:
-                            continue
-                        try:
-                            data = await self._download(att.url)
-                            if hashlib.md5(data).hexdigest() == image_md5:
-                                await msg.delete()
-                                deleted += 1
-                                channels_hit.append(channel.mention)
-                        except Exception:
-                            pass
-            except Exception:
-                pass
+            channel = guild.get_channel_or_thread(channel_id)
+            if channel is not None:
+                perms = channel.permissions_for(guild.me)
+                if perms.read_message_history:
+                    count, hit = await self._purge_channel(
+                        channel,
+                        author_id,
+                        image_md5,
+                        image_size,
+                        skip_message_id,
+                        cutoff,
+                    )
+                    deleted += count
+                    if hit:
+                        channels_hit.append(channel.mention)
+            # A deleted or permission-less channel counts as done so the session
+            # can always reach completion.
+            await mark_scam_purge_channel_done(session_id, channel_id)
             await asyncio.sleep(0.1)
 
+        await delete_scam_purge_session(session_id)
         return deleted, channels_hit
+
+    # --- SCAM PURGE RECONCILE (crash recovery) ---
+    @tasks.loop(count=1)
+    async def scam_purge_reconcile_task(self):
+        """Runs once per process, after the bot is ready. A cog is loaded once
+        and not re-added on gateway reconnect, so this is cold-boot-only — there
+        are no in-flight purges to race, hence no stale-age gate is needed."""
+        await self.bot.wait_until_ready()
+        try:
+            await self.reconcile_scam_purge_sessions()
+        except Exception as e:
+            print(f"❌ Scam purge reconcile failed: {e}")
+
+    async def reconcile_scam_purge_sessions(self):
+        """Resume any cross-channel purge left unfinished by a crash/restart, and
+        tell staff a resumed purge completed — distinct from the original
+        detection alert, which was never sent (or sent before the crash)."""
+        for session in await get_incomplete_scam_purge_sessions():
+            deleted, channels_hit = await self._run_purge_session(session)
+            # Audit trail: one line per resumed session, even if nothing was left
+            # (e.g. a deferred session whose guild wasn't cached yet).
+            print(
+                f"🧹 Scam purge resumed after restart: {deleted} copy(ies) "
+                f"removed across {len(channels_hit)} channel(s) "
+                f"(author {session['author_id']}, md5 {session['image_md5'][:8]})."
+            )
+            # Staff awareness: only ping the mod-log when the resumed run actually
+            # cleaned something up.
+            if deleted > 0:
+                mod_log = self.bot.get_channel(MODERATOR_LOGS_CHANNEL_ID)
+                if mod_log:
+                    embed = discord.Embed(
+                        title="🧹 Scam Purge Completed After Restart",
+                        description=(
+                            "A scam-image purge interrupted by a bot restart has "
+                            "finished cleaning up.\n"
+                            f"**Copies removed:** {deleted} across "
+                            f"{', '.join(channels_hit)}\n"
+                            f"**User:** `{session['author_id']}`"
+                        ),
+                        color=discord.Color.orange(),
+                    )
+                    embed.set_footer(
+                        text="Resumed automatically — no action needed. Distinct "
+                        "from the original detection alert."
+                    )
+                    await mod_log.send(embed=embed)
 
     def _security_cog(self):
         return self.bot.cogs.get("Security")
@@ -510,14 +612,38 @@ class ScamDetection(commands.Cog):
             except Exception:
                 pass
 
-            # Delete other instances of the same image across channels
-            other_deleted, channels_hit = await self._purge_scam_instances(
-                message.guild,
+            # Delete other instances of the same image across channels. Persist
+            # the target channel list + cutoff as a purge session BEFORE any
+            # deletes so a crash mid-purge is resumable on the next boot instead
+            # of leaving copies live in the un-purged channels.
+            all_channels = list(message.guild.text_channels) + list(
+                message.guild.threads
+            )
+            channel_ids = [c.id for c in all_channels]
+            cutoff = discord.utils.utcnow() - timedelta(minutes=_PURGE_LOOKBACK_MINUTES)
+            session_id = await create_scam_purge_session(
+                message.guild.id,
                 message.author.id,
                 image_md5,
                 attachment.size,
                 message.id,
+                cutoff,
+                channel_ids,
             )
+            session_doc = {
+                # None when the DB is down; _run_purge_session still purges in
+                # memory (just not crash-safe), so behaviour is unchanged.
+                "_id": session_id,
+                "guild_id": message.guild.id,
+                "author_id": message.author.id,
+                "image_md5": image_md5,
+                "image_size": attachment.size,
+                "skip_message_id": message.id,
+                "cutoff": cutoff,
+                "channels": channel_ids,
+                "completed": [],
+            }
+            other_deleted, channels_hit = await self._run_purge_session(session_doc)
 
             # Apply 10-minute precautionary timeout
             timeout_status = "⚠️ Could not timeout (missing permissions or user left)"
