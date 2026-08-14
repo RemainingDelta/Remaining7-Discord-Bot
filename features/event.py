@@ -34,6 +34,42 @@ EVENT_CHANNELS = {
 }
 
 
+def _stuck_line(row: dict) -> str:
+    """One stuck-payout row, formatted for its source. Payout rows are float
+    currency (2dp); event/poll rows are integer tokens."""
+    source = row.get("source", "event")
+    amount = row.get("amount", 0)
+    if source == "payout":
+        return (
+            f"• <@{row['user_id']}> — **{amount:,.2f}** owed "
+            f"({source}, msg `{row.get('message_id', '?')}`)"
+        )
+    return (
+        f"• <@{row['user_id']}> — **{amount}** tokens "
+        f"({source}, msg `{row.get('message_id', '?')}`)"
+    )
+
+
+def _stuck_recovery_note(rows: list) -> str:
+    """Source-correct recovery guidance. Token rewards and staff payouts share
+    the ledger but recover differently, so only mention the paths present."""
+    has_payout = any(r.get("source") == "payout" for r in rows)
+    has_token = any(r.get("source") != "payout" for r in rows)
+    parts = []
+    if has_token:
+        parts.append("**Token rewards** (event/poll): pay each with `/give`.")
+    if has_payout:
+        parts.append(
+            "**Staff payouts**: re-run the identical `/payout-add` — it credits "
+            "only the missing staff and double-pays no one."
+        )
+    parts.append(
+        "Then run `/check-stuck-payouts resolve:True` to clear them. Nothing is "
+        "auto-paid — re-paying blindly could double-pay."
+    )
+    return "\n".join(parts)
+
+
 class ClearChannelView(discord.ui.View):
     def __init__(self, channel_id: int):
         super().__init__(timeout=None)  # Persistent view
@@ -488,10 +524,11 @@ class Events(commands.Cog):
 
     async def reconcile_reward_payouts(self):
         """Reports (does NOT re-pay) any recipient left claimed-but-unpaid by a
-        crash between the ledger claim and the balance $inc. Re-paying can't be
-        safe here: a paid:False row can't tell 'crashed before the $inc' from
-        'crashed after it', so an auto-repay could double-pay. Staff recover with
-        a manual /give and clear the row via /check-stuck-payouts."""
+        crash between the ledger claim and the credit. Re-paying can't be safe
+        here: a paid:False row can't tell 'crashed before the credit' from
+        'crashed after it', so an auto-repay could double-pay. Token rewards
+        (event/poll) recover via /give; staff payouts recover by re-running the
+        identical /payout-add. Both clear via /check-stuck-payouts."""
         stuck = await get_stuck_reward_payouts()
         if not stuck:
             return
@@ -501,22 +538,15 @@ class Events(commands.Cog):
             print("❌ Reward payout reconcile: staff channel not found.")
             return
 
-        lines = [
-            f"• <@{row['user_id']}> — **{row.get('amount', 0)}** tokens "
-            f"({row.get('source', 'event')}, msg `{row.get('message_id', '?')}`)"
-            for row in stuck
-        ]
-        text = "\n".join(lines)
+        text = "\n".join(_stuck_line(row) for row in stuck)
         if len(text) > 1024:
             text = text[:960] + "\n... (more hidden)"
 
         embed = discord.Embed(
             title="⚠️ Stuck Reward Payouts Detected",
             description=(
-                f"**{len(stuck)}** recipient(s) were claimed for a reward payout "
-                "but their tokens were never confirmed (likely a crash mid-payout).\n"
-                "These were **not** auto-paid to avoid double-paying. Pay each with "
-                "`/give`, then run `/check-stuck-payouts resolve:True` to clear them."
+                f"**{len(stuck)}** recipient(s) were claimed but never confirmed "
+                f"(likely a crash mid-payout).\n{_stuck_recovery_note(stuck)}"
             ),
             color=discord.Color.orange(),
         )
@@ -611,7 +641,7 @@ class Events(commands.Cog):
         description="ADMIN ONLY: List event payouts claimed but never confirmed paid.",
     )
     @app_commands.describe(
-        resolve="Mark the listed rows resolved (only after you've paid them via /give)."
+        resolve="Mark the listed rows resolved (only after you've recovered each)."
     )
     async def check_stuck_payouts(
         self, interaction: discord.Interaction, resolve: bool = False
@@ -640,13 +670,7 @@ class Events(commands.Cog):
             )
             return
 
-        lines = []
-        for row in stuck:
-            lines.append(
-                f"• <@{row['user_id']}> — **{row.get('amount', 0)}** tokens "
-                f"({row.get('source', 'event')}, msg `{row.get('message_id', '?')}`)"
-            )
-        text = "\n".join(lines)
+        text = "\n".join(_stuck_line(row) for row in stuck)
         if len(text) > 1024:
             text = text[:960] + "\n... (more hidden)"
 
@@ -659,17 +683,15 @@ class Events(commands.Cog):
                 )
             title = "🧹 Stuck Payouts Resolved"
             description = (
-                f"Marked **{len(stuck)}** row(s) resolved. Make sure you paid each "
-                "with `/give` first — this only clears the report, it moves no tokens."
+                f"Marked **{len(stuck)}** row(s) resolved. Make sure you recovered "
+                "each first — this only clears the report, it moves nothing."
             )
             color = discord.Color.green()
         else:
             title = "⚠️ Stuck Reward Payouts"
             description = (
                 f"**{len(stuck)}** recipient(s) were claimed but never confirmed "
-                "paid (likely a crash mid-payout). Pay each with `/give`, then run "
-                "`/check-stuck-payouts resolve:True` to clear them. Nothing is "
-                "auto-paid — re-paying could double-pay."
+                f"(likely a crash mid-payout).\n{_stuck_recovery_note(stuck)}"
             )
             color = discord.Color.orange()
 

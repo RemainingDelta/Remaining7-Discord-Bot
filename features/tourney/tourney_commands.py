@@ -2386,7 +2386,9 @@ def setup_tourney_commands(bot: commands.Bot):
             payout_per_person = amount
 
         # 4. Update Database (Batch System)
-        await add_payout_batch(payout_per_person, staff_ids, reason)
+        _, credited, skipped = await add_payout_batch(
+            payout_per_person, staff_ids, reason, str(interaction.user.id)
+        )
 
         # 5. Response
         embed = discord.Embed(title="💰 Payouts Recorded", color=discord.Color.green())
@@ -2396,8 +2398,25 @@ def setup_tourney_commands(bot: commands.Bot):
         )
         embed.add_field(name="Reason", value=reason, inline=False)
 
-        mentions_str = " ".join([f"<@{uid}>" for uid in staff_ids])
-        embed.add_field(name="Staff Credited", value=mentions_str, inline=False)
+        # Cap the mention list so a large batch can't overflow Discord's
+        # 1024-char embed field limit and 400 the whole response.
+        def _cap_mentions(ids, limit=40):
+            shown = " ".join(f"<@{uid}>" for uid in ids[:limit])
+            if len(ids) > limit:
+                shown += f" …(+{len(ids) - limit} more)"
+            return shown
+
+        credited_str = _cap_mentions(credited) or "*(none)*"
+        embed.add_field(name="Staff Credited", value=credited_str, inline=False)
+
+        # A re-run of an identical payout dedupes on the batch id — surface any
+        # already-paid staff so the reply doesn't imply everyone was paid again.
+        if skipped:
+            embed.add_field(
+                name="Already Paid (skipped)",
+                value=_cap_mentions(skipped),
+                inline=False,
+            )
 
         await interaction.response.send_message(embed=embed)
 

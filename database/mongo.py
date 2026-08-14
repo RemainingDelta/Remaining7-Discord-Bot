@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta
+import hashlib
 import os
 import re
-import uuid
 import motor.motor_asyncio
 import certifi
 from bson import ObjectId
@@ -163,7 +163,7 @@ async def mark_poll_reward_processed(
 
 
 async def claim_reward_payout(
-    message_id: str, user_id: str, amount: int, admin_id: str, source: str = "event"
+    message_id: str, user_id: str, amount: float, admin_id: str, source: str = "event"
 ) -> bool:
     """Atomically claim one recipient's payout, writing paid:False before payment.
 
@@ -171,8 +171,9 @@ async def claim_reward_payout(
     Returns False if a doc already exists for this message+user (already paid, or
     claimed-but-stuck) — the caller should skip it. Keyed message_id+user_id so a
     re-run after a crash skips already-handled users instead of double-paying.
-    `source` ("event"/"poll") is informational, so a stuck-row report can point
-    staff at the right command; recovery is /give either way.
+    `source` ("event"/"poll"/"payout") is informational, so a stuck-row report
+    can give source-correct recovery steps. `amount` is stored as passed (int
+    tokens for event/poll, float currency for payouts) — do not truncate.
     """
     if db is None:
         return False
@@ -184,7 +185,7 @@ async def claim_reward_payout(
                 "_id": key,
                 "message_id": str(message_id),
                 "user_id": str(user_id),
-                "amount": int(amount),
+                "amount": amount,
                 "admin_id": str(admin_id),
                 "source": str(source),
                 "paid": False,
@@ -817,34 +818,66 @@ async def acquire_scam_detection_lock(author_id: int, image_md5: str) -> bool:
 # --- PAYOUT / ADMIN COMPENSATION HELPERS ---
 
 
-async def add_payout_batch(amount: float, user_ids: list[str], reason: str):
-    """
-    1. Logs the batch globally with a unique ID.
-    2. Adds funds AND the Batch ID to every user's profile.
+async def add_payout_batch(
+    amount: float, user_ids: list[str], reason: str, admin_id: str
+):
+    """Crash-safe staff payout batch.
+
+    The receipt id is derived deterministically from the batch inputs (sorted
+    user ids + per-person amount + reason), so re-running the identical
+    /payout-add after a mid-loop crash reuses the same batch id. Each recipient
+    is claimed in the shared reward_payouts ledger (source="payout") before the
+    payouts $inc, so a re-run credits only users who were never reached and
+    never double-pays anyone already credited for this batch.
+
+    Trade-off: two *intentionally* identical payouts (same users, same
+    per-person amount, same reason) hash to the same batch id, so the second is
+    treated as a retry and skipped. Vary the reason to force a distinct batch.
+
+    Returns (batch_id, credited, skipped) so the caller can report accurately.
     """
     if db is None:
-        return
+        return None, [], []
 
-    # Generate a unique receipt ID (e.g., "a1b2c3d4")
-    batch_id = str(uuid.uuid4())[:8]
+    # Deterministic receipt id: independent of caller set() ordering and of a
+    # random uuid, so an identical re-run collides on the same key and dedupes.
+    payload = "|".join(sorted(user_ids)) + f"|{amount:.2f}|{reason}"
+    batch_id = hashlib.sha1(payload.encode("utf-8")).hexdigest()[:8]
 
-    # 1. Save Global Log
-    log_entry = {
-        "batch_id": batch_id,
-        "timestamp": datetime.utcnow(),
-        "amount": amount,
-        "user_ids": user_ids,
-        "reason": reason,
-    }
-    await db.payout_logs.insert_one(log_entry)
+    # 1. Save Global Log (idempotent: a re-run must not append a duplicate row,
+    # since /payout-history reads these).
+    await db.payout_logs.update_one(
+        {"batch_id": batch_id},
+        {
+            "$setOnInsert": {
+                "batch_id": batch_id,
+                "timestamp": datetime.utcnow(),
+                "amount": amount,
+                "user_ids": user_ids,
+                "reason": reason,
+            }
+        },
+        upsert=True,
+    )
 
-    # 2. Update Users (Loop ensures everyone gets updated/created)
+    # 2. Credit each user at most once per batch. The ledger claim gates the
+    # $inc/$push so a re-run skips anyone already credited for this batch id.
+    credited, skipped = [], []
     for uid in user_ids:
+        if not await claim_reward_payout(
+            batch_id, uid, amount, admin_id, source="payout"
+        ):
+            skipped.append(uid)
+            continue
         await db.payouts.update_one(
             {"_id": uid},
             {"$inc": {"amount": amount}, "$push": {"unpaid_batches": batch_id}},
             upsert=True,
         )
+        await mark_reward_paid(batch_id, uid)
+        credited.append(uid)
+
+    return batch_id, credited, skipped
 
 
 async def get_payout_logs(limit: int = 25):
