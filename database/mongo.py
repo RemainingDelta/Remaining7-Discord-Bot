@@ -91,6 +91,38 @@ async def increment_user_balance(user_id: str, amount: int):
     )
 
 
+async def claim_daily_reward(
+    user_id: str, amount: int, cutoff_ts: float, now_ts: float
+):
+    """Atomically grant the daily reward and stamp the cooldown in one write.
+
+    The token grant ($inc balance) and the cooldown stamp ($set daily_last_claimed)
+    happen in a single find_one_and_update guarded by a cooldown predicate, so a crash
+    can no longer land between "tokens granted" and "cooldown stamped" and let the user
+    claim twice. Returns the updated user doc (with the new balance) if this call won
+    the claim, or None if the user has already claimed since cutoff_ts (a concurrent or
+    duplicate invoke). Caller must ensure the user doc exists first — get_user_data /
+    get_user_balance create it — since upsert is intentionally off here (an upsert whose
+    filter excludes an existing doc would raise a duplicate-key error).
+
+    Note: only the cooldown lives on the user doc. The daily message counter stays in
+    settings (daily_msg_count_{uid}); it doesn't need to be part of this atomic guard.
+    """
+    if db is None:
+        return None
+    return await db.users.find_one_and_update(
+        {
+            "_id": str(user_id),
+            "$or": [
+                {"daily_last_claimed": {"$exists": False}},
+                {"daily_last_claimed": {"$lt": cutoff_ts}},
+            ],
+        },
+        {"$inc": {"balance": int(amount)}, "$set": {"daily_last_claimed": now_ts}},
+        return_document=True,  # AFTER — surface the new balance for the embed
+    )
+
+
 # --- POLL REWARD HELPERS ---
 
 
@@ -204,6 +236,39 @@ async def resolve_stuck_reward_payout(message_id: str, user_id: str, resolver_id
             }
         },
     )
+
+
+# --- REDEMPTION CLOSURE GUARD (single-state, crash-safe) ---
+
+
+async def claim_redemption_closure(channel_id, action: str) -> bool:
+    """Atomically claim a redemption-ticket close so its financial side effect (refund
+    or budget deduction) runs at most once, even if the persistent close button is
+    re-clicked after a crash that killed the bot before the channel was deleted.
+
+    Returns True only if this call newly owns the closure — the caller should run the
+    money + transcript, then delete the channel. Returns False if a doc already exists
+    (a previous attempt already ran the money) — the caller should skip straight to
+    deleting the channel. Keyed by channel id; no boot reconcile is needed because the
+    surviving channel and its live buttons ARE the retry path (staff naturally re-click,
+    and this guard makes the re-click a delete-only no-op on the finances).
+    """
+    if db is None:
+        return False
+    key = str(channel_id)
+    result = await db.redemption_closures.find_one_and_update(
+        {"_id": key},
+        {
+            "$setOnInsert": {
+                "_id": key,
+                "action": str(action),
+                "claimed_at": datetime.utcnow(),
+            }
+        },
+        upsert=True,
+        return_document=False,
+    )
+    return result is None  # None = doc didn't exist before — we own this closure
 
 
 # --- LEVELING HELPERS ---

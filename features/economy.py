@@ -10,8 +10,11 @@ import asyncio
 
 from database.mongo import (
     get_user_balance,
+    get_user_data,
     update_user_balance,
     increment_user_balance,
+    claim_daily_reward,
+    claim_redemption_closure,
     get_leveling_data,
     update_leveling_data,
     add_item_token,
@@ -580,29 +583,34 @@ class RedemptionClosedOptionsView(discord.ui.View):
 
         await interaction.response.defer(ephemeral=True)
 
-        opener_raw = _extract_topic_value(
-            interaction.channel.topic, "redemption-opener"
-        )
-        item = _extract_topic_value(interaction.channel.topic, "item") or ""
-        token_cost = _token_price_for_item(item) if item else 0
-        balance_before = 0
-        balance_after = 0
-        if opener_raw and opener_raw.isdigit() and item:
-            refund_amount = _token_price_for_item(item)
-            if refund_amount > 0:
-                balance_before = await get_user_balance(opener_raw)
-                balance_after = balance_before + refund_amount
-                await update_user_balance(opener_raw, balance_after)
+        # Claim the closure BEFORE any money moves so a crash-then-reclick can't
+        # refund twice. If the claim was already taken (a prior attempt paid the
+        # refund but died before deleting), skip straight to deleting the channel.
+        if await claim_redemption_closure(interaction.channel.id, "refund"):
+            opener_raw = _extract_topic_value(
+                interaction.channel.topic, "redemption-opener"
+            )
+            item = _extract_topic_value(interaction.channel.topic, "item") or ""
+            token_cost = _token_price_for_item(item) if item else 0
+            balance_before = 0
+            balance_after = 0
+            if opener_raw and opener_raw.isdigit() and item:
+                refund_amount = _token_price_for_item(item)
+                if refund_amount > 0:
+                    balance_before = await get_user_balance(opener_raw)
+                    balance_after = balance_before + refund_amount
+                    await increment_user_balance(opener_raw, refund_amount)
 
-        await _save_redemption_transcript(
-            interaction.channel,
-            interaction.user,
-            item,
-            token_cost,
-            balance_before,
-            balance_after,
-            outcome="refunded",
-        )
+            await _save_redemption_transcript(
+                interaction.channel,
+                interaction.user,
+                item,
+                token_cost,
+                balance_before,
+                balance_after,
+                outcome="refunded",
+            )
+
         await interaction.channel.delete(
             reason=f"Redemption ticket refunded and deleted by {interaction.user}"
         )
@@ -636,35 +644,39 @@ class RedemptionClosedOptionsView(discord.ui.View):
 
         await interaction.response.defer(ephemeral=True)
 
-        item = _extract_topic_value(interaction.channel.topic, "item") or ""
-        budget_raw = _extract_topic_value(interaction.channel.topic, "budget_usd")
-        try:
-            cost = (
-                float(budget_raw)
-                if budget_raw is not None
-                else _budget_cost_for_item(item)
+        # Claim the closure BEFORE deducting from budget so a crash-then-reclick can't
+        # double-count the spend. If already claimed, skip straight to the delete.
+        if await claim_redemption_closure(interaction.channel.id, "budget"):
+            item = _extract_topic_value(interaction.channel.topic, "item") or ""
+            budget_raw = _extract_topic_value(interaction.channel.topic, "budget_usd")
+            try:
+                cost = (
+                    float(budget_raw)
+                    if budget_raw is not None
+                    else _budget_cost_for_item(item)
+                )
+            except ValueError:
+                cost = _budget_cost_for_item(item)
+
+            opener_raw = _extract_topic_value(
+                interaction.channel.topic, "redemption-opener"
             )
-        except ValueError:
-            cost = _budget_cost_for_item(item)
+            token_cost = _token_price_for_item(item) if item else 0
+            current_balance = 0
+            if opener_raw and opener_raw.isdigit():
+                current_balance = await get_user_balance(opener_raw)
 
-        opener_raw = _extract_topic_value(
-            interaction.channel.topic, "redemption-opener"
-        )
-        token_cost = _token_price_for_item(item) if item else 0
-        current_balance = 0
-        if opener_raw and opener_raw.isdigit():
-            current_balance = await get_user_balance(opener_raw)
+            await _save_redemption_transcript(
+                interaction.channel,
+                interaction.user,
+                item,
+                token_cost,
+                current_balance + token_cost,
+                current_balance,
+                outcome="fulfilled",
+            )
+            await add_budget_spent(cost)
 
-        await _save_redemption_transcript(
-            interaction.channel,
-            interaction.user,
-            item,
-            token_cost,
-            current_balance + token_cost,
-            current_balance,
-            outcome="fulfilled",
-        )
-        await add_budget_spent(cost)
         await interaction.channel.delete(
             reason=f"Redemption fulfilled and deleted by {interaction.user}"
         )
@@ -1301,9 +1313,12 @@ class Economy(commands.Cog):
                 booster_xp_bonus = 1
 
             # --- TRACK DAILY MESSAGE COUNT (tied to /daily cooldown window) ---
-            # Format: "LAST_DAILY_TIMESTAMP:COUNT" — resets when user claims /daily
-            last_daily_str = await get_setting(f"daily_{user_id}")
-            window_key = last_daily_str if last_daily_str else "0"
+            # Format: "LAST_DAILY_TIMESTAMP:COUNT" — resets when user claims /daily.
+            # The window key is the /daily cooldown, which lives on the user doc
+            # (daily_last_claimed). The count itself stays in settings on purpose.
+            user_doc = await get_user_data(user_id)
+            last_daily_ts = user_doc.get("daily_last_claimed")
+            window_key = str(last_daily_ts) if last_daily_ts else "0"
 
             daily_msg_data = await get_setting(
                 f"daily_msg_count_{user_id}", f"{window_key}:0"
@@ -1719,8 +1734,13 @@ class Economy(commands.Cog):
         now = datetime.utcnow()
 
         # 1. FETCH DATA
-        last_daily_str = await get_setting(f"daily_{user_id}")
-        window_key = last_daily_str if last_daily_str else "0"
+        # The cooldown lives on the user doc (daily_last_claimed) so the grant + stamp
+        # can be one atomic write (see claim_daily_reward). The daily message counter
+        # deliberately stays in settings (daily_msg_count_{uid}) — it isn't part of the
+        # atomic claim, so it's fine to keep it where it is.
+        user_doc = await get_user_data(user_id)
+        last_daily_ts = user_doc.get("daily_last_claimed")
+        window_key = str(last_daily_ts) if last_daily_ts else "0"
 
         daily_msg_data = await get_setting(
             f"daily_msg_count_{user_id}", f"{window_key}:0"
@@ -1729,8 +1749,8 @@ class Economy(commands.Cog):
         msg_count = int(count) if stored_window_key == window_key else 0
 
         cooldown_remaining = None
-        if last_daily_str:
-            last_daily = datetime.utcfromtimestamp(float(last_daily_str))
+        if last_daily_ts:
+            last_daily = datetime.utcfromtimestamp(float(last_daily_ts))
             time_since = now - last_daily
             if time_since < timedelta(days=1):
                 cooldown_remaining = timedelta(days=1) - time_since
@@ -1776,11 +1796,24 @@ class Economy(commands.Cog):
                 booster_bonus = 20
         final_tokens += booster_bonus
 
-        current_balance = await get_user_balance(user_id)
-        new_balance = current_balance + final_tokens
+        # Atomically stamp the cooldown AND grant the tokens in one write, so a crash
+        # can't land between "tokens granted" and "cooldown stamped" and let the user
+        # claim twice. If the claim loses the cooldown predicate (a concurrent or
+        # duplicate invoke slipped past the check above), treat it as on cooldown
+        # instead of granting again.
+        now_ts = now.timestamp()
+        cutoff_ts = (now - timedelta(days=1)).timestamp()
+        updated = await claim_daily_reward(user_id, final_tokens, cutoff_ts, now_ts)
+        if updated is None:
+            embed = discord.Embed(
+                title="🔒 Daily Reward Status",
+                description="You've already claimed your daily reward. Try again later!",
+                color=discord.Color.orange(),
+            )
+            await interaction.response.send_message(embed=embed, ephemeral=False)
+            return
 
-        await update_user_balance(user_id, new_balance)
-        await set_setting(f"daily_{user_id}", str(now.timestamp()))
+        new_balance = updated.get("balance", 0)
 
         description = (
             f"You received **{final_tokens} R7 tokens**!\n"
