@@ -169,6 +169,22 @@ The payout loop **claims → pays → commits** per recipient: the claim writes 
 
 ---
 
+### `redemption_queue`
+FIFO queue of redemptions deferred to next month when `/redeem` exceeds the available budget. One document per queued item; `_id` is an ObjectId.
+
+| Field | Type | Purpose |
+|-------|------|---------|
+| `user_id` | str | Opener (matches `users` convention) |
+| `item` | str | `SHOP_DATA` key |
+| `budget_usd` | float | USD cost snapshot at queue time (audit/display; processing recomputes) |
+| `queued_at` | datetime | FIFO sort key |
+| `claimed_at` | datetime | **Crash-safety marker** — stamped atomically *before* the ticket is created; absent until then |
+| `channel_id` | int \| null | The created ticket's channel id, recorded after creation (or `null` while claimed) |
+
+Monthly processing is **crash-safe** (claim → create ticket → record `channel_id` → remove entry), mirroring the `pending_redemptions` markers used by the interactive `/redeem` path. A claimed entry is never reprocessed by later runs, so a crash between ticket creation and entry removal can't create a duplicate ticket or double-spend the budget. Claimed leftovers are resolved once at cold boot by `reconcile_redemption_queue()` (decidably: `channel_id` present → drop; otherwise topic-scan the redemption category → drop if a ticket exists, else return the item to inventory).
+
+---
+
 ### `sticky`
 Sticky message data per channel. `_id = str(channel_id)`.
 

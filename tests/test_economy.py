@@ -302,7 +302,9 @@ def _make_category_with_members(member_ids, fetch_member=None):
 
 def _patch_queue_helpers(monkeypatch, entries, budgets):
     """Patches the queue processing collaborators; returns the key mocks."""
-    create_ticket = AsyncMock()
+    # create_redemption_ticket returns the channel it made; the queue processor
+    # reads .id off it to record on the entry, so hand back a channel with one.
+    create_ticket = AsyncMock(return_value=MagicMock(id=999))
     remove_entry = AsyncMock()
     refund = AsyncMock()
     monkeypatch.setattr(
@@ -316,6 +318,15 @@ def _patch_queue_helpers(monkeypatch, entries, budgets):
     monkeypatch.setattr("features.economy.remove_redemption_queue_entry", remove_entry)
     monkeypatch.setattr("features.economy.increment_user_balance", refund)
     monkeypatch.setattr("features.economy._increment_redeem_counter", AsyncMock())
+    # Crash-safe claim/record: claim succeeds by default; tests that exercise a
+    # lost claim or a pre-claimed entry re-patch these.
+    monkeypatch.setattr(
+        "features.economy.claim_redemption_queue_entry",
+        AsyncMock(return_value=True),
+    )
+    monkeypatch.setattr(
+        "features.economy.set_redemption_queue_entry_channel", AsyncMock()
+    )
     return create_ticket, remove_entry, refund
 
 
@@ -440,6 +451,75 @@ async def test_queue_processing_raises_without_category(monkeypatch):
         await cog.process_redemption_queue()
 
 
+async def test_queue_processing_records_channel_before_removing(monkeypatch):
+    # Crash-safe order: claim -> create ticket -> record its channel id -> remove.
+    category = _make_category_with_members([1])
+    cog, _ = _make_economy_cog(category)
+    entries = [{"_id": "a1", "user_id": "1", "item": "brawl pass"}]
+    create_ticket, remove_entry, _ = _patch_queue_helpers(
+        monkeypatch, entries, budgets=[50.0]
+    )
+    claim = AsyncMock(return_value=True)
+    set_channel = AsyncMock()
+    monkeypatch.setattr("features.economy.claim_redemption_queue_entry", claim)
+    monkeypatch.setattr(
+        "features.economy.set_redemption_queue_entry_channel", set_channel
+    )
+
+    await cog.process_redemption_queue()
+
+    claim.assert_awaited_once_with("a1")
+    create_ticket.assert_awaited_once()
+    set_channel.assert_awaited_once_with("a1", 999)  # id of the created channel
+    remove_entry.assert_awaited_once_with("a1")
+
+
+async def test_queue_processing_skips_already_claimed_entry(monkeypatch):
+    # A claimed leftover from a crashed run (ticket may already exist) must never
+    # be reprocessed here — that is the cold-boot reconcile's job.
+    category = _make_category_with_members([1])
+    cog, _ = _make_economy_cog(category)
+    entries = [
+        {
+            "_id": "a1",
+            "user_id": "1",
+            "item": "brawl pass",
+            "claimed_at": datetime.utcnow(),
+        }
+    ]
+    create_ticket, remove_entry, _ = _patch_queue_helpers(
+        monkeypatch, entries, budgets=[50.0]
+    )
+    claim = AsyncMock(return_value=True)
+    monkeypatch.setattr("features.economy.claim_redemption_queue_entry", claim)
+
+    await cog.process_redemption_queue()
+
+    claim.assert_not_awaited()  # skipped before even attempting a claim
+    create_ticket.assert_not_awaited()
+    remove_entry.assert_not_awaited()
+
+
+async def test_queue_processing_skips_when_claim_lost(monkeypatch):
+    # claim returns False (an earlier, possibly crashed, run owns the entry) ->
+    # no second ticket, no removal.
+    category = _make_category_with_members([1])
+    cog, _ = _make_economy_cog(category)
+    entries = [{"_id": "a1", "user_id": "1", "item": "brawl pass"}]
+    create_ticket, remove_entry, _ = _patch_queue_helpers(
+        monkeypatch, entries, budgets=[50.0]
+    )
+    monkeypatch.setattr(
+        "features.economy.claim_redemption_queue_entry",
+        AsyncMock(return_value=False),
+    )
+
+    await cog.process_redemption_queue()
+
+    create_ticket.assert_not_awaited()
+    remove_entry.assert_not_awaited()
+
+
 # --- reconcile_pending_redemptions (crash recovery) ---
 
 
@@ -546,6 +626,84 @@ async def test_reconcile_defers_when_category_unavailable(monkeypatch):
 
     refund.assert_not_awaited()
     clear.assert_not_awaited()
+
+
+# --- reconcile_redemption_queue (crash recovery) ---
+
+
+def _patch_queue_reconcile_helpers(monkeypatch, stuck_entries):
+    """Patches the queue-reconcile collaborators; returns (refund, remove)."""
+    refund = AsyncMock()
+    remove_entry = AsyncMock()
+    monkeypatch.setattr(
+        "features.economy.get_stuck_redemption_queue_entries",
+        AsyncMock(return_value=stuck_entries),
+    )
+    monkeypatch.setattr("features.economy.add_item_token", refund)
+    monkeypatch.setattr("features.economy.remove_redemption_queue_entry", remove_entry)
+    return refund, remove_entry
+
+
+async def test_queue_reconcile_noop_when_nothing_stuck(monkeypatch):
+    cog, _ = _make_economy_cog(_make_category_with_ticket_topics([]))
+    refund, remove_entry = _patch_queue_reconcile_helpers(monkeypatch, [])
+
+    await cog.reconcile_redemption_queue()
+
+    refund.assert_not_awaited()
+    remove_entry.assert_not_awaited()
+
+
+async def test_queue_reconcile_with_channel_removes_without_refund(monkeypatch):
+    # channel_id recorded -> the ticket was created -> drop the entry, no refund.
+    cog, _ = _make_economy_cog(_make_category_with_ticket_topics([]))
+    entries = [{"_id": "a1", "user_id": "1", "item": "brawl pass", "channel_id": 999}]
+    refund, remove_entry = _patch_queue_reconcile_helpers(monkeypatch, entries)
+
+    await cog.reconcile_redemption_queue()
+
+    refund.assert_not_awaited()
+    remove_entry.assert_awaited_once_with("a1")
+
+
+async def test_queue_reconcile_no_channel_no_ticket_returns_item(monkeypatch):
+    # Crash before/at ticket creation, no matching ticket -> return the item.
+    cog, transcript_channel = _make_economy_cog(_make_category_with_ticket_topics([]))
+    entries = [{"_id": "a1", "user_id": "1", "item": "brawl pass", "channel_id": None}]
+    refund, remove_entry = _patch_queue_reconcile_helpers(monkeypatch, entries)
+
+    await cog.reconcile_redemption_queue()
+
+    refund.assert_awaited_once_with("1", "brawl pass", quantity=1)
+    remove_entry.assert_awaited_once_with("a1")
+    transcript_channel.send.assert_awaited_once()
+
+
+async def test_queue_reconcile_no_channel_matching_ticket_no_refund(monkeypatch):
+    # Crash in the create->persist window: a ticket exists for this user+item.
+    category = _make_category_with_ticket_topics(
+        ["redemption-opener:1|item:brawl pass|budget_usd:9.00"]
+    )
+    cog, _ = _make_economy_cog(category)
+    entries = [{"_id": "a1", "user_id": "1", "item": "brawl pass", "channel_id": None}]
+    refund, remove_entry = _patch_queue_reconcile_helpers(monkeypatch, entries)
+
+    await cog.reconcile_redemption_queue()
+
+    refund.assert_not_awaited()
+    remove_entry.assert_awaited_once_with("a1")
+
+
+async def test_queue_reconcile_defers_when_category_unavailable(monkeypatch):
+    # Without the category we cannot verify a ticket -> leave the entry, no refund.
+    cog, _ = _make_economy_cog(None)
+    entries = [{"_id": "a1", "user_id": "1", "item": "brawl pass", "channel_id": None}]
+    refund, remove_entry = _patch_queue_reconcile_helpers(monkeypatch, entries)
+
+    await cog.reconcile_redemption_queue()
+
+    refund.assert_not_awaited()
+    remove_entry.assert_not_awaited()
 
 
 # --- begin_pending_redemption (atomic token consume + marker) ---

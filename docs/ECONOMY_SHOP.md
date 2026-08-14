@@ -122,6 +122,9 @@ When a `/redeem` request exceeds the available budget, the member gets an epheme
   "item": "brawl pass",      # SHOP_DATA key
   "budget_usd": 10.0,        # snapshot at queue time (audit/display only)
   "queued_at": datetime,     # FIFO sort key
+  # crash-safety fields, added only once processing claims the entry:
+  "claimed_at": datetime,    # set before ticket creation (two-state marker)
+  "channel_id": 123,         # set after the ticket channel is created (or None)
 }
 ```
 
@@ -134,7 +137,18 @@ When a `/redeem` request exceeds the available budget, the member gets an epheme
 `process_redemption_queue()` walks the queue in FIFO order:
 - **Member left the server** → entry is dropped, the item's token price is refunded to their balance, and a note is posted to `REDEMPTION_TRANSCRIPT_CHANNEL_ID`. A departure is only concluded after confirming against the API: on a `get_member` cache miss (e.g. right after a restart, when the member cache is cold) the code calls `fetch_member` and treats **only** a `discord.NotFound` as "left". A transient `discord.HTTPException` leaves the entry queued for the next cycle rather than wrongly refunding an active member.
 - **Cost > available budget** (recomputed every iteration, so tickets opened earlier in the run count as pending) → entry is skipped and carries over to the next month; cheaper later entries may still be fulfilled.
-- **Otherwise** → a ticket is created via `create_redemption_ticket()` (pinging the member) and the entry is removed — only after the channel is successfully created, so failures leave the entry queued.
+- **Otherwise** → the entry is processed **crash-safely** (same two-state pattern as the interactive `/redeem` path): it is **claimed** (`claimed_at` stamped atomically) *before* `create_redemption_ticket()` runs, the created channel's id is recorded on the entry (`channel_id`), and only then is the entry removed. If ticket creation fails, the entry is left claimed (not removed) rather than retried in-loop.
+
+Because the claim precedes ticket creation, a crash anywhere between the ticket being created and the entry being removed leaves a **claimed** entry that later runs **skip** (a claimed entry at the top of the loop is never reprocessed) — so a restart can't create a duplicate ticket or double-spend the budget.
+
+#### Cold-boot reconcile
+
+A claimed leftover is resolved once per process at startup by `reconcile_redemption_queue()` (run alongside `reconcile_pending_redemptions()` in `pending_redemption_reconcile_task`), decidably so it never both keeps a ticket and refunds, nor does neither:
+
+- `channel_id` set → the ticket was created → drop the entry, no refund.
+- `channel_id` is `None`, category unavailable → defer to a later reconcile.
+- `channel_id` is `None`, a matching ticket exists in the category (topic `redemption-opener`+`item`) → crash landed in the create→persist window → drop the entry, no refund.
+- `channel_id` is `None`, no matching ticket → the ticket was never made → **return the item to the member's inventory** (`add_item_token`, matching `/redemption-queue-remove`), drop the entry, and post a note to `REDEMPTION_TRANSCRIPT_CHANNEL_ID`.
 
 ### Queue Commands
 

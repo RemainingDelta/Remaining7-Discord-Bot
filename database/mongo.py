@@ -429,6 +429,61 @@ async def remove_redemption_queue_entry(entry_id: str) -> dict | None:
     return await db.redemption_queue.find_one_and_delete({"_id": oid})
 
 
+# Two-state, crash-safe queue fulfilment (mirrors the pending_redemptions trio
+# above): the queue processor claims an entry before creating its ticket and
+# records the channel after, so a crash between the create and the removal is
+# decidable on reconcile instead of re-creating a duplicate ticket. See
+# reconcile_redemption_queue in features/economy.py.
+
+
+async def claim_redemption_queue_entry(entry_id: str) -> bool:
+    """Atomically mark a queue entry as ticket-creation-in-progress.
+
+    Sets `claimed_at` only if it is not already set, in one atomic op. Returns
+    True if we claimed it (was unclaimed → we own the ticket creation), or False
+    if an earlier — possibly crashed — run already claimed it, in which case the
+    caller must skip it so a restart can never create a second ticket.
+    """
+    if db is None:
+        return False
+    try:
+        oid = ObjectId(entry_id)
+    except (InvalidId, TypeError):
+        return False
+    result = await db.redemption_queue.find_one_and_update(
+        {"_id": oid, "claimed_at": {"$exists": False}},
+        {"$set": {"claimed_at": datetime.utcnow(), "channel_id": None}},
+    )
+    return result is not None  # None = filter didn't match → already claimed
+
+
+async def set_redemption_queue_entry_channel(entry_id: str, channel_id: int):
+    """Record the created ticket's channel id on a claimed queue entry, so a
+    crash after ticket creation is decidable on reconcile (channel_id present →
+    ticket exists → no refund)."""
+    if db is None:
+        return
+    try:
+        oid = ObjectId(entry_id)
+    except (InvalidId, TypeError):
+        return
+    await db.redemption_queue.update_one(
+        {"_id": oid}, {"$set": {"channel_id": channel_id}}
+    )
+
+
+async def get_stuck_redemption_queue_entries() -> list[dict]:
+    """Queue entries claimed for ticket creation but never removed — a crash
+    between the claim and the entry removal. Resolved once at cold boot by
+    reconcile_redemption_queue. No age gate: the reconcile is cold-boot only, so
+    nothing is in flight."""
+    if db is None:
+        return []
+    return await db.redemption_queue.find({"claimed_at": {"$exists": True}}).to_list(
+        length=None
+    )
+
+
 # --- COUNTING HELPERS ---
 
 
