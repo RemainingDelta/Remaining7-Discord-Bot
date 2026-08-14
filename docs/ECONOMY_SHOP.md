@@ -83,6 +83,8 @@ The budget cost on the "Reduce from budget" path is read from `budget_usd` in th
 
 `!delete` is explicitly disabled for redemption tickets — staff must use `!close` first and then choose a button outcome.
 
+**Crash-safe close (both financial buttons).** The close view is persistent (`timeout=None`), so its buttons survive a restart on any un-deleted ticket. Both financial buttons run the money **before** deleting the channel, so a crash in between would leave the channel and its live buttons for a re-click. To prevent a double refund / double budget deduction, each button first calls `claim_redemption_closure(channel_id, action)` (`database/mongo.py`), an atomic `find_one_and_update` upsert keyed by channel id. The financial step + transcript run **only if this call newly owns the closure**; the channel delete runs unconditionally afterward. On a crash-then-reclick the claim already exists, so the money and transcript are skipped and the re-click just completes the delete. The refund uses `increment_user_balance` (`$inc`) rather than a read-modify-write. No boot reconcile is needed: the surviving channel + buttons are the retry path.
+
 ---
 
 ## Monthly Budget System

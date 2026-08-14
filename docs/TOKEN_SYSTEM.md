@@ -29,15 +29,17 @@ Tokens = 80 + (level * 5) capped at 160
 ```
 
 Requires:
-- 24-hour cooldown since last claim (stored in `users.daily_last_claimed`)
-- At least **5 messages sent** since the last daily (tracked in `users.daily_message_count`)
+- 24-hour cooldown since last claim (stored on the user doc as `users.daily_last_claimed`, an epoch-seconds float)
+- At least **5 messages sent** since the last daily. The counter lives in `settings` under `daily_msg_count_{user_id}` as a `"WINDOW_KEY:COUNT"` string, where `WINDOW_KEY` is `str(daily_last_claimed)`. The `on_message` listener increments it; it resets implicitly when the window key changes (i.e. after a claim), not via an explicit write.
 
 On claim:
-1. Reads `daily_last_claimed` from MongoDB
-2. Checks `daily_message_count >= 5`
-3. Calculates token reward based on user's current level
+1. Reads `daily_last_claimed` from the user doc and derives the message-count window key from it
+2. Checks the message count for the current window is `>= 5` and the 24h cooldown has passed
+3. Calculates the token reward based on the user's current level
 4. Adds a flat **+20 tokens** if the member has the Server Booster role (shown as a separate line in the claim embed)
-5. Resets `daily_message_count` to 0 and updates `daily_last_claimed` to now
+5. Grants the tokens and stamps the cooldown in **one atomic write** — `claim_daily_reward()` (`database/mongo.py`) does `find_one_and_update` with a `{"$inc": {"balance": ...}, "$set": {"daily_last_claimed": now}}` guarded by a `daily_last_claimed < cutoff` predicate. This closes the crash window where tokens could be granted before the cooldown was stamped (which allowed a second immediate claim), and also blocks concurrent double-invocations. If the predicate loses (already claimed), the command shows the cooldown status instead of granting.
+
+> **Storage note:** the cooldown lives on the user doc while the message counter stays in `settings` — this split is intentional. Only the cooldown needs to be part of the atomic grant; moving the counter too would add churn for no safety benefit.
 
 ---
 
