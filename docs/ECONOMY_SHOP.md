@@ -1,7 +1,11 @@
 # Economy Shop
 
 ## Overview
-The shop lets members spend R7 Tokens on real-world rewards. Redemptions open a private ticket channel where staff fulfill the order. Each fulfilled redemption reduces the monthly USD budget. Open (pending) tickets also reserve budget: the available budget is `monthly_budget − spent − pending`, so redemptions can never collectively exceed the cap. Requests that don't fit the available budget can be queued for the next month instead. The budget auto-resets on the first of each calendar month by detecting a month key change.
+The shop lets members spend R7 Tokens on real-world rewards. `/buy` deducts the tokens and
+grants the item in a **single atomic document update** (`purchase_item()` in
+`database/mongo.py`), guarded by `balance >= price` — so a crash can never leave a member
+debited with no item, and a concurrent balance write (e.g. a drop claim) can't double-charge
+or drive the balance negative. Redemptions open a private ticket channel where staff fulfill the order. Each fulfilled redemption reduces the monthly USD budget. Open (pending) tickets also reserve budget: the available budget is `monthly_budget − spent − pending`, so redemptions can never collectively exceed the cap. Requests that don't fit the available budget can be queued for the next month instead. The budget auto-resets on the first of each calendar month by detecting a month key change.
 
 ---
 
@@ -45,7 +49,7 @@ Server Boosters get a **10% token discount on one shop purchase per calendar mon
 
 Mechanics:
 - Discounted price is `_discounted_price(price)` = `int(price * 0.9)`. The discount is skipped when it would save less than 1 token (e.g. free items), so it can't be burned for nothing.
-- `booster_discount_month` is only stamped **after** a completed purchase — a failed balance check doesn't consume the month's discount. No reset logic is needed: a stale month key simply stops matching after rollover.
+- `booster_discount_month` is stamped **in the same atomic write** as the deduct/grant (passed to `purchase_item()`), so it's consumed only on a completed purchase — a failed balance check doesn't burn the month's discount, and a crash can't consume the discount without granting the item. No reset logic is needed: a stale month key simply stops matching after rollover.
 - `/shop` previews the discount for eligible viewers: `~~18000~~ **16200** R7 tokens (10% booster discount)`.
 - The **USD redemption budget is unaffected**: the discount only reduces the token price at `/buy`; redemption still consumes the full `REDEMPTION_BUDGET_COSTS` cost.
 
@@ -78,6 +82,8 @@ When staff close a redemption ticket, a `RedemptionClosedOptionsView` appears wi
 The budget cost on the "Reduce from budget" path is read from `budget_usd` in the topic first (set at creation), falling back to `_budget_cost_for_item(item)` from the `REDEMPTION_BUDGET_COSTS` dict. This allows manual override by editing the topic.
 
 `!delete` is explicitly disabled for redemption tickets — staff must use `!close` first and then choose a button outcome.
+
+**Crash-safe close (both financial buttons).** The close view is persistent (`timeout=None`), so its buttons survive a restart on any un-deleted ticket. Both financial buttons run the money **before** deleting the channel, so a crash in between would leave the channel and its live buttons for a re-click. To prevent a double refund / double budget deduction, each button first calls `claim_redemption_closure(channel_id, action)` (`database/mongo.py`), an atomic `find_one_and_update` upsert keyed by channel id. The financial step + transcript run **only if this call newly owns the closure**; the channel delete runs unconditionally afterward. On a crash-then-reclick the claim already exists, so the money and transcript are skipped and the re-click just completes the delete. The refund uses `increment_user_balance` (`$inc`) rather than a read-modify-write. No boot reconcile is needed: the surviving channel + buttons are the retry path.
 
 ---
 
@@ -118,8 +124,14 @@ When a `/redeem` request exceeds the available budget, the member gets an epheme
   "item": "brawl pass",      # SHOP_DATA key
   "budget_usd": 10.0,        # snapshot at queue time (audit/display only)
   "queued_at": datetime,     # FIFO sort key
+  # crash-safety fields, added only once processing claims the entry:
+  "claimed_at": datetime,    # set before ticket creation OR before a refund (marker)
+  "channel_id": 123,         # ticket path only: set after the channel is created (or None)
+  "refund_kind": "tokens",   # refund path only: "tokens" (member-left) or "item" (staff remove)
 }
 ```
+
+An entry carries **either** `channel_id` (ticket-creation claim) **or** `refund_kind` (refund claim), never both — that is what lets the cold-boot reconcile route each claimed leftover to the right resolution.
 
 `budget_usd` is a snapshot for display; processing always recomputes the cost from `REDEMPTION_BUDGET_COSTS` so a cost change while queued uses the current value.
 
@@ -128,9 +140,21 @@ When a `/redeem` request exceeds the available budget, the member gets an epheme
 `redemption_queue_task` is an hourly `tasks.loop` on the Economy cog. Each tick it compares `redemption_queue_processed_month` with the current month key; if they differ (new month, or bot was offline on the 1st), it runs `process_redemption_queue()` and stamps the key only on success (a failed run retries next hour).
 
 `process_redemption_queue()` walks the queue in FIFO order:
-- **Member left the server** → entry is dropped, the item's token price is refunded to their balance, and a note is posted to `REDEMPTION_TRANSCRIPT_CHANNEL_ID`.
+- **Member left the server** → the item's token price is refunded to their balance and the entry is dropped, with a note posted to `REDEMPTION_TRANSCRIPT_CHANNEL_ID`. This is **crash-safe**: the entry is first **claimed for refund** (`claim_redemption_queue_refund(id, "tokens")` stamps `claimed_at`+`refund_kind`), then the refund is applied idempotently (`apply_queue_refund`), then the entry is removed — so a crash between the removal and the payout can't lose the tokens (the claimed entry is skipped by the loop and completed by the cold-boot reconcile). If the claim is lost to a racing staff `/redemption-queue-remove` (or a prior reconcile), this branch just skips the entry — the other path already owns it. A departure is only concluded after confirming against the API: on a `get_member` cache miss (e.g. right after a restart, when the member cache is cold) the code calls `fetch_member` and treats **only** a `discord.NotFound` as "left". A transient `discord.HTTPException` leaves the entry queued for the next cycle rather than wrongly refunding an active member.
 - **Cost > available budget** (recomputed every iteration, so tickets opened earlier in the run count as pending) → entry is skipped and carries over to the next month; cheaper later entries may still be fulfilled.
-- **Otherwise** → a ticket is created via `create_redemption_ticket()` (pinging the member) and the entry is removed — only after the channel is successfully created, so failures leave the entry queued.
+- **Otherwise** → the entry is processed **crash-safely** (same two-state pattern as the interactive `/redeem` path): it is **claimed** (`claimed_at` stamped atomically) *before* `create_redemption_ticket()` runs, the created channel's id is recorded on the entry (`channel_id`), and only then is the entry removed. If ticket creation fails, the entry is left claimed (not removed) rather than retried in-loop.
+
+Because the claim precedes ticket creation, a crash anywhere between the ticket being created and the entry being removed leaves a **claimed** entry that later runs **skip** (a claimed entry at the top of the loop is never reprocessed) — so a restart can't create a duplicate ticket or double-spend the budget.
+
+#### Cold-boot reconcile
+
+A claimed leftover is resolved once per process at startup by `reconcile_redemption_queue()` (run alongside `reconcile_pending_redemptions()` in `pending_redemption_reconcile_task`), decidably so it never both keeps a ticket and refunds, nor does neither:
+
+- `refund_kind` set → a claimed **refund** (staff remove or member-left drop that crashed before paying) → pay it idempotently via `apply_queue_refund` (token price for `"tokens"`, one item for `"item"`), drop the entry, and post a note to `REDEMPTION_TRANSCRIPT_CHANNEL_ID`. Checked **first**, before the `channel_id` cases below (a refund entry has no `channel_id`, so those cases would misclassify it). Replaying a refund already applied is a no-op — `apply_queue_refund` records a per-entry receipt (`queue_refunds_done` on the user doc) atomically with the `$inc`.
+- `channel_id` set → the ticket was created → drop the entry, no refund.
+- `channel_id` is `None`, category unavailable → defer to a later reconcile.
+- `channel_id` is `None`, a matching ticket exists in the category (topic `redemption-opener`+`item`) → crash landed in the create→persist window → drop the entry, no refund.
+- `channel_id` is `None`, no matching ticket → the ticket was never made → **return the item to the member's inventory** (`add_item_token`, matching `/redemption-queue-remove`), drop the entry, and post a note to `REDEMPTION_TRANSCRIPT_CHANNEL_ID`.
 
 ### Queue Commands
 
@@ -138,7 +162,7 @@ When a `/redeem` request exceeds the available budget, the member gets an epheme
 |---------|-----|-------|
 | `/redemption-queue` | Anyone | Your queued redemptions with overall FIFO position (ephemeral) |
 | `/redemption-queue-list` | Admin/Mod | Full queue with entry ids and estimated USD total |
-| `/redemption-queue-remove <entry_id>` | Admin/Mod | Removes an entry and returns the item to the user's inventory |
+| `/redemption-queue-remove <entry_id>` | Admin/Mod | Returns the item to the user's inventory and removes the entry. **Crash-safe**: claims the entry for refund (`refund_kind:"item"`) and applies the grant idempotently *before* deleting, so a crash between the two is completed by the cold-boot reconcile instead of silently losing the item. If the entry is already claimed (a racing member-left drop, or reconcile), replies "already being processed" and no-ops. |
 
 `/check-budget` also shows the pending-ticket total and the queued-entry count/estimate.
 

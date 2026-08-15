@@ -5,11 +5,15 @@ from datetime import datetime, time
 import zoneinfo
 import re
 from database.mongo import (
-    get_user_balance,
+    claim_reward_payout,
+    get_setting,
+    get_stuck_reward_payouts,
     increment_user_balance,
     is_poll_reward_processed,
     mark_poll_reward_processed,
-    update_user_balance,
+    mark_reward_paid,
+    resolve_stuck_reward_payout,
+    set_setting,
 )
 
 from features.config import (
@@ -30,6 +34,42 @@ EVENT_CHANNELS = {
     "blue": BLUE_EVENT_CHANNEL_ID,
     "green": GREEN_EVENT_CHANNEL_ID,
 }
+
+
+def _stuck_line(row: dict) -> str:
+    """One stuck-payout row, formatted for its source. Payout rows are float
+    currency (2dp); event/poll rows are integer tokens."""
+    source = row.get("source", "event")
+    amount = row.get("amount", 0)
+    if source == "payout":
+        return (
+            f"• <@{row['user_id']}> — **{amount:,.2f}** owed "
+            f"({source}, msg `{row.get('message_id', '?')}`)"
+        )
+    return (
+        f"• <@{row['user_id']}> — **{amount}** tokens "
+        f"({source}, msg `{row.get('message_id', '?')}`)"
+    )
+
+
+def _stuck_recovery_note(rows: list) -> str:
+    """Source-correct recovery guidance. Token rewards and staff payouts share
+    the ledger but recover differently, so only mention the paths present."""
+    has_payout = any(r.get("source") == "payout" for r in rows)
+    has_token = any(r.get("source") != "payout" for r in rows)
+    parts = []
+    if has_token:
+        parts.append("**Token rewards** (event/poll): pay each with `/give`.")
+    if has_payout:
+        parts.append(
+            "**Staff payouts**: re-run the identical `/payout-add` — it credits "
+            "only the missing staff and double-pays no one."
+        )
+    parts.append(
+        "Then run `/check-stuck-payouts resolve:True` to clear them. Nothing is "
+        "auto-paid — re-paying blindly could double-pay."
+    )
+    return "\n".join(parts)
 
 
 class ClearChannelView(discord.ui.View):
@@ -149,18 +189,31 @@ class PayoutConfirmView(discord.ui.View):
 
         await interaction.response.defer()
 
-        processed_log = []
+        paid_log = []
+        skipped = 0
         total_distributed = 0
+        mid = str(self.original_msg.id)
+        admin = str(self.interaction_user.id)
 
         # --- EXECUTE PAYOUTS ---
+        # Claim -> pay -> commit, per recipient. The claim writes a paid:False
+        # ledger row before the $inc; a pre-existing row (already paid, or a
+        # crashed prior run) makes the claim skip, so re-running after a crash
+        # only pays recipients who were never claimed — never a double payout.
         for user_id_str, amount_str in self.matches:
             user_id = str(user_id_str)
             amount = int(amount_str)
 
-            current_bal = await get_user_balance(user_id)
-            await update_user_balance(user_id, current_bal + amount)
+            if not await claim_reward_payout(
+                mid, user_id, amount, admin, source="event"
+            ):
+                skipped += 1
+                continue
 
-            processed_log.append(f"<@{user_id}>: +{amount}")
+            await increment_user_balance(user_id, amount)
+            await mark_reward_paid(mid, user_id)  # commit point
+
+            paid_log.append(f"<@{user_id}>: +{amount}")
             total_distributed += amount
 
         # Mark original message with a checkmark
@@ -174,9 +227,14 @@ class PayoutConfirmView(discord.ui.View):
         embed.title = "✅ Payouts Complete"
         embed.color = discord.Color.green()
         embed.clear_fields()
+        summary = (
+            f"Distributed **{total_distributed}** tokens to **{len(paid_log)}** users."
+        )
+        if skipped:
+            summary += f"\nSkipped **{skipped}** already-processed recipients."
         embed.add_field(
             name="Summary",
-            value=f"Distributed **{total_distributed}** tokens to **{len(self.matches)}** users.",
+            value=summary,
             inline=False,
         )
 
@@ -243,14 +301,30 @@ class PollPayoutConfirmView(discord.ui.View):
             await interaction.edit_original_response(embed=embed, view=self)
             return
 
-        # Distribute tokens atomically
+        # Distribute tokens via the crash-safe reward ledger: claim -> pay ->
+        # commit, per voter. The claim writes a paid:False row before the $inc;
+        # a pre-existing row (already paid, or a crashed prior run) makes the
+        # claim skip, so re-running after a crash only pays never-claimed voters.
+        mid = str(self.original_msg.id)
+        admin = str(interaction.user.id)
+        paid_count = 0
+        skipped = 0
         for voter in self.voters:
-            await increment_user_balance(str(voter.id), self.amount)
+            uid = str(voter.id)
+            if not await claim_reward_payout(
+                mid, uid, self.amount, admin, source="poll"
+            ):
+                skipped += 1
+                continue
+            await increment_user_balance(uid, self.amount)
+            await mark_reward_paid(mid, uid)  # commit point
+            paid_count += 1
 
-        # Record in DB
+        # Record whole-message completion — a fast-path idempotency gate + audit
+        # record above the ledger; a clean re-run short-circuits before iterating.
         await mark_poll_reward_processed(
-            message_id=str(self.original_msg.id),
-            admin_id=str(interaction.user.id),
+            message_id=mid,
+            admin_id=admin,
             answer_text=self.answer_text,
             amount=self.amount,
             voter_count=len(self.voters),
@@ -263,17 +337,20 @@ class PollPayoutConfirmView(discord.ui.View):
             pass
 
         # Update confirmation embed
-        total = self.amount * len(self.voters)
+        total = self.amount * paid_count
         embed = interaction.message.embeds[0]
         embed.title = "✅ Poll Rewards Complete"
         embed.color = discord.Color.green()
         embed.clear_fields()
+        summary = (
+            f"Distributed **{total}** tokens to **{paid_count}** voters.\n"
+            f"(**{self.amount}** tokens each for option: *{self.answer_text}*)"
+        )
+        if skipped:
+            summary += f"\nSkipped **{skipped}** already-processed voters."
         embed.add_field(
             name="Summary",
-            value=(
-                f"Distributed **{total}** tokens to **{len(self.voters)}** voters.\n"
-                f"(**{self.amount}** tokens each for option: *{self.answer_text}*)"
-            ),
+            value=summary,
             inline=False,
         )
         for child in self.children:
@@ -298,9 +375,47 @@ class Events(commands.Cog):
         self.bot = bot
         self._warning_msg_ids: dict[int, int] = {}  # channel_id → warning message_id
         self.cleanup_check_task.start()
+        self.reward_reconcile_task.start()
+        self.cleanup_schedule_check_task.start()
 
     def cog_unload(self):
         self.cleanup_check_task.cancel()
+        self.reward_reconcile_task.cancel()
+        self.cleanup_schedule_check_task.cancel()
+
+    @staticmethod
+    def _et_today_key() -> str:
+        return datetime.now(zoneinfo.ZoneInfo("America/New_York")).strftime("%Y-%m-%d")
+
+    async def _log_cleanup_schedule_gap(self, today_key: str):
+        """Log — but don't back-fill — any midnight cleanup runs missed to downtime.
+        The cleanup is low-stakes (it only refreshes a staff warning embed), so per the
+        plan we surface a clear log line rather than auto-running a missed occurrence."""
+        last = await get_setting("last_event_cleanup_day")
+        if not last or last >= today_key:
+            return
+        try:
+            last_dt = datetime.strptime(last, "%Y-%m-%d").date()
+            today_dt = datetime.strptime(today_key, "%Y-%m-%d").date()
+            missed = (today_dt - last_dt).days - 1
+        except ValueError:
+            missed = 0
+        if missed > 0:
+            print(
+                f"⚠️ Event cleanup: {missed} scheduled midnight run(s) missed while "
+                f"the bot was down (last ran {last}). Not auto-run; the next midnight "
+                f"run will refresh any cleanup warnings."
+            )
+
+    # Cold-boot check: a time= loop only fires at the next matching wall-clock instant,
+    # so a bot down at midnight ET silently skips that run. Log it (don't auto-run).
+    @tasks.loop(count=1)
+    async def cleanup_schedule_check_task(self):
+        await self.bot.wait_until_ready()
+        try:
+            await self._log_cleanup_schedule_gap(self._et_today_key())
+        except Exception as e:
+            print(f"❌ Event cleanup schedule check failed: {e}")
 
     async def has_event_permission(self, interaction: discord.Interaction):
         if isinstance(interaction.user, discord.Member):
@@ -433,6 +548,56 @@ class Events(commands.Cog):
             except Exception as e:
                 print(f"Error checking history for #{name}-event: {e}")
 
+        # Record that today's midnight run happened, so a boot after downtime can
+        # tell (and log) that one or more scheduled runs were missed.
+        await set_setting("last_event_cleanup_day", self._et_today_key())
+
+    # --- REWARD PAYOUT CRASH RECOVERY ---
+
+    @tasks.loop(count=1)
+    async def reward_reconcile_task(self):
+        """Runs once per process, after the bot is ready. A cog is loaded once
+        and not re-added on gateway reconnect, so this is cold-boot-only."""
+        await self.bot.wait_until_ready()
+        try:
+            await self.reconcile_reward_payouts()
+        except Exception as e:
+            print(f"❌ Reward payout reconcile failed: {e}")
+
+    async def reconcile_reward_payouts(self):
+        """Reports (does NOT re-pay) any recipient left claimed-but-unpaid by a
+        crash between the ledger claim and the credit. Re-paying can't be safe
+        here: a paid:False row can't tell 'crashed before the credit' from
+        'crashed after it', so an auto-repay could double-pay. Token rewards
+        (event/poll) recover via /give; staff payouts recover by re-running the
+        identical /payout-add. Both clear via /check-stuck-payouts."""
+        stuck = await get_stuck_reward_payouts()
+        if not stuck:
+            return
+
+        staff_channel = self.bot.get_channel(EVENT_STAFF_CHANNEL_ID)
+        if not staff_channel:
+            print("❌ Reward payout reconcile: staff channel not found.")
+            return
+
+        text = "\n".join(_stuck_line(row) for row in stuck)
+        if len(text) > 1024:
+            text = text[:960] + "\n... (more hidden)"
+
+        embed = discord.Embed(
+            title="⚠️ Stuck Reward Payouts Detected",
+            description=(
+                f"**{len(stuck)}** recipient(s) were claimed but never confirmed "
+                f"(likely a crash mid-payout).\n{_stuck_recovery_note(stuck)}"
+            ),
+            color=discord.Color.orange(),
+        )
+        embed.add_field(name="Unconfirmed Recipients", value=text, inline=False)
+        try:
+            await staff_channel.send(embed=embed)
+        except Exception as e:
+            print(f"❌ Reward payout reconcile: failed to post report: {e}")
+
     @app_commands.command(
         name="event-rewards",
         description="ADMIN ONLY: Distribute tokens from an announcement.",
@@ -512,6 +677,69 @@ class Events(commands.Cog):
 
         view = PayoutConfirmView(target_message, matches, interaction.user)
         await interaction.followup.send(embed=embed, view=view)
+
+    @app_commands.command(
+        name="check-stuck-payouts",
+        description="ADMIN ONLY: List event payouts claimed but never confirmed paid.",
+    )
+    @app_commands.describe(
+        resolve="Mark the listed rows resolved (only after you've recovered each)."
+    )
+    async def check_stuck_payouts(
+        self, interaction: discord.Interaction, resolve: bool = False
+    ):
+        # 1. Permission Check - STRICTLY ADMIN ONLY
+        if not interaction.user.get_role(ADMIN_ROLE_ID):
+            await interaction.response.send_message(
+                "❌ Permission Denied: Only Admins can check payouts.", ephemeral=True
+            )
+            return
+
+        # 2. Channel Check
+        if interaction.channel_id != EVENT_STAFF_CHANNEL_ID:
+            await interaction.response.send_message(
+                f"❌ Please use this command in <#{EVENT_STAFF_CHANNEL_ID}>.",
+                ephemeral=True,
+            )
+            return
+
+        await interaction.response.defer(ephemeral=True)
+
+        stuck = await get_stuck_reward_payouts()
+        if not stuck:
+            await interaction.followup.send(
+                "✅ No stuck payouts — every claimed recipient was confirmed paid."
+            )
+            return
+
+        text = "\n".join(_stuck_line(row) for row in stuck)
+        if len(text) > 1024:
+            text = text[:960] + "\n... (more hidden)"
+
+        if resolve:
+            for row in stuck:
+                await resolve_stuck_reward_payout(
+                    row.get("message_id", ""),
+                    row.get("user_id", ""),
+                    str(interaction.user.id),
+                )
+            title = "🧹 Stuck Payouts Resolved"
+            description = (
+                f"Marked **{len(stuck)}** row(s) resolved. Make sure you recovered "
+                "each first — this only clears the report, it moves nothing."
+            )
+            color = discord.Color.green()
+        else:
+            title = "⚠️ Stuck Reward Payouts"
+            description = (
+                f"**{len(stuck)}** recipient(s) were claimed but never confirmed "
+                f"(likely a crash mid-payout).\n{_stuck_recovery_note(stuck)}"
+            )
+            color = discord.Color.orange()
+
+        embed = discord.Embed(title=title, description=description, color=color)
+        embed.add_field(name="Recipients", value=text, inline=False)
+        await interaction.followup.send(embed=embed)
 
     @app_commands.command(
         name="poll-rewards",
@@ -670,7 +898,9 @@ class Events(commands.Cog):
             "`/event-rewards <message_id>` - Process token distribution from an announcement message.\n"
             "*(Message must use `@User 500` format. Admin only.)*\n\n"
             "`/poll-rewards <message_id> <answer> <amount>` - Distribute tokens to all voters of a poll option.\n"
-            "*(Poll must be finalized. Case-insensitive option match. Admin only.)*"
+            "*(Poll must be finalized. Case-insensitive option match. Admin only.)*\n\n"
+            "`/check-stuck-payouts [resolve]` - List event payouts claimed but never confirmed paid.\n"
+            "*(Pay each with `/give`, then re-run with `resolve:True` to clear. Admin only.)*"
         )
         embed.add_field(name="🏆 Reward Distribution", value=reward_text, inline=False)
 

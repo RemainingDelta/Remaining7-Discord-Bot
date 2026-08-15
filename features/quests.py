@@ -1,6 +1,6 @@
 import discord
 from discord import app_commands
-from discord.ext import commands
+from discord.ext import commands, tasks
 
 # Import Config
 from features.config import (
@@ -18,10 +18,9 @@ from database.mongo import (
     assign_random_quest,
     update_quest_progress,
     reset_user_quests,
-    get_user_balance,
-    update_user_balance,
-    get_leveling_data,
-    update_leveling_data,
+    add_quest_reward,
+    mark_quest_rewarded,
+    get_unrewarded_completed_quests,
 )
 
 # --- DEFAULT QUESTS CONFIGURATION ---
@@ -93,6 +92,35 @@ class Quests(commands.Cog):
         self.bot = bot
         # Invite cache kept for stability, but unused for quests now
         self.invite_cache = {}
+        self.quest_reward_reconcile_task.start()
+
+    def cog_unload(self):
+        self.quest_reward_reconcile_task.cancel()
+
+    # --- CRASH RECOVERY ---
+    @tasks.loop(count=1)
+    async def quest_reward_reconcile_task(self):
+        """Runs once per process, after the bot is ready. A cog is loaded once
+        and not re-added on gateway reconnect, so this is cold-boot-only."""
+        await self.bot.wait_until_ready()
+        try:
+            await self.reconcile_quest_rewards()
+        except Exception as e:
+            print(f"❌ Quest reward reconcile failed: {e}")
+
+    async def reconcile_quest_rewards(self):
+        """Pays out any quest left completed-but-unrewarded by a crash between
+        the completion flag write and the reward payout. The next-message retry
+        in process_quest_update covers active chatters; this backstops anyone
+        who never sends another qualifying message. Silent — the reward is what
+        matters, and there is no channel context on boot."""
+        for user_id, q_key, q_data in await get_unrewarded_completed_quests():
+            await add_quest_reward(
+                user_id,
+                q_data.get("reward_tokens", 0),
+                q_data.get("reward_exp", 0),
+            )
+            await mark_quest_rewarded(user_id, q_key)
 
     async def cog_load(self):
         # Initialize default quests in DB on startup
@@ -138,17 +166,22 @@ class Quests(commands.Cog):
 
             # 4. Handle Completion
             if completed and q_data:
-                reward_text = []
-                # Give Tokens
-                if q_data.get("reward_tokens", 0) > 0:
-                    bal = await get_user_balance(user_id)
-                    await update_user_balance(user_id, bal + q_data["reward_tokens"])
-                    reward_text.append(f"💰 {q_data['reward_tokens']} Tokens")
+                # Pay the reward (single atomic $inc) BEFORE flagging it paid, so
+                # a crash leaves the quest completed-but-unrewarded and re-payable
+                # rather than losing the reward. Idempotent per completion via the
+                # rewarded flag; retried on the next message or the startup
+                # reconcile if the flag write below never lands.
+                await add_quest_reward(
+                    user_id,
+                    q_data.get("reward_tokens", 0),
+                    q_data.get("reward_exp", 0),
+                )
+                await mark_quest_rewarded(user_id, q_key)
 
-                # Give XP
+                reward_text = []
+                if q_data.get("reward_tokens", 0) > 0:
+                    reward_text.append(f"💰 {q_data['reward_tokens']} Tokens")
                 if q_data.get("reward_exp", 0) > 0:
-                    lvl, exp = await get_leveling_data(user_id)
-                    await update_leveling_data(user_id, lvl, exp + q_data["reward_exp"])
                     reward_text.append(f"⚡ {q_data['reward_exp']} XP")
 
                 # Send Embed

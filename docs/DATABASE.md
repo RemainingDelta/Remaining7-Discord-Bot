@@ -43,6 +43,8 @@ Key fields:
 | `credits` | int | Brawl credits |
 | `gems` | int | Brawl gems |
 | `inventory` | list | Shop items purchased |
+| `queue_refunds_done` | list | Entry-id receipts guarding redemption-queue refund idempotency — an id is added atomically with the refund `$inc` (`apply_queue_refund`), so a reconcile replay after a crash is a no-op. Append-only (not pruned). |
+| `pending_redemptions` | list | Crash-safety markers written by the crash-safe `/redeem` flow. Each entry has `id`, `item`, `budget_usd`, `channel_id` (null until the ticket is created), and `created_at`. Exists so a crash between removing the item token and creating the redemption ticket is reconcilable on boot. |
 
 **Self-healing**: `get_user_data()` upserts a default document if one doesn't exist, including Shelly at Level 1. This means any command can safely call `get_user_data()` without checking for existence first.
 
@@ -99,14 +101,14 @@ Fields: `reason`, `matcherino`, `alts: list[str]`, `admin_id`, `timestamp`.
 ### `payouts`
 Pending staff payouts. One document per staff member with a non-zero balance.
 
-Fields: `user_id`, `balance` (float, USD), `name`.
+Fields: `_id` (the user id string), `amount` (float, the pending total in USD), `unpaid_batches` (list of batch_id strings).
 
 ---
 
 ### `payout_logs`
 Archived batch payout records. Each document is a batch:
 
-Fields: `batch_id`, `users: list[{user_id, name, amount}]`, `mode` (`"split"` or `"flat"`), `timestamp`, `total`.
+Fields: `batch_id` (string, deterministic sha1-derived id; `_id` is keyed on `batch_id` via upsert), `timestamp`, `amount` (float, the per-person amount), `user_ids` (list of user id strings), `reason` (string).
 
 ---
 
@@ -114,6 +116,8 @@ Fields: `batch_id`, `users: list[{user_id, name, amount}]`, `mode` (`"split"` or
 One document per tournament session.
 
 Key fields: `start_time`, `matcherino_id`, `total_tickets`, `total_messages`, `peak_queue`, `collect_data`.
+
+Restart-recovery fields (persisted by `!starttourney`, read by the boot-time resume routine): `region`, `admin_role_original_name`, `slowmode_ends_at`, `lock_reopens_at`. The two `*_at` fields are absolute UTC deadlines so a restart can re-arm the remaining time (or act immediately if already elapsed).
 
 ---
 
@@ -137,23 +141,109 @@ Key entries:
 | `monthly_budget` | Budget cap as float string |
 | `manual_total_spent` | Cumulative USD spent this month |
 | `brawlpass_redeemed_count` | Legacy per-item counter |
+| `booster_drop_message_id` | Message ID of the live booster-channel drop; cleared on claim/expiry |
+| `last_message_{user_id}` | Epoch-seconds of the user's last passive token award (20s cooldown) |
+| `pending_winner_announcement` | JSON marker (`matcherino_id`, `updates_channel_id`, `expires_at`) driving the crash-safe `!endtourney` winner retry |
+| `last_monthly_report_month` | `"YYYY-MM"` of the last month a tournament report was generated for (idempotent gate + catch-up) |
+| `last_event_cleanup_day` | `"YYYY-MM-DD"` (ET) of the last event-channel cleanup run (missed-run logging) |
 
 ---
 
 ### `processed_poll_rewards`
-Audit log for poll reward distributions. Tracks `message_id` of processed polls to prevent double-paying.
+Audit log for poll reward distributions. Tracks `message_id` of processed polls to prevent double-paying. This is the fast-path whole-message gate; the per-voter `reward_payouts` ledger sits **beneath** it for crash-safety when a run dies mid-loop before this gate is written.
 
 ---
 
-### `sticky`
+### `reward_payouts`
+Per-recipient, two-state ledger **shared by `/event-rewards`, `/poll-rewards`, and `/payout-add`** — prevents double-paying when any of these commands is re-run after a crash/restart. One document per recipient per source message (or per payout batch). (Message IDs and batch IDs are distinct keys, so event, poll, and payout rows never collide on the composite key.)
+
+`_id = "{message_id}:{user_id}"` (composite key; each user appears at most once per source message).
+
+| Field | Type | Purpose |
+|-------|------|---------|
+| `message_id` | str | Source announcement or poll message |
+| `user_id` | str | Recipient |
+| `amount` | int/float | Owed on this line — int tokens for `event`/`poll`, float USD for `payout` batches |
+| `admin_id` | str | Admin who ran the payout |
+| `source` | str | `"event"`, `"poll"`, or `"payout"` — which command claimed the row (informational; recovery is `/give` either way) |
+| `paid` | bool | `False` at claim (before the balance `$inc`), flipped `True` after it lands |
+| `claimed_at` | datetime | When the row was claimed |
+| `paid_at` | datetime | When confirmed paid (or resolved) |
+| `manually_resolved` | bool | Set when a stuck row was cleared via `/check-stuck-payouts resolve:True` |
+| `resolved_by` | str | Admin who manually resolved it |
+
+The payout loop **claims → pays → commits** per recipient: the claim writes a `paid:False` row atomically (`find_one_and_update` + `$setOnInsert`); a pre-existing row makes the claim skip, so a re-run only pays never-claimed recipients. Rows stuck at `paid:False` (a crash between claim and `$inc`) are **never auto-repaid** — a `paid:False` row can't distinguish "crashed before the `$inc`" from "crashed after it". They are surfaced to staff by a cold-boot reconcile report and the `/check-stuck-payouts` command, and recovered manually via `/give`.
+
+---
+
+### `drop_claims`
+Atomic single-claim guard for token supply/booster/admin drops. One document per drop **message**, keyed by the drop message's ID, recording the first (and only) claimer. Replaces the old in-memory `DropView.claimed` flag so the guard survives a restart and serializes two near-simultaneous clicks.
+
+`_id = "{message_id}"`.
+
+| Field | Type | Purpose |
+|-------|------|---------|
+| `claimed_by` | str | User ID of the winning claimer |
+| `ts` | datetime | Claim time; a TTL index (`expireAfterSeconds=604800`) auto-expires the record after 7 days |
+
+`claim_drop(message_id, user_id)` does a `find_one_and_update` + `$setOnInsert`: `None` returned means no prior record (this caller won and gets paid via `increment_user_balance`); a returned doc means it was already claimed. `ensure_drop_claims_ttl_index()` (called from `Economy.cog_load`) creates the TTL index.
+
+---
+
+### `redemption_queue`
+FIFO queue of redemptions deferred to next month when `/redeem` exceeds the available budget. One document per queued item; `_id` is an ObjectId.
+
+| Field | Type | Purpose |
+|-------|------|---------|
+| `user_id` | str | Opener (matches `users` convention) |
+| `item` | str | `SHOP_DATA` key |
+| `budget_usd` | float | USD cost snapshot at queue time (audit/display; processing recomputes) |
+| `queued_at` | datetime | FIFO sort key |
+| `claimed_at` | datetime | **Crash-safety marker** — stamped atomically *before* the ticket is created **or** before a refund is paid; absent until then |
+| `channel_id` | int \| null | Ticket path only: the created ticket's channel id, recorded after creation (or `null` while claimed) |
+| `refund_kind` | str | Refund path only: `"tokens"` (member left) or `"item"` (staff `/redemption-queue-remove`). Mutually exclusive with `channel_id`; routes the entry to the reconcile refund branch |
+
+Monthly processing is **crash-safe** (claim → create ticket → record `channel_id` → remove entry), mirroring the `pending_redemptions` markers used by the interactive `/redeem` path. A claimed entry is never reprocessed by later runs, so a crash between ticket creation and entry removal can't create a duplicate ticket or double-spend the budget. The two **refund** paths (member-left drop and staff `/redemption-queue-remove`) are crash-safe the same way — claim (`refund_kind`) → apply refund → remove — but their payout is a bare `$inc` on the user doc (not an observable ticket), so idempotency comes from `apply_queue_refund` recording the entry id in `users.queue_refunds_done` **atomically with the `$inc`**. Claimed leftovers are resolved once at cold boot by `reconcile_redemption_queue()` (decidably: `refund_kind` present → pay the refund idempotently and drop; else `channel_id` present → drop; otherwise topic-scan the redemption category → drop if a ticket exists, else return the item to inventory).
+
+---
+
+### `redemption_closures`
+Claim guard for redemption-ticket closes. `_id` = the ticket channel id.
+
+Fields: `action`, `claimed_at`.
+
+Ensures a redemption ticket close (refund or budget-deduct) runs its money step at most once, even if the close button is clicked again after a crash.
+
+---
+
+### `scam_purge_sessions`
+Crash-safety record for the scam-image cross-channel purge (`features/scam_detection.py`). One document per purge job; `_id` is an ObjectId. See `docs/SCAM_DETECTION.md` → **Crash-Safe Purge**.
+
+| Field | Type | Purpose |
+|-------|------|---------|
+| `guild_id` | int | Guild being purged |
+| `author_id` | int | Poster whose copies are removed |
+| `image_md5` | str | MD5 the purge matches on |
+| `image_size` | int | Attachment size pre-filter |
+| `skip_message_id` | int | The already-deleted flagged message (skipped during purge) |
+| `cutoff` | datetime | Persisted lookback window, reused on resume so a restart doesn't shift it |
+| `channels` | list[int] | Immutable target list (text channels + threads) captured at session start |
+| `completed` | list[int] | **Cursor** — channel ids already processed |
+| `created_at` | datetime | Session creation time |
+
+The purge writes this doc **before any deletes**, `$addToSet`s each channel into `completed` as it finishes, and deletes the doc once every channel is done. Leftovers (a crash mid-purge) are resumed once at cold boot by `scam_purge_reconcile_task` from the `completed` cursor; re-runs are safe because MD5 deletes are idempotent. **No TTL** — an unfinished session must persist until resolved.
+
+---
+
+### `sticky_messages`
 Sticky message data per channel. `_id = str(channel_id)`.
 
 Fields: `content`, `attachment_url`, `message_id` (last posted sticky message to delete on repost).
 
 ---
 
-### `counting_state`
-Single document tracking the current count game state.
+### `counting`
+Stores the current count game state as a single document (`_id = "state"`).
 
 Fields: `count` (int), `last_user_id` (str).
 

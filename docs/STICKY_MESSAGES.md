@@ -44,6 +44,8 @@ async def on_message(message):
 
 ## `!sticky <message>` Command
 
+Requires the **Administrator** permission or the **Event Staff** role (`EVENT_STAFF_ROLE_ID`).
+
 1. Stores content + any attachment URL in MongoDB (`sticky` collection, keyed by `channel_id`)
 2. Posts the sticky message immediately and saves its message ID
 3. If a sticky already exists in the channel, the old one is deleted first
@@ -61,6 +63,8 @@ async def on_message(message):
 ---
 
 ## `!unsticky` Command
+
+Requires the **Administrator** permission or the **Event Staff** role (`EVENT_STAFF_ROLE_ID`).
 
 1. Fetches the current sticky for the channel from MongoDB
 2. Deletes the sticky message from Discord by `message_id`

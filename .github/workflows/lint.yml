@@ -17,7 +17,8 @@ jobs:
           python-version: "3.10"
 
       - name: Install Ruff
-        run: pip install ruff
+        # Pin to match the version used locally so CI and local agree.
+        run: pip install ruff==0.15.15
 
       - name: Check lint
         run: ruff check .

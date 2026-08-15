@@ -1,7 +1,7 @@
-from datetime import datetime
+from datetime import datetime, timedelta
+import hashlib
 import os
 import re
-import uuid
 import motor.motor_asyncio
 import certifi
 from bson import ObjectId
@@ -12,7 +12,7 @@ load_dotenv()
 MONGO_URI = os.getenv("MONGO_URI")
 
 if not MONGO_URI:
-    print("⚠️ CRITICAL: MONGO_URI missing in .env or Pella variables.")
+    print("⚠️ CRITICAL: MONGO_URI missing in .env or RamNaym Cloud variables.")
     db = None
 else:
     try:
@@ -91,6 +91,38 @@ async def increment_user_balance(user_id: str, amount: int):
     )
 
 
+async def claim_daily_reward(
+    user_id: str, amount: int, cutoff_ts: float, now_ts: float
+):
+    """Atomically grant the daily reward and stamp the cooldown in one write.
+
+    The token grant ($inc balance) and the cooldown stamp ($set daily_last_claimed)
+    happen in a single find_one_and_update guarded by a cooldown predicate, so a crash
+    can no longer land between "tokens granted" and "cooldown stamped" and let the user
+    claim twice. Returns the updated user doc (with the new balance) if this call won
+    the claim, or None if the user has already claimed since cutoff_ts (a concurrent or
+    duplicate invoke). Caller must ensure the user doc exists first — get_user_data /
+    get_user_balance create it — since upsert is intentionally off here (an upsert whose
+    filter excludes an existing doc would raise a duplicate-key error).
+
+    Note: only the cooldown lives on the user doc. The daily message counter stays in
+    settings (daily_msg_count_{uid}); it doesn't need to be part of this atomic guard.
+    """
+    if db is None:
+        return None
+    return await db.users.find_one_and_update(
+        {
+            "_id": str(user_id),
+            "$or": [
+                {"daily_last_claimed": {"$exists": False}},
+                {"daily_last_claimed": {"$lt": cutoff_ts}},
+            ],
+        },
+        {"$inc": {"balance": int(amount)}, "$set": {"daily_last_claimed": now_ts}},
+        return_document=True,  # AFTER — surface the new balance for the embed
+    )
+
+
 # --- POLL REWARD HELPERS ---
 
 
@@ -123,6 +155,121 @@ async def mark_poll_reward_processed(
             "processed_at": datetime.utcnow(),
         }
     )
+
+
+# --- REWARD PAYOUT LEDGER (per-recipient, two-state, crash-safe) ---
+# Shared by /event-rewards and /poll-rewards. Message IDs are globally-unique
+# Discord snowflakes, so event and poll rows never collide on the composite key.
+
+
+async def claim_reward_payout(
+    message_id: str, user_id: str, amount: float, admin_id: str, source: str = "event"
+) -> bool:
+    """Atomically claim one recipient's payout, writing paid:False before payment.
+
+    Returns True if this call newly claimed the payout (caller should pay now).
+    Returns False if a doc already exists for this message+user (already paid, or
+    claimed-but-stuck) — the caller should skip it. Keyed message_id+user_id so a
+    re-run after a crash skips already-handled users instead of double-paying.
+    `source` ("event"/"poll"/"payout") is informational, so a stuck-row report
+    can give source-correct recovery steps. `amount` is stored as passed (int
+    tokens for event/poll, float currency for payouts) — do not truncate.
+    """
+    if db is None:
+        return False
+    key = f"{message_id}:{user_id}"
+    result = await db.reward_payouts.find_one_and_update(
+        {"_id": key},
+        {
+            "$setOnInsert": {
+                "_id": key,
+                "message_id": str(message_id),
+                "user_id": str(user_id),
+                "amount": amount,
+                "admin_id": str(admin_id),
+                "source": str(source),
+                "paid": False,
+                "claimed_at": datetime.utcnow(),
+            }
+        },
+        upsert=True,
+        return_document=False,
+    )
+    return result is None  # None = doc didn't exist before — we own this payout
+
+
+async def mark_reward_paid(message_id: str, user_id: str):
+    """Commit point: flag the recipient's tokens as confirmed paid."""
+    if db is None:
+        return
+    await db.reward_payouts.update_one(
+        {"_id": f"{message_id}:{user_id}"},
+        {"$set": {"paid": True, "paid_at": datetime.utcnow()}},
+    )
+
+
+async def get_stuck_reward_payouts(older_than_seconds: int = 60) -> list:
+    """Rows claimed but never confirmed paid — a crash between the claim and the
+    balance $inc. The age gate skips in-flight payouts so an on-demand check run
+    during a live payout doesn't false-positive on a row about to be committed.
+    """
+    if db is None:
+        return []
+    cutoff = datetime.utcnow() - timedelta(seconds=older_than_seconds)
+    cursor = db.reward_payouts.find({"paid": False, "claimed_at": {"$lt": cutoff}})
+    return await cursor.to_list(length=None)
+
+
+async def resolve_stuck_reward_payout(message_id: str, user_id: str, resolver_id: str):
+    """Marks a stuck row resolved after a staff manual /give, so it stops being
+    reported. Records who resolved it for audit — does NOT move any tokens.
+    """
+    if db is None:
+        return
+    await db.reward_payouts.update_one(
+        {"_id": f"{message_id}:{user_id}", "paid": False},
+        {
+            "$set": {
+                "paid": True,
+                "manually_resolved": True,
+                "resolved_by": str(resolver_id),
+                "paid_at": datetime.utcnow(),
+            }
+        },
+    )
+
+
+# --- REDEMPTION CLOSURE GUARD (single-state, crash-safe) ---
+
+
+async def claim_redemption_closure(channel_id, action: str) -> bool:
+    """Atomically claim a redemption-ticket close so its financial side effect (refund
+    or budget deduction) runs at most once, even if the persistent close button is
+    re-clicked after a crash that killed the bot before the channel was deleted.
+
+    Returns True only if this call newly owns the closure — the caller should run the
+    money + transcript, then delete the channel. Returns False if a doc already exists
+    (a previous attempt already ran the money) — the caller should skip straight to
+    deleting the channel. Keyed by channel id; no boot reconcile is needed because the
+    surviving channel and its live buttons ARE the retry path (staff naturally re-click,
+    and this guard makes the re-click a delete-only no-op on the finances).
+    """
+    if db is None:
+        return False
+    key = str(channel_id)
+    result = await db.redemption_closures.find_one_and_update(
+        {"_id": key},
+        {
+            "$setOnInsert": {
+                "_id": key,
+                "action": str(action),
+                "claimed_at": datetime.utcnow(),
+            }
+        },
+        upsert=True,
+        return_document=False,
+    )
+    return result is None  # None = doc didn't exist before — we own this closure
 
 
 # --- LEVELING HELPERS ---
@@ -181,6 +328,33 @@ async def set_booster_shoutout_month(user_id: str, month_key: str):
     )
 
 
+async def claim_booster_shoutout_month(user_id: str, month_key: str):
+    """Atomically claim this month's booster-shoutout slot for the user.
+
+    Returns (won, previous): `won` is True if this caller set the marker (the doc
+    was not already at month_key), False if another concurrent boost event already
+    claimed it. `previous` is the marker's prior value, so the caller can roll it
+    back with set_booster_shoutout_month if the channel creation then fails —
+    preserving the "retry later this month" intent the old set-after-success code had.
+
+    Closes the check-then-set race in on_member_update where two rapid boost events
+    both read no marker and each create a ticket. The user doc is ensured first
+    (get_user_data upserts it) because the $ne filter would make an upsert here try
+    to insert a duplicate _id.
+    """
+    if db is None:
+        return True, None
+    await get_user_data(user_id)  # ensure the doc exists (upsert-unsafe filter below)
+    before = await db.users.find_one_and_update(
+        {"_id": str(user_id), "booster_shoutout_month": {"$ne": month_key}},
+        {"$set": {"booster_shoutout_month": month_key}},
+        return_document=False,  # BEFORE — None means the predicate excluded the doc
+    )
+    if before is None:
+        return False, None  # already claimed this month
+    return True, before.get("booster_shoutout_month")
+
+
 async def get_item_count(user_id: str, item_name: str) -> int:
     """Checks how many of an item a user has."""
     doc = await get_user_data(user_id)
@@ -197,6 +371,106 @@ async def remove_item_token(user_id: str, item_name: str, quantity: int = 1):
     )
 
 
+async def purchase_item(
+    user_id: str, item_name: str, price: int, discount_month: str | None = None
+) -> bool:
+    """Atomically deduct `price` tokens and grant one `item_name`, only if the
+    balance still covers the price. Optionally stamp the booster-discount month in
+    the same write. All three fields live on the one users doc, so a single
+    update_one is atomic — a crash can never deduct without granting (or vice
+    versa), and the `balance >= price` guard blocks double-spend / negative
+    balances under concurrency. Returns False (no-op) if the balance no longer
+    covers the price."""
+    if db is None:
+        return False
+    update = {"$inc": {"balance": -price, f"inventory.{item_name}": 1}}
+    if discount_month is not None:
+        update["$set"] = {"booster_discount_month": discount_month}
+    result = await db.users.update_one(
+        {"_id": user_id, "balance": {"$gte": price}},
+        update,
+    )
+    return result.modified_count > 0
+
+
+# --- PENDING REDEMPTION HELPERS ---
+# Crash-safety for /redeem: a durable marker written atomically with the token
+# removal, reconciled once at startup so a hard crash mid-redeem can never lose
+# the item silently (see reconcile_pending_redemptions in features/economy.py).
+
+
+async def begin_pending_redemption(
+    user_id: str, item: str, budget_usd: float
+) -> str | None:
+    """Atomically consume one item token and record a pending-redemption marker.
+
+    The decrement and the marker are a single-document update, so there is no
+    window where the token is gone without a durable marker (or vice versa). The
+    conditional match also prevents two concurrent /redeem calls from driving the
+    inventory below zero. Returns the pending id, or None if the user no longer
+    owns the item (caller should abort).
+    """
+    if db is None:
+        return None
+    pending_id = str(ObjectId())
+    result = await db.users.update_one(
+        {"_id": user_id, f"inventory.{item}": {"$gte": 1}},
+        {
+            "$inc": {f"inventory.{item}": -1},
+            "$push": {
+                "pending_redemptions": {
+                    "id": pending_id,
+                    "item": item,
+                    "budget_usd": budget_usd,
+                    "channel_id": None,
+                    "created_at": datetime.utcnow(),
+                }
+            },
+        },
+    )
+    return pending_id if result.modified_count else None
+
+
+async def set_pending_redemption_channel(
+    user_id: str, pending_id: str, channel_id: int
+):
+    """Record the created ticket's channel id on the pending marker, so a crash
+    after ticket creation is decidable on reconcile (ticket exists → no refund)."""
+    if db is None:
+        return
+    await db.users.update_one(
+        {"_id": user_id},
+        {"$set": {"pending_redemptions.$[e].channel_id": channel_id}},
+        array_filters=[{"e.id": pending_id}],
+    )
+
+
+async def clear_pending_redemption(user_id: str, pending_id: str):
+    """Remove a pending-redemption marker by id (happy-path cleanup or reconcile)."""
+    if db is None:
+        return
+    await db.users.update_one(
+        {"_id": user_id},
+        {"$pull": {"pending_redemptions": {"id": pending_id}}},
+    )
+
+
+async def get_all_pending_redemptions() -> list[dict]:
+    """Returns every outstanding pending-redemption marker, flattened to rows of
+    {user_id, id, item, budget_usd, channel_id, created_at}."""
+    if db is None:
+        return []
+    rows: list[dict] = []
+    cursor = db.users.find(
+        {"pending_redemptions": {"$exists": True, "$ne": []}},
+        {"pending_redemptions": 1},
+    )
+    async for doc in cursor:
+        for entry in doc.get("pending_redemptions", []):
+            rows.append({"user_id": doc["_id"], **entry})
+    return rows
+
+
 async def get_setting(key: str, default: str = None):
     if db is None:
         return default
@@ -208,6 +482,42 @@ async def set_setting(key: str, value: str):
     if db is None:
         return
     await db.settings.update_one({"_id": key}, {"$set": {"value": value}}, upsert=True)
+
+
+async def ensure_drop_claims_ttl_index():
+    """TTL index so per-drop claim records auto-expire ~7 days after creation.
+    Drops are single-claim and infrequent, but without this the records would
+    accumulate forever; 7 days is far longer than any drop stays live."""
+    if db is None:
+        return
+    await db.drop_claims.create_index("ts", expireAfterSeconds=604800)
+
+
+async def claim_drop(message_id: str, user_id: str) -> bool:
+    """Atomically record the first claimer of a supply/booster/admin drop.
+
+    Returns True if this caller won the claim (should be paid), False if the drop
+    was already claimed. Keyed by the drop's message id, so it survives a restart —
+    unlike the in-memory DropView.claimed flag it replaces — and serializes the
+    race between two near-simultaneous clicks (both pass the old in-memory guard
+    because the claim callback awaits a defer before checking it). Same
+    find_one_and_update / $setOnInsert pattern as acquire_scam_detection_lock.
+    """
+    if db is None:
+        return True  # DB down: nothing persists anyway, let the click through
+    before = await db.drop_claims.find_one_and_update(
+        {"_id": str(message_id)},
+        {
+            "$setOnInsert": {
+                "_id": str(message_id),
+                "claimed_by": str(user_id),
+                "ts": datetime.utcnow(),
+            }
+        },
+        upsert=True,
+        return_document=False,
+    )
+    return before is None  # None means it didn't exist before — we claimed it
 
 
 # --- REDEMPTION QUEUE HELPERS ---
@@ -246,6 +556,194 @@ async def remove_redemption_queue_entry(entry_id: str) -> dict | None:
     except (InvalidId, TypeError):
         return None
     return await db.redemption_queue.find_one_and_delete({"_id": oid})
+
+
+# Two-state, crash-safe queue fulfilment (mirrors the pending_redemptions trio
+# above): the queue processor claims an entry before creating its ticket and
+# records the channel after, so a crash between the create and the removal is
+# decidable on reconcile instead of re-creating a duplicate ticket. See
+# reconcile_redemption_queue in features/economy.py.
+
+
+async def claim_redemption_queue_entry(entry_id: str) -> bool:
+    """Atomically mark a queue entry as ticket-creation-in-progress.
+
+    Sets `claimed_at` only if it is not already set, in one atomic op. Returns
+    True if we claimed it (was unclaimed → we own the ticket creation), or False
+    if an earlier — possibly crashed — run already claimed it, in which case the
+    caller must skip it so a restart can never create a second ticket.
+    """
+    if db is None:
+        return False
+    try:
+        oid = ObjectId(entry_id)
+    except (InvalidId, TypeError):
+        return False
+    result = await db.redemption_queue.find_one_and_update(
+        {"_id": oid, "claimed_at": {"$exists": False}},
+        {"$set": {"claimed_at": datetime.utcnow(), "channel_id": None}},
+    )
+    return result is not None  # None = filter didn't match → already claimed
+
+
+async def set_redemption_queue_entry_channel(entry_id: str, channel_id: int):
+    """Record the created ticket's channel id on a claimed queue entry, so a
+    crash after ticket creation is decidable on reconcile (channel_id present →
+    ticket exists → no refund)."""
+    if db is None:
+        return
+    try:
+        oid = ObjectId(entry_id)
+    except (InvalidId, TypeError):
+        return
+    await db.redemption_queue.update_one(
+        {"_id": oid}, {"$set": {"channel_id": channel_id}}
+    )
+
+
+async def get_stuck_redemption_queue_entries() -> list[dict]:
+    """Queue entries claimed for ticket creation but never removed — a crash
+    between the claim and the entry removal. Resolved once at cold boot by
+    reconcile_redemption_queue. No age gate: the reconcile is cold-boot only, so
+    nothing is in flight."""
+    if db is None:
+        return []
+    return await db.redemption_queue.find({"claimed_at": {"$exists": True}}).to_list(
+        length=None
+    )
+
+
+async def claim_redemption_queue_refund(entry_id: str, kind: str) -> dict | None:
+    """Atomically claim a queue entry for REFUND (not ticket creation).
+
+    Stamps `claimed_at` + `refund_kind` only if the entry is unclaimed, in one op.
+    Unlike claim_redemption_queue_entry it does NOT set `channel_id`, so the
+    cold-boot reconcile routes it to the refund branch (ahead of the channel_id /
+    topic-scan ticket logic). Returns the updated doc (for its user_id/item) if we
+    newly claimed it, or None if the entry was not found or was already claimed —
+    in which case the caller must not pay (a restart's reconcile, or a racing
+    staff/queue action, owns it).
+    """
+    if db is None:
+        return None
+    try:
+        oid = ObjectId(entry_id)
+    except (InvalidId, TypeError):
+        return None
+    return await db.redemption_queue.find_one_and_update(
+        {"_id": oid, "claimed_at": {"$exists": False}},
+        {"$set": {"claimed_at": datetime.utcnow(), "refund_kind": kind}},
+        return_document=True,  # AFTER — surface user_id/item for the payout
+    )
+
+
+async def apply_queue_refund(
+    user_id: str, entry_id: str, *, item: str | None = None, tokens: int = 0
+) -> bool:
+    """Idempotently pay a claimed queue refund and record its receipt in one write.
+
+    Grants the item and/or tokens AND adds `entry_id` to `queue_refunds_done` in a
+    single atomic update gated by `queue_refunds_done: {$ne: entry_id}`, so a
+    re-run with the same entry_id (a reconcile after a crash between pay and entry
+    removal) is a no-op — the $inc and its receipt land together or not at all.
+    Mirrors claim_daily_reward (atomic $inc + guard on the users doc). Returns True
+    if this call performed the payout, False if it was already applied.
+
+    The user doc is ensured to exist first via get_user_data: upsert is off here
+    (an upsert whose $ne filter excludes an existing doc raises a duplicate-key
+    error on _id), so a missing doc would otherwise make the refund silently
+    no-op. Owning that precondition here keeps callers from having to remember it.
+    """
+    if db is None:
+        return False
+    await get_user_data(str(user_id))  # pre-create so the upsert-off write lands
+    inc = {}
+    if item:
+        inc[f"inventory.{item}"] = 1
+    if tokens:
+        inc["balance"] = tokens
+    update: dict = {"$addToSet": {"queue_refunds_done": entry_id}}
+    if inc:
+        update["$inc"] = inc
+    result = await db.users.update_one(
+        {"_id": str(user_id), "queue_refunds_done": {"$ne": entry_id}}, update
+    )
+    return result.modified_count > 0
+
+
+# --- SCAM PURGE SESSION HELPERS ---
+#
+# Crash-safe cross-channel purge (mirrors the redemption-queue crash-safety
+# idiom above). When a scam image is detected, the purge session records the
+# full target channel list and a `completed` cursor before any deletes start,
+# and marks each channel done as it finishes, so a crash mid-purge is resumable
+# on cold boot instead of silently abandoning the remaining channels. See
+# reconcile_scam_purge_sessions in features/scam_detection.py.
+
+
+async def create_scam_purge_session(
+    guild_id: int,
+    author_id: int,
+    image_md5: str,
+    image_size: int,
+    skip_message_id: int,
+    cutoff: datetime,
+    channel_ids: list[int],
+) -> str | None:
+    """Persist a purge job before any deletes, so an interrupted purge can be
+    resumed. Returns the session id, or None if the DB is unavailable."""
+    if db is None:
+        return None
+    result = await db.scam_purge_sessions.insert_one(
+        {
+            "guild_id": guild_id,
+            "author_id": author_id,
+            "image_md5": image_md5,
+            "image_size": image_size,
+            "skip_message_id": skip_message_id,
+            "cutoff": cutoff,
+            "channels": channel_ids,
+            "completed": [],
+            "created_at": datetime.utcnow(),
+        }
+    )
+    return str(result.inserted_id)
+
+
+async def mark_scam_purge_channel_done(session_id: str, channel_id: int):
+    """Advance the completed cursor by one channel. Idempotent via $addToSet so
+    a resumed run can't record a channel twice."""
+    if db is None:
+        return
+    try:
+        oid = ObjectId(session_id)
+    except (InvalidId, TypeError):
+        return
+    await db.scam_purge_sessions.update_one(
+        {"_id": oid}, {"$addToSet": {"completed": channel_id}}
+    )
+
+
+async def delete_scam_purge_session(session_id: str) -> dict | None:
+    """Remove a purge session once every target channel is done. Returns the
+    removed document, or None."""
+    if db is None:
+        return None
+    try:
+        oid = ObjectId(session_id)
+    except (InvalidId, TypeError):
+        return None
+    return await db.scam_purge_sessions.find_one_and_delete({"_id": oid})
+
+
+async def get_incomplete_scam_purge_sessions() -> list[dict]:
+    """Purge sessions that were never finished — a crash between session
+    creation and its deletion. Resolved once at cold boot by
+    reconcile_scam_purge_sessions. No age gate: the reconcile is cold-boot only,
+    so nothing is in flight, and sessions must persist until resolved."""
+    if db is None:
+        return []
+    return await db.scam_purge_sessions.find({}).to_list(length=None)
 
 
 # --- COUNTING HELPERS ---
@@ -441,34 +939,66 @@ async def acquire_scam_detection_lock(author_id: int, image_md5: str) -> bool:
 # --- PAYOUT / ADMIN COMPENSATION HELPERS ---
 
 
-async def add_payout_batch(amount: float, user_ids: list[str], reason: str):
-    """
-    1. Logs the batch globally with a unique ID.
-    2. Adds funds AND the Batch ID to every user's profile.
+async def add_payout_batch(
+    amount: float, user_ids: list[str], reason: str, admin_id: str
+):
+    """Crash-safe staff payout batch.
+
+    The receipt id is derived deterministically from the batch inputs (sorted
+    user ids + per-person amount + reason), so re-running the identical
+    /payout-add after a mid-loop crash reuses the same batch id. Each recipient
+    is claimed in the shared reward_payouts ledger (source="payout") before the
+    payouts $inc, so a re-run credits only users who were never reached and
+    never double-pays anyone already credited for this batch.
+
+    Trade-off: two *intentionally* identical payouts (same users, same
+    per-person amount, same reason) hash to the same batch id, so the second is
+    treated as a retry and skipped. Vary the reason to force a distinct batch.
+
+    Returns (batch_id, credited, skipped) so the caller can report accurately.
     """
     if db is None:
-        return
+        return None, [], []
 
-    # Generate a unique receipt ID (e.g., "a1b2c3d4")
-    batch_id = str(uuid.uuid4())[:8]
+    # Deterministic receipt id: independent of caller set() ordering and of a
+    # random uuid, so an identical re-run collides on the same key and dedupes.
+    payload = "|".join(sorted(user_ids)) + f"|{amount:.2f}|{reason}"
+    batch_id = hashlib.sha1(payload.encode("utf-8")).hexdigest()[:8]
 
-    # 1. Save Global Log
-    log_entry = {
-        "batch_id": batch_id,
-        "timestamp": datetime.utcnow(),
-        "amount": amount,
-        "user_ids": user_ids,
-        "reason": reason,
-    }
-    await db.payout_logs.insert_one(log_entry)
+    # 1. Save Global Log (idempotent: a re-run must not append a duplicate row,
+    # since /payout-history reads these).
+    await db.payout_logs.update_one(
+        {"batch_id": batch_id},
+        {
+            "$setOnInsert": {
+                "batch_id": batch_id,
+                "timestamp": datetime.utcnow(),
+                "amount": amount,
+                "user_ids": user_ids,
+                "reason": reason,
+            }
+        },
+        upsert=True,
+    )
 
-    # 2. Update Users (Loop ensures everyone gets updated/created)
+    # 2. Credit each user at most once per batch. The ledger claim gates the
+    # $inc/$push so a re-run skips anyone already credited for this batch id.
+    credited, skipped = [], []
     for uid in user_ids:
+        if not await claim_reward_payout(
+            batch_id, uid, amount, admin_id, source="payout"
+        ):
+            skipped.append(uid)
+            continue
         await db.payouts.update_one(
             {"_id": uid},
             {"$inc": {"amount": amount}, "$push": {"unpaid_batches": batch_id}},
             upsert=True,
         )
+        await mark_reward_paid(batch_id, uid)
+        credited.append(uid)
+
+    return batch_id, credited, skipped
 
 
 async def get_payout_logs(limit: int = 25):
@@ -695,6 +1225,75 @@ async def deduct_coins(user_id, amount):
     return False
 
 
+async def purchase_brawler_ability(
+    user_id: str, brawler_id: str, item_type: str, item_name: str, cost: int
+) -> bool:
+    """
+    Atomically deducts Coins and grants a gadget / star power / hypercharge in a
+    single update_one, mirroring upgrade_brawler_level. Returns True on success,
+    False if the ability type is unknown or the user can't afford it.
+    """
+    if db is None:
+        return False
+
+    user_data = await get_user_data(user_id)
+    current_coins = user_data.get("currencies", {}).get("coins", 0)
+    if current_coins < cost:
+        return False
+
+    # Deduct + grant fold into one update document; the currency $inc and the
+    # ability grant touch different field paths, so MongoDB applies both atomically.
+    update = {"$inc": {"currencies.coins": -cost}}
+    if item_type == "gadget":
+        update["$addToSet"] = {f"brawlers.{brawler_id}.gadgets": item_name}
+    elif item_type == "star_power":
+        update["$addToSet"] = {f"brawlers.{brawler_id}.star_powers": item_name}
+    elif item_type == "hypercharge":
+        update["$set"] = {f"brawlers.{brawler_id}.hypercharge": item_name}
+    else:
+        return False
+
+    await db.users.update_one({"_id": str(user_id)}, update)
+    return True
+
+
+async def purchase_brawler(user_id: str, brawler_id: str, price: int):
+    """
+    Atomically deducts Credits and grants the brawler in a single update_one,
+    mirroring upgrade_brawler_level. Preserves add_brawler_to_user's semantics:
+    a duplicate purchase grants 15 Power Points instead of the brawler.
+
+    Returns "new" or "duplicate" on success, or False if the user can't afford it.
+    """
+    if db is None:
+        return False
+
+    user_data = await get_user_data(user_id)
+    current_credits = user_data.get("currencies", {}).get("credits", 0)
+    if current_credits < price:
+        return False
+
+    if brawler_id in user_data.get("brawlers", {}):
+        # Duplicate: deduct Credits and grant 15 Power Points in one write.
+        await db.users.update_one(
+            {"_id": str(user_id)},
+            {"$inc": {"currencies.credits": -price, "currencies.power_points": 15}},
+        )
+        return "duplicate"
+
+    # New brawler: deduct Credits and set the brawler entry in one write.
+    await db.users.update_one(
+        {"_id": str(user_id)},
+        {
+            "$inc": {"currencies.credits": -price},
+            "$set": {
+                f"brawlers.{brawler_id}": {"level": 1, "obtained_at": datetime.utcnow()}
+            },
+        },
+    )
+    return "new"
+
+
 async def upgrade_brawler_level(user_id: str, brawler_id: str):
     """
     Attempts to upgrade a brawler.
@@ -916,6 +1515,7 @@ async def assign_random_quest(user_id: str, q_key: str, is_booster: bool = False
         "reward_exp": quest.get("reward_exp", 0),
         "progress": 0,
         "completed": False,
+        "rewarded": False,
         "booster_reduced": is_booster,
         "date_assigned": datetime.utcnow(),
     }
@@ -948,7 +1548,13 @@ async def update_quest_progress(user_id: str, q_key: str, amount: int = 1):
 
     quest = user_q[q_key]
     if quest["completed"]:
-        return False, None
+        # Legacy completed quests (assigned before the rewarded field existed)
+        # default to paid, so they are never re-granted. Only an explicit
+        # rewarded:False — a crash between the completed write and the payout —
+        # re-signals a payout so the caller can retry it.
+        if quest.get("rewarded", True):
+            return False, None
+        return True, quest
 
     new_progress = quest["progress"] + amount
     target = quest["target_count"]
@@ -964,6 +1570,57 @@ async def update_quest_progress(user_id: str, q_key: str, amount: int = 1):
             {"_id": user_id}, {"$inc": {f"{q_key}.progress": amount}}
         )
         return False, None
+
+
+QUEST_KEYS = ("daily_message", "weekly_message", "daily_megabox", "weekly_megabox")
+
+
+async def add_quest_reward(user_id: str, tokens: int, exp: int):
+    """Atomically grant a quest's tokens + XP in a single users-doc $inc.
+
+    balance and exp both live on the one users doc, so this can never pay tokens
+    without XP (or vice versa). Paid before the rewarded flag is set so a crash
+    leaves the quest re-payable rather than losing the reward.
+    """
+    if db is None:
+        return
+    inc = {}
+    if tokens:
+        inc["balance"] = tokens
+    if exp:
+        inc["exp"] = exp
+    if not inc:
+        return
+    await db.users.update_one({"_id": str(user_id)}, {"$inc": inc}, upsert=True)
+
+
+async def mark_quest_rewarded(user_id: str, q_key: str):
+    """Flags a completed quest's reward as paid out (commit point of the payout)."""
+    if db is None:
+        return
+    await db.user_quests.update_one(
+        {"_id": user_id}, {"$set": {f"{q_key}.rewarded": True}}
+    )
+
+
+async def get_unrewarded_completed_quests():
+    """Returns [(user_id, q_key, quest_entry), ...] for quests flagged completed
+    whose reward never landed — a crash between the completed write and the
+    payout. Matching rewarded:False (not $ne True) excludes legacy quests that
+    predate the field and were already paid under the old code path.
+    """
+    if db is None:
+        return []
+    query = {
+        "$or": [{f"{k}.completed": True, f"{k}.rewarded": False} for k in QUEST_KEYS]
+    }
+    out = []
+    async for doc in db.user_quests.find(query):
+        for k in QUEST_KEYS:
+            q = doc.get(k)
+            if q and q.get("completed") and q.get("rewarded") is False:
+                out.append((doc["_id"], k, q))
+    return out
 
 
 # --- TOURNAMENT STATS HELPERS ---
@@ -1026,6 +1683,18 @@ async def reset_tourney_session_start_time(session_id):
     except Exception as e:
         print(f"⚠️ DB Error (Reset Session Start Time): {e}")
         return False
+
+
+async def update_tourney_runtime_state(session_id, **fields):
+    """Persist recovery fields on the active session so runtime state can be
+    rehydrated after a bot restart (region, admin_role_original_name,
+    slowmode_ends_at, lock_reopens_at). SILENT FAIL enabled."""
+    if db is None or not fields:
+        return
+    try:
+        await db.tourney_sessions.update_one({"_id": session_id}, {"$set": fields})
+    except Exception as e:
+        print(f"⚠️ DB Error (Runtime State): {e}")
 
 
 async def increment_tourney_message_count(session_id):

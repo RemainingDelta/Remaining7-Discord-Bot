@@ -198,6 +198,13 @@ def reset_ticket_counter():
     _ticket_counter = 1
 
 
+def set_ticket_counter(n: int):
+    """Set the live ticket counter to a specific value (used on restart resume
+    to continue numbering from the highest existing ticket channel)."""
+    global _ticket_counter
+    _ticket_counter = n
+
+
 async def create_tourney_ticket_channel(
     interaction: discord.Interaction,
     team_name: str,

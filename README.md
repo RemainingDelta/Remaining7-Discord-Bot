@@ -2,7 +2,7 @@
 
 ## Overview
 **Name:** Remaining7 Discord Bot
-**Version:** v1.11.1
+**Version:** v1.12.0
 **Contributors:** remainingdelta, nightwarrior5
 **Objective:** A feature-rich Discord bot for the Remaining7 community server (16k+ members). Handles an R7 Token economy, leveling, quests, a Brawl Stars collection minigame, tournament management with Matcherino integration, support tickets, event operations, a security protocol, and multi-language translation.
 **Server Link:** https://discord.gg/6MzrjS2X8k
@@ -30,9 +30,9 @@ Remaining7-Discord-Bot/
 ├── LICENSE
 ├── .env.example
 ├── .gitignore
-├── CLAUDE.md
 ├── README.md
 ├── docs/                             # Feature implementation guides
+│   └── logs/                         # SPECS.md & CHANGELOG.md — development history
 ├── database/
 │   └── mongo.py                     # All MongoDB helper functions
 ├── features/
@@ -43,7 +43,7 @@ Remaining7-Discord-Bot/
 │   ├── scam_detection.py            # Scam image detection (MD5/pHash/ORB blacklist)
 │   ├── event.py                     # Event channel cleanup & reward payouts
 │   ├── general.py                   # /help, /mod-help, /admin-help, /version, /convert-time
-│   ├── translation.py               # !t prefix & /translate slash command (55 languages)
+│   ├── translation.py               # !t prefix & /translate slash command (54 languages)
 │   ├── counting.py                  # Sequential counting game with /set-count
 │   ├── sticky.py                    # !sticky / !unsticky persistent channel messages
 │   ├── support_tickets.py           # General support tickets (issues, support, apps, partnership)
@@ -62,6 +62,8 @@ Remaining7-Discord-Bot/
 │       ├── tourney_views.py         # discord.ui.View classes for ticket buttons
 │       ├── tourney_reports.py       # Monthly tournament report generation
 │       └── matcherino.py            # Matcherino API integration
+├── scripts/
+│   └── generate_specs.py            # Generates docs/logs/ SPECS & CHANGELOG from GitHub data
 ├── tests/                            # Pytest unit tests (pure functions & regex helpers)
 └── .github/
     ├── ISSUE_TEMPLATE/
@@ -85,7 +87,7 @@ Remaining7-Discord-Bot/
 - **Supply Drop:** `/drop <amount>` (Admin) to force a token drop in general chat.
 - **Balance & Ranking:** `/balance [user]`, `/leaderboard [page]`.
 - **Give & Set:** `/give <user> <token/xp/level> <amount>`, `/set-balance <user> <amount>` (Admin).
-- **Permissions:** `/perm <add/remove> <user>` to grant/revoke command access.
+- **Permissions:** `/perm <user> <add/remove>` to grant/revoke command access.
 - **Guide:** `/economy-help` for a full user-facing guide.
 
 ### Shop & Budget System
@@ -95,6 +97,7 @@ Remaining7-Discord-Bot/
 - **Monthly Cap:** $50.00 monthly budget, auto-resets each calendar month.
 - **Budget Check:** `/check-budget` shows spent vs. remaining.
 - **Budget Override:** `/set-budget <amount>` (Admin).
+- **Redemption Queue:** `/redemption-queue` lists your queued redemptions (items awaiting next month's budget); staff manage the queue with `/redemption-queue-list` and `/redemption-queue-remove <entry_id>`.
 
 ### Leveling & XP
 - XP earned passively from messages alongside tokens, restricted to the general and booster channels.
@@ -138,7 +141,7 @@ Every user always has **4 active quests** — one daily and one weekly per categ
 
 ### Tournament System
 - **Phase Management:**
-  - `!starttourney [region]` — start live tournament, reset counters, init queue dashboard. Use `!starttourney SA` for South America mode.
+  - `!starttourney [region]` — start live tournament, reset counters, init queue dashboard. Use `!starttourney SA` for South America mode. The bot auto-resumes tourney state (dashboards, slow-mode/lock timers, region, ticket counter) after a restart; pass `force` (`!starttourney [region] force`) to restart setup over an already-active session.
   - `!endtourney` — end tournament, clean up dashboards and tickets, auto-post Hall of Fame.
 - **Ticket Panels:** `/tourney-panel` (live) and `/pre-tourney-panel` (pre-tourney) post interactive open buttons.
 - **Ticket Operations:**
@@ -160,7 +163,7 @@ Every user always has **4 active quests** — one daily and one weekly per categ
 - **Auto-translation:** Ticket messages auto-translated via `deep-translator` + `langdetect`.
 - **Test Mode:** `/tourney-test-mode` — toggle 100-ticket limit and 0.1s cooldown for testing.
 - **Active Matches:** `/active-matches` — display all active match scores grouped by round.
-- **Monthly Reports:** Auto-generated monthly tournament reports posted to a dedicated archive channel. Matcherino ID is auto-detected on `!starttourney`.
+- **Monthly Reports:** Auto-generated monthly tournament reports posted to a dedicated archive channel. Matcherino ID is auto-detected on `!starttourney`. `/monthly-report [month] [year]` (Staff) generates or re-generates a report on demand.
 - **Slow Mode:** `!starttourney` enables 60s slow mode in general chat with a public notice; auto-removed after 1 hour (or immediately on `!endtourney`).
 - **Staff Guide:** `/tourney-admin-help`.
 - **SA Mode:** South America region variant with separate ticket categories and region-specific workflow.
@@ -191,12 +194,13 @@ Every user always has **4 active quests** — one daily and one weekly per categ
 - **Automated Monitoring:** Daily background task at 12:00 AM ET scans event channels.
 - **Smart Alerts:** Alert sent when messages are 7+ days old (prevents exceeding Discord's 14-day bulk-delete limit). Previous day's alert is replaced instead of stacking.
 - **Manual Cleanup:** `/clear-red`, `/clear-blue`, `/clear-green` for instant channel wipes.
-- **Reward Payouts:** `/event-rewards <message_id>` parses `@User 500` format to batch-distribute tokens with confirmation.
-- **Poll Rewards:** `/poll-rewards <message_id>` distributes tokens to all users who voted on a poll.
+- **Reward Payouts:** `/event-rewards <message_id>` parses `@User 500` format to batch-distribute tokens with confirmation. Payouts run through a per-recipient ledger, so a crash-and-retry never double-pays.
+- **Poll Rewards:** `/poll-rewards <message_id> <answer> <amount>` distributes tokens to users who voted a given answer on a poll.
+- **Stuck Payouts:** `/check-stuck-payouts [resolve]` lists (or resolves) payouts that were claimed but never confirmed paid after an interruption.
 - **Staff Guide:** `/event-staff-help`.
 
 ### Security Protocol
-- `/hacked <user> [days]` or `!hacked` (reply) — instantly timeout (7 days), flag in DB, purge messages across all channels.
+- `/hacked <user>` or `!hacked` (reply) — instantly timeout (7 days), flag in DB, purge messages across all channels.
 - `/unhacked <user>` — remove flag and timeout.
 - `/hacked-list` — view all currently flagged users.
 - Logs to moderator logs channel. Prevents targeting equal/higher role members.
@@ -224,7 +228,7 @@ Every user always has **4 active quests** — one daily and one weekly per categ
 - `/set-count <number>` (Staff) — manually set the current count.
 
 ### Sticky Messages
-- `!sticky <message>` — pin a message that reposts automatically when other messages are sent.
+- `!sticky <message>` — pin a message that reposts automatically when other messages are sent. Usable by Admins and Event Staff.
 - `!unsticky` — remove the active sticky message from a channel.
 
 ### Utility
@@ -282,6 +286,29 @@ This bot requires **Python 3.10+** and a **MongoDB Atlas** database.
 
 ---
 
+## Hosting
+
+The bot runs 24/7 on **RamNaym Cloud** (Nano plan, the lowest paid tier), deployed via GitHub zip download.
+
+| | |
+|---|---|
+| **Host** | RamNaym Cloud |
+| **Plan** | Nano (lowest paid tier) |
+| **Plan specs** | 0.10 CPU · 256 MB RAM · 2 GB disk |
+| **Cost** | 4 EUR/year (≈ $4.55 USD as of now; paid $4.75) |
+
+**Current usage** (refresh if the plan or load changes materially):
+
+| Resource | Usage |
+|---|---|
+| vCPU load | 0.5% |
+| Memory | 126.6 / 256.0 MB |
+| Project storage | 2.1 MB / 2.00 GB |
+
+See [`docs/HOSTING.md`](docs/HOSTING.md) for the full hosting history and the reasoning behind the migration from the previous host.
+
+---
+
 ## Database
 
 Uses MongoDB database `r7_bot_db` with the following collections:
@@ -324,7 +351,7 @@ Uses MongoDB database `r7_bot_db` with the following collections:
 | Admin | Full access to all commands |
 | Moderator | Economy oversight, security protocol |
 | Tourney Admin | Tournament commands, ticket management |
-| Event Staff | Event channel cleanup, reward distribution |
+| Event Staff | Event channel cleanup, reward distribution, sticky messages |
 | Member | Economy, quests, brawl, translation, help |
 
 ---
@@ -334,6 +361,7 @@ Uses MongoDB database `r7_bot_db` with the following collections:
 - Feature/bug branches merge into `dev` via PR.
 - `dev` merges into `main` for release.
 - Ruff enforced via CI (`.github/workflows/lint.yml`); pytest suite runs on every push/PR (`tests.yml`).
+- Common dev tasks are wrapped in the `Makefile`: `make test`, `make lint`, `make fix`, `make ci`, `make up`, and `make commit m="..."` (stages, commits, and pushes in one step).
 - PRs into `main` are blocked unless `pyproject.toml`'s version was bumped (`version-check.yml`).
 - PRs into `dev` are checked for a consistent issue number across branch name, title, and body (`pr-issue-reference-check.yml`).
 

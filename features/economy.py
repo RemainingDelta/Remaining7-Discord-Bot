@@ -10,17 +10,22 @@ import asyncio
 
 from database.mongo import (
     get_user_balance,
+    get_user_data,
     update_user_balance,
     increment_user_balance,
+    claim_daily_reward,
+    claim_redemption_closure,
     get_leveling_data,
     update_leveling_data,
     add_item_token,
     get_booster_discount_month,
-    set_booster_discount_month,
     get_item_count,
     remove_item_token,
+    purchase_item,
     get_setting,
     set_setting,
+    claim_drop,
+    ensure_drop_claims_ttl_index,
     get_leaderboard_page,
     get_total_users,
     get_user_rank,
@@ -29,6 +34,15 @@ from database.mongo import (
     add_redemption_queue_entry,
     get_redemption_queue,
     remove_redemption_queue_entry,
+    claim_redemption_queue_entry,
+    claim_redemption_queue_refund,
+    apply_queue_refund,
+    set_redemption_queue_entry_channel,
+    get_stuck_redemption_queue_entries,
+    begin_pending_redemption,
+    set_pending_redemption_channel,
+    clear_pending_redemption,
+    get_all_pending_redemptions,
 )
 
 # --- CONFIGURATION ---
@@ -573,29 +587,34 @@ class RedemptionClosedOptionsView(discord.ui.View):
 
         await interaction.response.defer(ephemeral=True)
 
-        opener_raw = _extract_topic_value(
-            interaction.channel.topic, "redemption-opener"
-        )
-        item = _extract_topic_value(interaction.channel.topic, "item") or ""
-        token_cost = _token_price_for_item(item) if item else 0
-        balance_before = 0
-        balance_after = 0
-        if opener_raw and opener_raw.isdigit() and item:
-            refund_amount = _token_price_for_item(item)
-            if refund_amount > 0:
-                balance_before = await get_user_balance(opener_raw)
-                balance_after = balance_before + refund_amount
-                await update_user_balance(opener_raw, balance_after)
+        # Claim the closure BEFORE any money moves so a crash-then-reclick can't
+        # refund twice. If the claim was already taken (a prior attempt paid the
+        # refund but died before deleting), skip straight to deleting the channel.
+        if await claim_redemption_closure(interaction.channel.id, "refund"):
+            opener_raw = _extract_topic_value(
+                interaction.channel.topic, "redemption-opener"
+            )
+            item = _extract_topic_value(interaction.channel.topic, "item") or ""
+            token_cost = _token_price_for_item(item) if item else 0
+            balance_before = 0
+            balance_after = 0
+            if opener_raw and opener_raw.isdigit() and item:
+                refund_amount = _token_price_for_item(item)
+                if refund_amount > 0:
+                    balance_before = await get_user_balance(opener_raw)
+                    balance_after = balance_before + refund_amount
+                    await increment_user_balance(opener_raw, refund_amount)
 
-        await _save_redemption_transcript(
-            interaction.channel,
-            interaction.user,
-            item,
-            token_cost,
-            balance_before,
-            balance_after,
-            outcome="refunded",
-        )
+            await _save_redemption_transcript(
+                interaction.channel,
+                interaction.user,
+                item,
+                token_cost,
+                balance_before,
+                balance_after,
+                outcome="refunded",
+            )
+
         await interaction.channel.delete(
             reason=f"Redemption ticket refunded and deleted by {interaction.user}"
         )
@@ -629,35 +648,39 @@ class RedemptionClosedOptionsView(discord.ui.View):
 
         await interaction.response.defer(ephemeral=True)
 
-        item = _extract_topic_value(interaction.channel.topic, "item") or ""
-        budget_raw = _extract_topic_value(interaction.channel.topic, "budget_usd")
-        try:
-            cost = (
-                float(budget_raw)
-                if budget_raw is not None
-                else _budget_cost_for_item(item)
+        # Claim the closure BEFORE deducting from budget so a crash-then-reclick can't
+        # double-count the spend. If already claimed, skip straight to the delete.
+        if await claim_redemption_closure(interaction.channel.id, "budget"):
+            item = _extract_topic_value(interaction.channel.topic, "item") or ""
+            budget_raw = _extract_topic_value(interaction.channel.topic, "budget_usd")
+            try:
+                cost = (
+                    float(budget_raw)
+                    if budget_raw is not None
+                    else _budget_cost_for_item(item)
+                )
+            except ValueError:
+                cost = _budget_cost_for_item(item)
+
+            opener_raw = _extract_topic_value(
+                interaction.channel.topic, "redemption-opener"
             )
-        except ValueError:
-            cost = _budget_cost_for_item(item)
+            token_cost = _token_price_for_item(item) if item else 0
+            current_balance = 0
+            if opener_raw and opener_raw.isdigit():
+                current_balance = await get_user_balance(opener_raw)
 
-        opener_raw = _extract_topic_value(
-            interaction.channel.topic, "redemption-opener"
-        )
-        token_cost = _token_price_for_item(item) if item else 0
-        current_balance = 0
-        if opener_raw and opener_raw.isdigit():
-            current_balance = await get_user_balance(opener_raw)
+            await _save_redemption_transcript(
+                interaction.channel,
+                interaction.user,
+                item,
+                token_cost,
+                current_balance + token_cost,
+                current_balance,
+                outcome="fulfilled",
+            )
+            await add_budget_spent(cost)
 
-        await _save_redemption_transcript(
-            interaction.channel,
-            interaction.user,
-            item,
-            token_cost,
-            current_balance + token_cost,
-            current_balance,
-            outcome="fulfilled",
-        )
-        await add_budget_spent(cost)
         await interaction.channel.delete(
             reason=f"Redemption fulfilled and deleted by {interaction.user}"
         )
@@ -946,19 +969,35 @@ class ShopPaginationView(discord.ui.View):
         await interaction.response.edit_message(embed=self.create_embed(), view=self)
 
 
-class DropView(discord.ui.View):
-    def __init__(self, amount, on_claim=None):
-        super().__init__(timeout=None)
-        self.amount = amount
-        self.claimed = False
-        self.on_claim = on_claim
+class DropClaimButton(
+    discord.ui.DynamicItem[discord.ui.Button],
+    template=r"drop_claim:(?P<amount>\d+)",
+):
+    """Persistent claim button for supply/booster/admin drops.
 
-    @discord.ui.button(
-        label="Claim Supply Drop", style=discord.ButtonStyle.green, emoji="🎁"
-    )
-    async def claim_callback(
-        self, interaction: discord.Interaction, button: discord.ui.Button
-    ):
+    The token amount rides in the custom_id (`drop_claim:{amount}`) so the button
+    survives a restart: registered once via `bot.add_dynamic_items(DropClaimButton)`
+    in Economy.cog_load, discord.py rebuilds it from the custom_id for interactions
+    on drop messages sent before the restart — which the old plain View (no custom_id,
+    never re-registered) could not do, leaving outstanding drops permanently dead.
+    """
+
+    def __init__(self, amount: int):
+        self.amount = amount
+        super().__init__(
+            discord.ui.Button(
+                label="Claim Supply Drop",
+                style=discord.ButtonStyle.green,
+                emoji="🎁",
+                custom_id=f"drop_claim:{amount}",
+            )
+        )
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match):
+        return cls(int(match["amount"]))
+
+    async def callback(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
 
         if any(role.id == MODERATOR_ROLE_ID for role in interaction.user.roles):
@@ -967,34 +1006,46 @@ class DropView(discord.ui.View):
             )
             return
 
-        if self.claimed:
+        # Atomic, restart-safe single-claim guard (replaces the in-memory `claimed`
+        # flag, which reset on restart and raced across the defer() above).
+        message = interaction.message
+        if not await claim_drop(str(message.id), str(interaction.user.id)):
             await interaction.followup.send("❌ Already claimed!", ephemeral=True)
             return
 
-        self.claimed = True
+        # 1. Pay atomically ($inc) — no read-modify-write.
+        await increment_user_balance(str(interaction.user.id), self.amount)
 
-        # 1. Update Database
-        uid = str(interaction.user.id)
-        current_bal = await get_user_balance(uid)
-        await update_user_balance(uid, current_bal + self.amount)
+        # 2. Clear the booster-drop marker if this was the live booster drop. The
+        #    persistent button has no on_claim closure, so do it here directly.
+        if message.channel.id == BOOSTER_CHANNEL_ID:
+            if await get_setting("booster_drop_message_id") == str(message.id):
+                await set_setting("booster_drop_message_id", "")
 
-        # 2. Update Button to "Claimed"
-        button.disabled = True
-        button.label = f"Claimed by {interaction.user.display_name}"
-        button.style = discord.ButtonStyle.secondary
+        # 3. Update the button to "Claimed" and edit the message.
+        self.item.disabled = True
+        self.item.label = f"Claimed by {interaction.user.display_name}"
+        self.item.style = discord.ButtonStyle.secondary
+        view = discord.ui.View(timeout=None)
+        view.add_item(self)
 
-        # 3. Edit Message
-        embed = interaction.message.embeds[0]
+        embed = message.embeds[0]
         embed.color = discord.Color.light_grey()
-        embed.description = f"**📦 CLAIMED!**\n\n**{interaction.user.mention}** grabbed **{self.amount} Tokens**!"
-
-        await interaction.edit_original_response(embed=embed, view=self)
+        embed.description = (
+            f"**📦 CLAIMED!**\n\n**{interaction.user.mention}** grabbed "
+            f"**{self.amount} Tokens**!"
+        )
+        await interaction.edit_original_response(embed=embed, view=view)
         await interaction.followup.send(
             f"🎉 **+{self.amount} Tokens** added to your account!", ephemeral=True
         )
 
-        if self.on_claim:
-            await self.on_claim(interaction)
+
+def build_drop_view(amount: int) -> discord.ui.View:
+    """A persistent (timeout=None) view carrying one DropClaimButton."""
+    view = discord.ui.View(timeout=None)
+    view.add_item(DropClaimButton(amount))
+    return view
 
 
 # --- COG ---
@@ -1006,14 +1057,42 @@ class Economy(commands.Cog):
         self.supply_drop_task.start()
         self.booster_drop_task.start()
         self.redemption_queue_task.start()
+        self.pending_redemption_reconcile_task.start()
+        self.booster_drop_reconcile_task.start()
 
     async def cog_load(self):
         self.bot.add_view(RedemptionClosedOptionsView())
+        # Persistent drop-claim button: re-registered so outstanding supply/booster/
+        # admin drops stay claimable after a restart (the amount rides in the
+        # custom_id). Without this every pre-restart drop button is inert.
+        self.bot.add_dynamic_items(DropClaimButton)
+        try:
+            await ensure_drop_claims_ttl_index()
+        except Exception as e:
+            print(f"⚠️ Economy: could not create drop_claims TTL index: {e}")
 
     def cog_unload(self):
         self.supply_drop_task.cancel()
         self.booster_drop_task.cancel()
         self.redemption_queue_task.cancel()
+        self.pending_redemption_reconcile_task.cancel()
+        self.booster_drop_reconcile_task.cancel()
+
+    # --- BOOSTER DROP MARKER RECONCILE (crash recovery) ---
+    @tasks.loop(count=1)
+    async def booster_drop_reconcile_task(self):
+        """Cold-boot-only. If a crash left a booster_drop_message_id marker set,
+        resolve it immediately instead of waiting up to ~4h for the next drop to
+        expire it lazily. _expire_previous_booster_drop edits the stale drop to
+        EXPIRED (or clears the marker if the message is gone)."""
+        await self.bot.wait_until_ready()
+        channel = self.bot.get_channel(BOOSTER_CHANNEL_ID)
+        if not channel:
+            return
+        try:
+            await self._expire_previous_booster_drop(channel)
+        except Exception as e:
+            print(f"❌ Booster drop marker reconcile failed: {e}")
 
     # --- REDEMPTION QUEUE PROCESSING ---
     @tasks.loop(hours=1)
@@ -1034,6 +1113,182 @@ class Economy(commands.Cog):
 
         await set_setting("redemption_queue_processed_month", current_key)
 
+    # --- PENDING REDEMPTION RECONCILE (crash recovery) ---
+    @tasks.loop(count=1)
+    async def pending_redemption_reconcile_task(self):
+        """Runs once per process, after the bot is ready. A cog is loaded once
+        and not re-added on gateway reconnect, so this is cold-boot-only — there
+        are no in-flight redemptions to race, hence no stale-age gate is needed."""
+        await self.bot.wait_until_ready()
+        # Independent try/except so a failure in one reconcile can't skip the
+        # other on a given boot.
+        try:
+            await self.reconcile_pending_redemptions()
+        except Exception as e:
+            print(f"❌ Pending redemption reconcile failed: {e}")
+        try:
+            await self.reconcile_redemption_queue()
+        except Exception as e:
+            print(f"❌ Redemption queue reconcile failed: {e}")
+
+    async def reconcile_pending_redemptions(self):
+        """Resolve pending-redemption markers left over from a crash.
+
+        Decidable per marker so it never both keeps a ticket and refunds
+        (double value), nor does neither (silent loss):
+        - has channel_id  -> the ticket was created -> clear, no refund.
+        - no channel_id   -> scan the redemption category by topic; if a matching
+          ticket exists (crash landed in the create->persist window) adopt it with
+          no refund, otherwise refund the item and clear.
+        """
+        pending = await get_all_pending_redemptions()
+        if not pending:
+            return
+
+        category = self.bot.get_channel(REDEMPTION_TICKET_CATEGORY_ID)
+        open_tickets = (
+            list(category.text_channels)
+            if isinstance(category, discord.CategoryChannel)
+            else None
+        )
+
+        for row in pending:
+            user_id = row["user_id"]
+            pending_id = row["id"]
+            item = row["item"]
+
+            # Ticket was created (channel_id persisted) -> item already delivered
+            # to a ticket. Never refund, whether or not the channel still exists.
+            if row.get("channel_id") is not None:
+                await clear_pending_redemption(user_id, pending_id)
+                continue
+
+            # No channel_id: the ticket may still have been created just before
+            # the crash. Can't verify without the category -> leave the marker for
+            # a later reconcile rather than risk a double refund.
+            if open_tickets is None:
+                print(
+                    "⚠️ Redemption reconcile: category unavailable, deferring "
+                    f"pending redemption {pending_id} for {user_id}."
+                )
+                continue
+
+            ticket_exists = any(
+                _extract_topic_value(ch.topic, "redemption-opener") == str(user_id)
+                and _extract_topic_value(ch.topic, "item") == item
+                for ch in open_tickets
+            )
+
+            if ticket_exists:
+                # Crash in the create->persist window; ticket is real, no refund.
+                await clear_pending_redemption(user_id, pending_id)
+            else:
+                # Crash before/at ticket creation; the token was consumed with no
+                # ticket ever made -> refund it.
+                await add_item_token(user_id, item, quantity=1)
+                await clear_pending_redemption(user_id, pending_id)
+                print(
+                    f"↩️ Redemption reconcile: refunded {item} to {user_id} "
+                    "(no ticket found for crashed redemption)."
+                )
+
+    async def reconcile_redemption_queue(self):
+        """Resolve redemption-queue entries claimed but never removed — a crash
+        between the claim and the removal in process_redemption_queue (ticket
+        creation) or in a refund path (staff remove / member-left drop).
+
+        Decidable per entry so it never both keeps a ticket and refunds (double
+        value), nor does neither (silent loss):
+        - has refund_kind -> a claimed refund -> pay it idempotently (token or
+          item, per kind) and drop the entry; replaying a completed refund is a
+          no-op via the per-entry receipt in apply_queue_refund.
+        - has channel_id  -> the ticket was created -> drop the entry, no refund.
+        - no channel_id   -> scan the redemption category by topic; if a matching
+          ticket exists (crash landed in the create->persist window) drop it with
+          no refund, otherwise return the item and drop the entry.
+        """
+        entries = await get_stuck_redemption_queue_entries()
+        if not entries:
+            return
+
+        category = self.bot.get_channel(REDEMPTION_TICKET_CATEGORY_ID)
+        open_tickets = (
+            list(category.text_channels)
+            if isinstance(category, discord.CategoryChannel)
+            else None
+        )
+
+        for entry in entries:
+            entry_id = str(entry["_id"])
+            user_id = entry["user_id"]
+            item = entry["item"]
+
+            # Refund claim (staff /redemption-queue-remove or a member-left drop
+            # that crashed before paying). Must be handled BEFORE the channel_id /
+            # topic-scan ticket logic below: a refund entry has no channel_id and
+            # no ticket, so that logic would wrongly return an item — even for a
+            # token refund — and without the idempotency receipt. apply_queue_refund
+            # is idempotent per entry, so replaying a completed refund is a no-op.
+            refund_kind = entry.get("refund_kind")
+            if refund_kind is not None:
+                if refund_kind == "tokens":
+                    refund = _token_price_for_item(item)
+                    await apply_queue_refund(user_id, entry_id, tokens=refund)
+                    note = f"{refund:,} R7 tokens refunded"
+                else:  # "item"
+                    await apply_queue_refund(user_id, entry_id, item=item)
+                    note = "the item was returned to their inventory"
+                await remove_redemption_queue_entry(entry_id)
+                transcript_channel = self.bot.get_channel(
+                    REDEMPTION_TRANSCRIPT_CHANNEL_ID
+                )
+                if transcript_channel:
+                    await transcript_channel.send(
+                        f"↩️ Queued **{item}** redemption refund for <@{user_id}> "
+                        f"was completed after a restart — {note}."
+                    )
+                continue
+
+            # Channel recorded -> the ticket was created. Never refund, whether or
+            # not the channel still exists.
+            if entry.get("channel_id") is not None:
+                await remove_redemption_queue_entry(entry_id)
+                continue
+
+            # No channel_id: the ticket may still have been created just before
+            # the crash. Can't verify without the category -> leave the entry for
+            # a later reconcile rather than risk a double (ticket + refund).
+            if open_tickets is None:
+                print(
+                    "⚠️ Redemption queue reconcile: category unavailable, "
+                    f"deferring entry {entry_id} for {user_id}."
+                )
+                continue
+
+            ticket_exists = any(
+                _extract_topic_value(ch.topic, "redemption-opener") == str(user_id)
+                and _extract_topic_value(ch.topic, "item") == item
+                for ch in open_tickets
+            )
+
+            if ticket_exists:
+                # Crash in the create->persist window; ticket is real, no refund.
+                await remove_redemption_queue_entry(entry_id)
+            else:
+                # Crash before/at ticket creation; the queued item was consumed
+                # with no ticket ever made -> return it to the member's inventory.
+                await add_item_token(user_id, item, quantity=1)
+                await remove_redemption_queue_entry(entry_id)
+                transcript_channel = self.bot.get_channel(
+                    REDEMPTION_TRANSCRIPT_CHANNEL_ID
+                )
+                if transcript_channel:
+                    await transcript_channel.send(
+                        f"↩️ Queued **{item}** redemption for <@{user_id}> could not "
+                        "be completed (bot restarted before the ticket opened) — the "
+                        "item was returned to their inventory."
+                    )
+
     async def process_redemption_queue(self):
         """Fulfills queued redemptions FIFO against the new month's budget.
 
@@ -1050,13 +1305,39 @@ class Economy(commands.Cog):
             user_id = entry["user_id"]
             cost = _budget_cost_for_item(item)
 
+            # A claimed entry is a crash leftover (ticket may already exist) — it
+            # belongs to the cold-boot reconcile, never reprocess it here.
+            if entry.get("claimed_at") is not None:
+                continue
+
             member = guild.get_member(int(user_id))
             if member is None:
-                # Opener left the server — drop the entry and refund tokens.
-                await remove_redemption_queue_entry(str(entry["_id"]))
+                # A cache miss (e.g. right after a restart) does NOT mean the
+                # user left. Confirm against the API before dropping/refunding.
+                try:
+                    member = await guild.fetch_member(int(user_id))
+                except discord.NotFound:
+                    member = None  # Genuinely left — fall through to refund.
+                except discord.HTTPException as e:
+                    # Transient error — leave the entry queued, retry next cycle.
+                    print(
+                        f"⚠️ Redemption queue: fetch_member failed for "
+                        f"{user_id}, retrying next cycle: {e}"
+                    )
+                    continue
+
+            if member is None:
+                # Opener left the server — refund tokens and drop the entry.
+                # Claim first so a crash between the entry removal and the refund
+                # can't lose the tokens: the claimed entry is skipped by the loop
+                # above and resolved (idempotently) by the cold-boot reconcile. A
+                # lost claim means a racing staff-remove or reconcile owns it.
+                eid = str(entry["_id"])
+                if await claim_redemption_queue_refund(eid, "tokens") is None:
+                    continue
                 refund = _token_price_for_item(item)
-                if refund > 0:
-                    await increment_user_balance(user_id, refund)
+                await apply_queue_refund(user_id, eid, tokens=refund)
+                await remove_redemption_queue_entry(eid)
                 transcript_channel = self.bot.get_channel(
                     REDEMPTION_TRANSCRIPT_CHANNEL_ID
                 )
@@ -1073,12 +1354,21 @@ class Economy(commands.Cog):
             if cost > available:
                 continue
 
+            # Claim before creating so a crash between the ticket creation and
+            # the entry removal can't double-create on the next run: the claimed
+            # entry is skipped above and resolved by the cold-boot reconcile.
+            if not await claim_redemption_queue_entry(str(entry["_id"])):
+                continue
+
             try:
-                await create_redemption_ticket(guild, member, item, cost)
+                ch = await create_redemption_ticket(guild, member, item, cost)
                 await _increment_redeem_counter(item)
+                # Record the channel so a crash after this point is decidable on
+                # reconcile (channel present → ticket exists → no refund).
+                await set_redemption_queue_entry_channel(str(entry["_id"]), ch.id)
             except Exception as e:
                 print(f"❌ Failed to open queued redemption for {user_id}: {e}")
-                continue
+                continue  # leave it claimed; cold-boot reconcile resolves it
 
             await remove_redemption_queue_entry(str(entry["_id"]))
 
@@ -1116,9 +1406,12 @@ class Economy(commands.Cog):
                 booster_xp_bonus = 1
 
             # --- TRACK DAILY MESSAGE COUNT (tied to /daily cooldown window) ---
-            # Format: "LAST_DAILY_TIMESTAMP:COUNT" — resets when user claims /daily
-            last_daily_str = await get_setting(f"daily_{user_id}")
-            window_key = last_daily_str if last_daily_str else "0"
+            # Format: "LAST_DAILY_TIMESTAMP:COUNT" — resets when user claims /daily.
+            # The window key is the /daily cooldown, which lives on the user doc
+            # (daily_last_claimed). The count itself stays in settings on purpose.
+            user_doc = await get_user_data(user_id)
+            last_daily_ts = user_doc.get("daily_last_claimed")
+            window_key = str(last_daily_ts) if last_daily_ts else "0"
 
             daily_msg_data = await get_setting(
                 f"daily_msg_count_{user_id}", f"{window_key}:0"
@@ -1156,9 +1449,15 @@ class Economy(commands.Cog):
                 if is_booster and random.random() < 0.35:
                     earned_tokens += 1
 
-                current_balance = await get_user_balance(user_id)
-                await update_user_balance(user_id, current_balance + earned_tokens)
+                # Stamp the cooldown BEFORE granting so a crash between the two
+                # writes loses a tiny 2-6 token reward rather than re-awarding on
+                # the next message. (Balance lives on the user doc and the cooldown
+                # in settings, so they can't be one atomic write — stamp-first is the
+                # crash-safe ordering.) Grant via atomic $inc, no read-modify-write.
+                # NOTE: this deliberately reverses #412's paid-first choice; there the
+                # reward was large enough to prioritize never-lose over never-double.
                 await set_setting(f"last_message_{user_id}", str(current_timestamp))
+                await increment_user_balance(user_id, earned_tokens)
 
             # --- PART 2: XP & LEVELING ---
             EXP_PER_MESSAGE = 10
@@ -1208,7 +1507,7 @@ class Economy(commands.Cog):
             description=f"A crate containing **{amount} R7 Tokens** has landed!\n\n**Click FAST to claim it!**",
             color=discord.Color.red(),
         )
-        await channel.send(embed=embed, view=DropView(amount))
+        await channel.send(embed=embed, view=build_drop_view(amount))
         print(f"🪂 Auto-Drop sent: {amount} tokens")
 
     # --- BOOSTER CHANNEL DROP TASK ---
@@ -1237,12 +1536,10 @@ class Economy(commands.Cog):
             color=discord.Color.fuchsia(),
         )
 
-        async def on_claim(interaction: discord.Interaction):
-            stored_id = await get_setting("booster_drop_message_id")
-            if stored_id == str(interaction.message.id):
-                await set_setting("booster_drop_message_id", "")
-
-        msg = await channel.send(embed=embed, view=DropView(amount, on_claim=on_claim))
+        # The claim button clears booster_drop_message_id itself (see
+        # DropClaimButton.callback) — no on_claim closure needed, which is what
+        # lets the button survive a restart as a persistent dynamic item.
+        msg = await channel.send(embed=embed, view=build_drop_view(amount))
         await set_setting("booster_drop_message_id", str(msg.id))
         print(f"🚀 Booster drop sent: {amount} tokens")
 
@@ -1296,7 +1593,7 @@ class Economy(commands.Cog):
             description=f"Admin summoned **{amount} R7 Tokens**!",
             color=discord.Color.gold(),
         )
-        view = DropView(amount)
+        view = build_drop_view(amount)
         await target_channel.send(embed=embed, view=view)
         await interaction.response.send_message(
             f"✅ Drop sent to {target_channel.mention}!", ephemeral=True
@@ -1365,13 +1662,27 @@ class Economy(commands.Cog):
             await interaction.response.send_message(embed=embed, ephemeral=True)
             return
 
-        new_balance = balance - price
-        await update_user_balance(user_id, new_balance)
-        await add_item_token(user_id, item)
-        if discount_applied:
-            # Marked only after a completed purchase, so a failed balance
-            # check doesn't consume the monthly discount.
-            await set_booster_discount_month(user_id, _budget_month_key())
+        # Deduct tokens, grant the item, and (for boosters) stamp the monthly
+        # discount in a single atomic document update. Both effects live on the
+        # one users doc, so a crash can never leave the tokens gone without the
+        # item. The `balance >= price` guard also blocks a concurrent balance
+        # write (e.g. a drop claim) from letting the purchase go through twice or
+        # drive the balance negative.
+        discount_month = _budget_month_key() if discount_applied else None
+        purchased = await purchase_item(user_id, item, price, discount_month)
+        if not purchased:
+            # Lost a race: the balance dropped below the price between the check
+            # and the commit. No tokens were spent and no item was granted.
+            fresh = await get_user_balance(user_id)
+            embed = discord.Embed(
+                title="❌ **Insufficient Balance**",
+                description=f"You need **{int(price - fresh)} more R7 tokens** to purchase **{item_info['display']}**.",
+                color=discord.Color.red(),
+            )
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+            return
+
+        new_balance = await get_user_balance(user_id)
 
         description = (
             f"You have purchased **{item_info['display']}**!\n"
@@ -1454,6 +1765,8 @@ class Economy(commands.Cog):
 
         await interaction.response.defer()
 
+        pending_id = None
+        ticket_created = False
         try:
             # Re-check after defer in case a concurrent redemption claimed
             # the remaining budget.
@@ -1467,12 +1780,29 @@ class Economy(commands.Cog):
                     )
                     return
 
-            await remove_item_token(user_id, item)
-            await _increment_redeem_counter(item)
+            # Consume the token and write a durable pending marker in one atomic
+            # op, so a hard crash before the ticket exists is recoverable on
+            # startup (reconcile_pending_redemptions). None => the item was
+            # claimed by a concurrent redemption; abort without side effects.
+            pending_id = await begin_pending_redemption(user_id, item, budget_cost)
+            if pending_id is None:
+                await interaction.followup.send(
+                    "❌ That item is no longer available on your account. "
+                    "Please run `/redeem` again.",
+                    ephemeral=True,
+                )
+                return
 
             ch = await create_redemption_ticket(
                 interaction.guild, interaction.user, item, budget_cost
             )
+            ticket_created = True
+
+            # Record the ticket so a crash after this point is decidable on
+            # reconcile (ticket exists → no refund), then finish bookkeeping.
+            await set_pending_redemption_channel(user_id, pending_id, ch.id)
+            await _increment_redeem_counter(item)
+            await clear_pending_redemption(user_id, pending_id)
 
             instructions = _redemption_instructions(item)
             embed = discord.Embed(
@@ -1483,7 +1813,14 @@ class Economy(commands.Cog):
             await interaction.followup.send(embed=embed)
 
         except Exception as e:
-            await add_item_token(user_id, item, quantity=1)
+            # In-process failure: self-heal now. (A hard crash skips this handler;
+            # the startup reconcile covers that case.) Refund only when no ticket
+            # was created — if one was, the token was delivered, so just drop the
+            # marker to avoid a double (ticket + refund).
+            if pending_id is not None:
+                if not ticket_created:
+                    await add_item_token(user_id, item, quantity=1)
+                await clear_pending_redemption(user_id, pending_id)
             await interaction.followup.send(
                 f"❌ **Error** Failed to create ticket: {e}", ephemeral=True
             )
@@ -1494,8 +1831,13 @@ class Economy(commands.Cog):
         now = datetime.utcnow()
 
         # 1. FETCH DATA
-        last_daily_str = await get_setting(f"daily_{user_id}")
-        window_key = last_daily_str if last_daily_str else "0"
+        # The cooldown lives on the user doc (daily_last_claimed) so the grant + stamp
+        # can be one atomic write (see claim_daily_reward). The daily message counter
+        # deliberately stays in settings (daily_msg_count_{uid}) — it isn't part of the
+        # atomic claim, so it's fine to keep it where it is.
+        user_doc = await get_user_data(user_id)
+        last_daily_ts = user_doc.get("daily_last_claimed")
+        window_key = str(last_daily_ts) if last_daily_ts else "0"
 
         daily_msg_data = await get_setting(
             f"daily_msg_count_{user_id}", f"{window_key}:0"
@@ -1504,8 +1846,8 @@ class Economy(commands.Cog):
         msg_count = int(count) if stored_window_key == window_key else 0
 
         cooldown_remaining = None
-        if last_daily_str:
-            last_daily = datetime.utcfromtimestamp(float(last_daily_str))
+        if last_daily_ts:
+            last_daily = datetime.utcfromtimestamp(float(last_daily_ts))
             time_since = now - last_daily
             if time_since < timedelta(days=1):
                 cooldown_remaining = timedelta(days=1) - time_since
@@ -1551,11 +1893,24 @@ class Economy(commands.Cog):
                 booster_bonus = 20
         final_tokens += booster_bonus
 
-        current_balance = await get_user_balance(user_id)
-        new_balance = current_balance + final_tokens
+        # Atomically stamp the cooldown AND grant the tokens in one write, so a crash
+        # can't land between "tokens granted" and "cooldown stamped" and let the user
+        # claim twice. If the claim loses the cooldown predicate (a concurrent or
+        # duplicate invoke slipped past the check above), treat it as on cooldown
+        # instead of granting again.
+        now_ts = now.timestamp()
+        cutoff_ts = (now - timedelta(days=1)).timestamp()
+        updated = await claim_daily_reward(user_id, final_tokens, cutoff_ts, now_ts)
+        if updated is None:
+            embed = discord.Embed(
+                title="🔒 Daily Reward Status",
+                description="You've already claimed your daily reward. Try again later!",
+                color=discord.Color.orange(),
+            )
+            await interaction.response.send_message(embed=embed, ephemeral=False)
+            return
 
-        await update_user_balance(user_id, new_balance)
-        await set_setting(f"daily_{user_id}", str(now.timestamp()))
+        new_balance = updated.get("balance", 0)
 
         description = (
             f"You received **{final_tokens} R7 tokens**!\n"
@@ -1768,14 +2123,19 @@ class Economy(commands.Cog):
             )
             return
 
-        doc = await remove_redemption_queue_entry(entry_id)
+        # Claim before paying so a crash between the entry removal and the item
+        # grant can't lose the item: the claimed entry is resolved by the
+        # cold-boot reconcile, and apply_queue_refund is idempotent per entry.
+        doc = await claim_redemption_queue_refund(entry_id, "item")
         if doc is None:
             await interaction.response.send_message(
-                "❌ Queue entry not found.", ephemeral=True
+                "❌ Queue entry not found, or it's already being processed.",
+                ephemeral=True,
             )
             return
 
-        await add_item_token(doc["user_id"], doc["item"])
+        await apply_queue_refund(doc["user_id"], entry_id, item=doc["item"])
+        await remove_redemption_queue_entry(entry_id)
         embed = discord.Embed(
             title="✅ **Queue Entry Removed**",
             description=(
@@ -1991,7 +2351,8 @@ class Economy(commands.Cog):
             "`/buy` - Purchase an item from the shop\n"
             "`/redeem` - Claim your purchased rewards\n\n"
             "**Utility:**\n"
-            "`/check-budget` - See remaining monthly reward budget"
+            "`/check-budget` - See remaining monthly reward budget\n"
+            "`/redemption-queue` - View your queued redemptions"
         )
         cmd_embed.description = cmd_text
 
