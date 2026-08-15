@@ -58,12 +58,10 @@ The leaderboard paginates using `get_leaderboard_page(offset, per_page)` — a M
 
 ## Supply Drop (`/drop <amount>`)
 
-Admin command. Distributes tokens to members active in the general channel:
-1. Reads recent messages from `GENERAL_CHANNEL_ID`
-2. Collects unique non-bot member IDs
-3. Divides `amount` among them (or gives `amount` to each — depends on config)
-4. Calls `update_user_balance()` for each recipient
-5. Posts a confirmation embed listing recipients and amount per person
+Admin command. Posts a single claimable crate that the first clicker wins:
+1. Builds an embed with a persistent `DropClaimButton` via `build_drop_view(amount)`
+2. Posts the crate to the channel
+3. The **first** user to click the button wins the full `amount` (single-claim guard via the `drop_claims` collection)
 
 ---
 

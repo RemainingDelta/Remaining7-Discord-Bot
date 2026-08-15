@@ -44,6 +44,7 @@ Key fields:
 | `gems` | int | Brawl gems |
 | `inventory` | list | Shop items purchased |
 | `queue_refunds_done` | list | Entry-id receipts guarding redemption-queue refund idempotency — an id is added atomically with the refund `$inc` (`apply_queue_refund`), so a reconcile replay after a crash is a no-op. Append-only (not pruned). |
+| `pending_redemptions` | list | Crash-safety markers written by the crash-safe `/redeem` flow. Each entry has `id`, `item`, `budget_usd`, `channel_id` (null until the ticket is created), and `created_at`. Exists so a crash between removing the item token and creating the redemption ticket is reconcilable on boot. |
 
 **Self-healing**: `get_user_data()` upserts a default document if one doesn't exist, including Shelly at Level 1. This means any command can safely call `get_user_data()` without checking for existence first.
 
@@ -100,14 +101,14 @@ Fields: `reason`, `matcherino`, `alts: list[str]`, `admin_id`, `timestamp`.
 ### `payouts`
 Pending staff payouts. One document per staff member with a non-zero balance.
 
-Fields: `user_id`, `balance` (float, USD), `name`.
+Fields: `_id` (the user id string), `amount` (float, the pending total in USD), `unpaid_batches` (list of batch_id strings).
 
 ---
 
 ### `payout_logs`
 Archived batch payout records. Each document is a batch:
 
-Fields: `batch_id`, `users: list[{user_id, name, amount}]`, `mode` (`"split"` or `"flat"`), `timestamp`, `total`.
+Fields: `batch_id` (string, deterministic sha1-derived id; `_id` is keyed on `batch_id` via upsert), `timestamp`, `amount` (float, the per-person amount), `user_ids` (list of user id strings), `reason` (string).
 
 ---
 
@@ -154,7 +155,7 @@ Audit log for poll reward distributions. Tracks `message_id` of processed polls 
 ---
 
 ### `reward_payouts`
-Per-recipient, two-state ledger **shared by `/event-rewards` and `/poll-rewards`** — prevents double-paying when either command is re-run after a crash/restart. One document per recipient per source message. (Message IDs are globally-unique Discord snowflakes, so event and poll rows never collide on the composite key.)
+Per-recipient, two-state ledger **shared by `/event-rewards`, `/poll-rewards`, and `/payout-add`** — prevents double-paying when any of these commands is re-run after a crash/restart. One document per recipient per source message (or per payout batch). (Message IDs and batch IDs are distinct keys, so event, poll, and payout rows never collide on the composite key.)
 
 `_id = "{message_id}:{user_id}"` (composite key; each user appears at most once per source message).
 
@@ -162,9 +163,9 @@ Per-recipient, two-state ledger **shared by `/event-rewards` and `/poll-rewards`
 |-------|------|---------|
 | `message_id` | str | Source announcement or poll message |
 | `user_id` | str | Recipient |
-| `amount` | int | Tokens owed on this line |
+| `amount` | int/float | Owed on this line — int tokens for `event`/`poll`, float USD for `payout` batches |
 | `admin_id` | str | Admin who ran the payout |
-| `source` | str | `"event"` or `"poll"` — which command claimed the row (informational; recovery is `/give` either way) |
+| `source` | str | `"event"`, `"poll"`, or `"payout"` — which command claimed the row (informational; recovery is `/give` either way) |
 | `paid` | bool | `False` at claim (before the balance `$inc`), flipped `True` after it lands |
 | `claimed_at` | datetime | When the row was claimed |
 | `paid_at` | datetime | When confirmed paid (or resolved) |
@@ -206,6 +207,15 @@ Monthly processing is **crash-safe** (claim → create ticket → record `channe
 
 ---
 
+### `redemption_closures`
+Claim guard for redemption-ticket closes. `_id` = the ticket channel id.
+
+Fields: `action`, `claimed_at`.
+
+Ensures a redemption ticket close (refund or budget-deduct) runs its money step at most once, even if the close button is clicked again after a crash.
+
+---
+
 ### `scam_purge_sessions`
 Crash-safety record for the scam-image cross-channel purge (`features/scam_detection.py`). One document per purge job; `_id` is an ObjectId. See `docs/SCAM_DETECTION.md` → **Crash-Safe Purge**.
 
@@ -225,15 +235,15 @@ The purge writes this doc **before any deletes**, `$addToSet`s each channel into
 
 ---
 
-### `sticky`
+### `sticky_messages`
 Sticky message data per channel. `_id = str(channel_id)`.
 
 Fields: `content`, `attachment_url`, `message_id` (last posted sticky message to delete on repost).
 
 ---
 
-### `counting_state`
-Single document tracking the current count game state.
+### `counting`
+Stores the current count game state as a single document (`_id = "state"`).
 
 Fields: `count` (int), `last_user_id` (str).
 

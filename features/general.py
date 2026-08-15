@@ -39,7 +39,8 @@ class General(commands.Cog):
             "`/shop` - Browse the token store\n"
             "`/buy` - Purchase an item from the shop\n"
             "`/redeem` - Claim your purchased rewards\n"
-            "`/check-budget` - See remaining monthly reward budget"
+            "`/check-budget` - See remaining monthly reward budget\n"
+            "`/redemption-queue` - View your queued redemptions"
         )
         embed.add_field(name="💰 Economy", value=economy_text, inline=False)
 
@@ -64,7 +65,7 @@ class General(commands.Cog):
 
         translation_text = (
             "`!t [language]` - Reply to a message to translate it into English (e.g., `!t spanish`)\n"
-            "`/translate` - Translate your English text into 55 other languages"
+            "`/translate` - Translate your English text into 53 other languages"
         )
         embed.add_field(name="🌐 Translation", value=translation_text, inline=False)
 
@@ -108,13 +109,15 @@ class General(commands.Cog):
         # Economy Oversight
         economy_text = (
             "`/give <user> <type> <amount>` - Manually grant Tokens, XP, or Levels.\n"
-            "`/set-balance <user> <amount>` - Directly set a user's token balance."
+            "`/set-balance <user> <amount>` - Directly set a user's token balance.\n"
+            "`/redemption-queue-list` - View queued redemptions awaiting budget.\n"
+            "`/redemption-queue-remove <entry_id>` - Remove a queued redemption."
         )
         embed.add_field(name="💰 Economy Oversight", value=economy_text, inline=False)
 
         # Security Protocol
         security_text = (
-            "`/hacked <user> [days]` - Times out a user and purges recent messages.\n"
+            "`/hacked <user>` - Times out a user and purges recent messages.\n"
             "`!hacked` (Prefix) - Reply to a message with this to trigger the protocol.\n"
             "`/unhacked <user>` - Removes hacked flag and clears timeout.\n"
             "`/hacked-list` - View all users currently flagged as compromised."
@@ -167,21 +170,23 @@ class General(commands.Cog):
             "`/drop <amount>` - Manual supply drop in general.\n"
             "`/give <user> <tokens/xp> <amount>` - Grant resources.\n"
             "`/set-balance <user> <amount>` - Hard reset of a user's tokens.\n"
-            "`/perm <add/remove> <user>` - Manage bot command access."
+            "`/set-budget <amount>` - Override the monthly reward budget.\n"
+            "`/perm <user> <add/remove>` - Manage bot command access."
         )
         embed.add_field(name="💰 Economy Management", value=economy_text, inline=False)
 
         # --- Event Operations ---
         event_text = (
-            "`/event-rewards <msg_id>` - Process token distribution from an announcement message.\n"
-            "`/poll-rewards <msg_id>` - Distribute tokens to all users who voted on a poll.\n"
+            "`/event-rewards <message_id>` - Process token distribution from an announcement message.\n"
+            "`/poll-rewards <message_id> <answer> <amount>` - Distribute tokens to users who voted a given answer.\n"
+            "`/check-stuck-payouts [resolve]` - List (or resolve) event payouts claimed but never confirmed paid.\n"
             "*(Requires formatting: @User 500 for event-rewards)*"
         )
         embed.add_field(name="🏆 Event Operations", value=event_text, inline=False)
 
         # --- Security & Hacked Protocol ---
         security_text = (
-            "`/hacked <user> [days]` - 7-day timeout + global message purge.\n"
+            "`/hacked <user>` - 7-day timeout + global message purge.\n"
             "`/unhacked <user>` - Recover account (clear timeout/flag).\n"
             "`/hacked-list` - View all currently compromised accounts."
         )
