@@ -21,13 +21,15 @@ Records a payout for one or more staff members.
 → Alice: $50, Bob: $50
 ```
 
-Internally, `add_payout_batch()` upserts each user's balance in the `payouts` collection (adds to existing balance, doesn't overwrite) and inserts a batch record in `payout_logs`.
+Internally, `add_payout_batch()` is **crash-safe**. It derives a deterministic `batch_id` (sha1 of the sorted `user_ids` + per-person amount + reason, truncated), does an idempotent upsert into `payout_logs` keyed on `batch_id` (so a re-run of the identical batch does not append a duplicate log row), and claims each recipient in the shared `reward_payouts` ledger (`source="payout"`) **before** applying the `$inc` to their `payouts` doc. As a result, re-running an identical `/payout-add` after a mid-loop crash credits only users who were never reached and never double-pays.
+
+**Trade-off:** two intentionally-identical payouts (same users, same per-person amount, same reason) hash to the same `batch_id`, so the second is treated as a retry and skipped. Vary the reason to force a distinct batch.
 
 ---
 
 ## `/payout-list`
 
-Reads all documents from the `payouts` collection where `balance > 0` (pending/unpaid). Displays as an embed listing each staff member and their owed balance.
+Reads all documents from the `payouts` collection where `amount > 0` (queries `{"amount": {"$gt": 0}}`; pending/unpaid). Displays as an embed listing each staff member and their owed balance.
 
 ---
 
@@ -42,10 +44,9 @@ Reads from `payout_logs` — the full audit trail of every payout batch that has
 Clears a staff member's pending balance:
 
 1. Reads current balance from `payouts`
-2. Writes a final "settled" record to `payout_logs` with `outcome: "paid"`
-3. Sets `balance = 0` (or deletes the document) in `payouts`
+2. Sets `amount = 0` and clears `unpaid_batches` on the payouts doc (via `clear_pending_payout`)
 
-This is the "I paid them" action. After reset, the staff member no longer appears in `/payout-list`.
+No log or "settled" record is written to `payout_logs`. This is the "I paid them" action. After reset, the staff member no longer appears in `/payout-list`.
 
 ---
 
@@ -55,22 +56,19 @@ This is the "I paid them" action. After reset, the staff member no longer appear
 ```json
 {
   "_id": "user_discord_id",
-  "user_name": "StaffMember",
-  "balance": 75.00
+  "amount": 75.00,
+  "unpaid_batches": ["batch_id_1", "batch_id_2"]
 }
 ```
 
 ### `payout_logs` collection
 ```json
 {
-  "batch_id": "uuid",
-  "users": [
-    {"user_id": "123", "name": "Alice", "amount": 50.0},
-    {"user_id": "456", "name": "Bob", "amount": 50.0}
-  ],
-  "mode": "split",
-  "total": 100.0,
-  "timestamp": "2026-06-21T00:00:00Z"
+  "batch_id": "sha1-derived-id",
+  "timestamp": "2026-06-21T00:00:00Z",
+  "amount": 50.0,
+  "user_ids": ["123", "456"],
+  "reason": "Tournament staffing"
 }
 ```
 

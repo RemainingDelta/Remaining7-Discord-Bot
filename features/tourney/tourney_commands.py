@@ -2776,7 +2776,8 @@ def setup_tourney_commands(bot: commands.Bot):
 
         treasury_text = (
             "`/payout-list` - View your personal and team pending payout totals.\n"
-            "`/payout-history` - View the audit log for group payout additions."
+            "`/payout-history` - View the audit log for group payout additions.\n"
+            "`/monthly-report [month] [year]` - Generate or re-generate a monthly tournament report."
         )
         embed.add_field(name="💰 Treasury & Logs", value=treasury_text, inline=False)
 

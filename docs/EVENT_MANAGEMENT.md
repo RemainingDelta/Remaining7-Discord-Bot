@@ -47,8 +47,10 @@ Bot flow:
 1. Fetches the message by ID from the current channel
 2. Parses each line with a regex: `@mention + integer`
 3. Displays a confirmation embed listing all recipients and amounts
-4. On confirm, calls `update_user_balance()` for each recipient
+4. On confirm, pays each recipient through the shared `reward_payouts` ledger in a **claim → pay → commit** sequence: `claim_reward_payout(..., source="event")` → `increment_user_balance` → `mark_reward_paid`
 5. Posts a final embed confirming distribution
+
+This flow (v1.12.0) is **crash-safe** — a crash-and-retry never double-pays, because a recipient already claimed in the ledger is skipped on re-run. A cold-boot `reconcile_reward_payouts` task recovers stuck claims (rows claimed but never confirmed paid), and `/check-stuck-payouts [resolve]` lets an admin list or resolve those stuck payouts.
 
 ---
 
@@ -59,8 +61,8 @@ Distributes tokens to all users who voted on a Discord poll:
 1. Fetches the poll message by ID
 2. Reads all reactions (or poll voters depending on Discord.py version)
 3. Collects unique non-bot voter IDs
-4. Distributes a fixed token amount to each (amount configured as command parameter or hardcoded)
-5. Checks `processed_poll_rewards` MongoDB collection to prevent double-paying the same poll
+4. Distributes a fixed token amount to each (amount configured as command parameter or hardcoded), claiming each voter in the shared per-voter `reward_payouts` ledger (`source="poll"`) before crediting — so a crash-and-retry never double-pays an individual voter
+5. Checks `processed_poll_rewards` MongoDB collection to prevent double-paying the same poll (a fast-path whole-message gate that sits above the per-voter ledger)
 6. Logs the processed poll ID to prevent future duplicates
 
 ---

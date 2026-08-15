@@ -2351,7 +2351,8 @@ class Economy(commands.Cog):
             "`/buy` - Purchase an item from the shop\n"
             "`/redeem` - Claim your purchased rewards\n\n"
             "**Utility:**\n"
-            "`/check-budget` - See remaining monthly reward budget"
+            "`/check-budget` - See remaining monthly reward budget\n"
+            "`/redemption-queue` - View your queued redemptions"
         )
         cmd_embed.description = cmd_text
 
