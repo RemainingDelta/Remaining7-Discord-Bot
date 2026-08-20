@@ -1,0 +1,42 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 -c \"\nimport sys, os, json, subprocess\ndata = json.load(sys.stdin)\nfp = data.get('tool_input', {}).get('file_path', '')\nif not fp.endswith('.py'):\n    sys.exit(0)\nopen('/tmp/r7-files-changed', 'w').close()\nresult = subprocess.run(['make', 'fix'], capture_output=True, text=True, cwd=os.environ['CLAUDE_PROJECT_DIR'])\nif result.stdout:\n    print(result.stdout, end='')\nif result.stderr:\n    print(result.stderr, end='', file=sys.stderr)\nsys.exit(result.returncode)\n\""
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/require-tests.sh",
+            "args": [],
+            "timeout": 10,
+            "statusMessage": "Checking for test coverage on this branch"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/stop-checks.sh",
+            "args": [],
+            "timeout": 30,
+            "statusMessage": "Checking config, restarting bot..."
+          }
+        ]
+      }
+    ]
+  }
+}
