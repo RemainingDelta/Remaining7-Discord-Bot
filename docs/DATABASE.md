@@ -249,6 +249,27 @@ Fields: `count` (int), `last_user_id` (str).
 
 ---
 
+### `story`
+Stores the live collaborative story as a single document (`_id = "state"`).
+
+Fields: `words` (array of str, in order), `last_user_id` (int), `active` (bool — whether the listener is accepting words; toggled by `/story-start` vs `/story-end`/`/story-reset`).
+
+---
+
+### `story_archive`
+One document per completed/reset story, inserted by `reset_story()`.
+
+Fields: `words` (array of str), `archived_at` (datetime).
+
+---
+
+### `story_config`
+Admin-configurable moderation lists, one document per list.
+
+Documents: `_id = "banned_words"` and `_id = "banned_chars"`, each with `items` (array of str). When the `banned_chars` document is absent, the code defaults to `["_"]` so multi-word entries like `I_am_a_noob` can't bypass the one-word rule. The `banned_words` document is populated on first run by fetching a public profanity list (LDNOOBW) — the words are not stored in the repo.
+
+---
+
 ### `tourney_snapshots`
 Bracket progress snapshots for POC data collection (optional).
 

@@ -75,6 +75,13 @@ class General(commands.Cog):
         )
         embed.add_field(name="🔢 Counting Game", value=counting_text, inline=False)
 
+        story_text = (
+            "Build a story one word per message in the story channel while it's active!\n"
+            "`/story-see` - View the story so far\n"
+            "*(One word per message — no spaces, emojis, or banned words, and you can't go twice in a row)*"
+        )
+        embed.add_field(name="📖 One-Word Story", value=story_text, inline=False)
+
         utility_text = (
             "`/booster-perks` - View all Server Booster perks\n"
             "`/convert-time` - Convert a date and time to Discord timestamp formats\n"
@@ -143,6 +150,15 @@ class General(commands.Cog):
             "`!unsticky` - Remove the active sticky message from a channel."
         )
         embed.add_field(name="🔧 Server Tools", value=tools_text, inline=False)
+
+        story_text = (
+            "`/story-start` - Open a new story (activates the channel).\n"
+            "`/story-end` - Publish, archive & close the current story.\n"
+            "`/story-reset` - Silently archive & clear the story.\n"
+            "`/story-banword add|remove|list` - Manage banned words.\n"
+            "`/story-banchar add|remove|list` - Manage banned characters."
+        )
+        embed.add_field(name="📖 One-Word Story", value=story_text, inline=False)
 
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
