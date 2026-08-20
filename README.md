@@ -45,6 +45,7 @@ Remaining7-Discord-Bot/
 │   ├── general.py                   # /help, /mod-help, /admin-help, /version, /convert-time
 │   ├── translation.py               # !t prefix & /translate slash command (54 languages)
 │   ├── counting.py                  # Sequential counting game with /set-count
+│   ├── story.py                     # Collaborative one-word story game (staff-run, moderated)
 │   ├── sticky.py                    # !sticky / !unsticky persistent channel messages
 │   ├── support_tickets.py           # General support tickets (issues, support, apps, partnership)
 │   ├── github_tickets.py           # AI-powered GitHub issue creation from tickets (Gemini)
@@ -226,6 +227,11 @@ Every user always has **4 active quests** — one daily and one weekly per categ
 ### Counting Game
 - Sequential counting game in a designated channel — users must send the next number in sequence.
 - `/set-count <number>` (Staff) — manually set the current count.
+
+### One-Word Story
+- Collaborative story built one word per message in a designated channel, active only between staff `/story-start` and `/story-end`. Each accepted word gets a ✅; invalid messages (multi-word, emojis, banned words/characters, same user twice in a row) are removed.
+- Configurable, MongoDB-backed banned-word and banned-character lists (the default profanity list is fetched from a public source, not committed to the repo).
+- `/story-see` — view the current story. `/story-start`, `/story-end`, `/story-reset`, `/story-banword`, `/story-banchar` (Staff) — run and moderate stories.
 
 ### Sticky Messages
 - `!sticky <message>` — pin a message that reposts automatically when other messages are sent. Usable by Admins and Event Staff.

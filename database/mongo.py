@@ -2,6 +2,7 @@ from datetime import datetime, timedelta
 import hashlib
 import os
 import re
+import aiohttp
 import motor.motor_asyncio
 import certifi
 from bson import ObjectId
@@ -774,6 +775,152 @@ async def update_counting_state(current_count: int, last_user_id: int | None):
         },
         upsert=True,
     )
+
+
+# --- STORY HELPERS ---
+
+# Seeded so users can't smuggle multi-word entries like "I_am_a_noob"
+# past the one-word check. Applies only until a banned_chars doc exists.
+STORY_DEFAULT_BANNED_CHARS = ["_"]
+
+STORY_BANNED_WORDS_URL = (
+    "https://raw.githubusercontent.com/LDNOOBW/"
+    "List-of-Dirty-Naughty-Obscene-and-Otherwise-Bad-Words/master/en"
+)
+
+
+def parse_banned_words(text: str) -> list[str]:
+    """Parse a newline-delimited word list into a deduped, lowercased list,
+    skipping blank and comment lines."""
+    seen: set[str] = set()
+    out: list[str] = []
+    for line in text.splitlines():
+        word = line.strip().lower()
+        if not word or word.startswith("#") or word in seen:
+            continue
+        seen.add(word)
+        out.append(word)
+    return out
+
+
+async def seed_default_banned_words() -> bool:
+    """Fetch the default profanity list from a public URL and store it in
+    story_config once. No-op if a banned_words document already exists (so staff
+    edits are never clobbered), if there's no DB, or if the fetch fails. Returns
+    True only when it actually seeds. The word list itself is never committed to
+    this repo; only its source URL lives here."""
+    if db is None:
+        return False
+    if await db.story_config.find_one({"_id": "banned_words"}):
+        return False
+    try:
+        timeout = aiohttp.ClientTimeout(total=10)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.get(STORY_BANNED_WORDS_URL) as resp:
+                resp.raise_for_status()
+                text = await resp.text()
+    except Exception as e:
+        print(f"⚠️ Story: could not fetch default banned-words list: {e}")
+        return False
+    words = parse_banned_words(text)
+    if not words:
+        return False
+    await db.story_config.update_one(
+        {"_id": "banned_words"}, {"$set": {"items": words}}, upsert=True
+    )
+    print(f"✅ Story: seeded {len(words)} default banned words")
+    return True
+
+
+async def get_story_state() -> dict:
+    if db is None:
+        return {"words": [], "last_user_id": None, "active": False}
+    doc = await db.story.find_one({"_id": "state"})
+    if not doc:
+        return {"words": [], "last_user_id": None, "active": False}
+    return {
+        "words": doc.get("words", []),
+        "last_user_id": doc.get("last_user_id"),
+        "active": doc.get("active", False),
+    }
+
+
+async def set_story_active(active: bool):
+    if db is None:
+        return
+    await db.story.update_one(
+        {"_id": "state"}, {"$set": {"active": active}}, upsert=True
+    )
+
+
+async def append_story_word(word: str, user_id: int):
+    if db is None:
+        return
+    await db.story.update_one(
+        {"_id": "state"},
+        {
+            "$push": {"words": word},
+            "$set": {"last_user_id": user_id},
+        },
+        upsert=True,
+    )
+
+
+async def reset_story():
+    """Archive the current story (if any words) to story_archive, then clear
+    the live state document."""
+    if db is None:
+        return
+    doc = await db.story.find_one({"_id": "state"})
+    if doc and doc.get("words"):
+        await db.story_archive.insert_one(
+            {
+                "words": doc.get("words", []),
+                "archived_at": datetime.utcnow(),
+            }
+        )
+    await db.story.delete_one({"_id": "state"})
+
+
+async def get_story_banlist(kind: str) -> list[str]:
+    """kind is 'banned_words' or 'banned_chars'. Returns the seeded default
+    only when no config document exists yet. The banned_words list has no
+    in-repo default — it's fetched into the DB by seed_default_banned_words()."""
+    default = STORY_DEFAULT_BANNED_CHARS if kind == "banned_chars" else []
+    if db is None:
+        return list(default)
+    doc = await db.story_config.find_one({"_id": kind})
+    if not doc:
+        return list(default)
+    return doc.get("items", [])
+
+
+async def add_story_banlist_item(kind: str, item: str) -> bool:
+    """Returns True if added, False if already present (or no DB)."""
+    if db is None:
+        return False
+    items = await get_story_banlist(kind)
+    if item in items:
+        return False
+    items.append(item)
+    await db.story_config.update_one(
+        {"_id": kind}, {"$set": {"items": items}}, upsert=True
+    )
+    return True
+
+
+async def remove_story_banlist_item(kind: str, item: str) -> bool:
+    """Returns True if removed, False if not present (or no DB)."""
+    if db is None:
+        return False
+    items = await get_story_banlist(kind)
+    if item not in items:
+        return False
+    items.remove(item)
+    await db.story_config.update_one(
+        {"_id": kind}, {"$set": {"items": items}}, upsert=True
+    )
+    return True
 
 
 # --- LEADERBOARD HELPERS ---
