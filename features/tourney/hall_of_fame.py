@@ -17,12 +17,14 @@ to the original warning -- never to a button click or a restart -- so the
 schedule is identical whether staff acknowledge it or ignore it.
 """
 
+import asyncio
 import json
 
 from features.config import HOF_MAX_ATTEMPTS, HOF_RETRY_INTERVAL_SECONDS
 
 __all__ = [
     "HOF_MAX_ATTEMPTS",
+    "cancel_task_slot",
     "HOF_RETRY_INTERVAL_SECONDS",
     "PENDING_HOF_KEY",
     "fresh_marker",
@@ -135,3 +137,17 @@ def hof_marker_loads(raw: str | None) -> dict | None:
         }
     except (ValueError, TypeError):
         return None
+
+
+def cancel_task_slot(slot: list) -> None:
+    """Clear a single-slot task holder, cancelling the task unless it is the caller.
+
+    The retry loop clears its own slot on the way out. Cancelling the running
+    task there would raise CancelledError at its next suspension point and skip
+    the remaining cleanup -- closing the alert message and dropping the marker --
+    so a self-clearing task only empties the slot and returns normally.
+    """
+    task = slot[0]
+    if task is not None and task is not asyncio.current_task() and not task.done():
+        task.cancel()
+    slot[0] = None

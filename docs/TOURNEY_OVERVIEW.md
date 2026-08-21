@@ -82,6 +82,54 @@ Because the bot auto-resumes, re-running `!starttourney` while a session is acti
 
 ---
 
+## Hall of Fame Prize Pool
+
+`/hall-of-fame` (and the `!endtourney` auto-post) reads the total prize pool by scraping the
+Matcherino tournament page. That scrape can fail, and the failure used to be invisible: the amount
+defaulted to `0.0`, so a broken read was published as a permanent public `$0.00` embed while staff
+were told the post succeeded.
+
+The scrape now distinguishes three outcomes:
+
+| Page shows | Result | Behaviour |
+|------------|--------|-----------|
+| `$1,250.00` | `1250.0` | Posts normally |
+| `$0.00` | `0.0` | Posts normally — a free tourney is a real value, not an error |
+| element absent, no `<span>`, unparseable text, or the request fails twice | `None` | **Nothing is posted** |
+
+When the amount is unknown, the bot posts an alert to `#tourney-admin` instead, with two controls:
+
+- **Set prize pool manually** — a modal that takes the amount and publishes the Hall of Fame with it.
+- **Acknowledge** — records that staff saw the alert. It deliberately does *not* reschedule
+  anything; see below.
+
+### Retry schedule
+
+Retries are anchored to the **original alert**, never to a button click or a restart:
+`first_alerted_at + HOF_RETRY_INTERVAL_SECONDS * attempt`. With the defaults in `features/config.py`
+(`HOF_RETRY_INTERVAL_SECONDS = 3600`, `HOF_MAX_ATTEMPTS = 3`) that is the initial attempt, then one
+retry at +1h and one at +2h. After the third, the alert closes with a "set it manually" message.
+
+Because the schedule is fixed at alert time, ignoring the alert and clicking **Acknowledge** produce
+identical timing — which is why that button is not labelled "retry in 1 hour".
+
+State lives in the `pending_hall_of_fame` settings doc (`PENDING_HOF_KEY`), so a restart re-arms the
+retry via `hof_reconcile_task` on the `QueueDashboard` cog; an already-elapsed deadline fires
+immediately. The scheduling rules themselves are in `features/tourney/hall_of_fame.py`, kept free of
+Discord and Mongo so they are unit-testable (`tests/test_hall_of_fame.py`).
+
+### Superseding
+
+Only one Hall of Fame alert is ever pending. A new `/hall-of-fame` run while one is outstanding
+cancels the in-flight retry, edits the old alert to "superseded" and strips its buttons, then starts
+fresh — attempt count back to 1, hour re-anchored to the new alert.
+
+Two races this opens are handled explicitly: before posting, recent `#hall-of-fame` history is
+scanned for an existing embed linking the same tournament (so a cancelled loop that already posted
+can't cause a duplicate), and a modal submitted after a supersede is rejected rather than published.
+
+---
+
 ## SA Region Mode
 
 When `!starttourney sa` is used:
@@ -121,6 +169,7 @@ Active sessions are stored in `tourney_sessions`:
 | `match_refresher_task` | 1 minute | Refreshes Matcherino scores in each active ticket |
 | `auto_disable_slowmode` | 1 hour (one-shot) | Removes slowmode from general channel |
 | `auto_reopen` (lock) | 6 hours (one-shot) | Re-opens `OTHER_TICKET_CHANNEL_ID` |
+| `_hof_retry_loop` | 1 hour (up to 2 retries) | Re-reads an unavailable Hall of Fame prize pool |
 
 ---
 
@@ -128,3 +177,4 @@ Active sessions are stored in `tourney_sessions`:
 - `features/tourney/tourney_commands.py` — `!starttourney`, `!endtourney`, queue and progress dashboards
 - `features/tourney/tourney_utils.py` — ticket creation, closing, deletion, reopening
 - `features/tourney/tourney_views.py` — UI buttons and modals
+- `features/tourney/hall_of_fame.py` — Hall of Fame prizepool retry scheduling (pure, unit-tested)

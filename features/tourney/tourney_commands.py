@@ -13,6 +13,17 @@ from .matcherino import (
     find_match_by_team_name,
     clear_bracket_teams_cache,
 )
+from .hall_of_fame import (
+    HOF_MAX_ATTEMPTS,
+    cancel_task_slot,
+    PENDING_HOF_KEY,
+    fresh_marker,
+    hof_marker_dumps,
+    hof_marker_loads,
+    marker_after_failed_attempt,
+    next_hof_retry_at,
+    should_supersede,
+)
 
 from database.mongo import (
     add_payout_batch,
@@ -253,6 +264,433 @@ async def _arm_winner_retry(
     )
 
 
+# =========================================================================
+#  HALL OF FAME PRIZEPOOL RETRY (#443)
+#
+#  Matcherino's page sometimes yields no prize pool. Publishing the post anyway
+#  is what produced permanent public "$0.00" embeds, so instead we alert
+#  #tourney-admin, offer a manual override, and retry -- anchored to the
+#  original alert, capped at HOF_MAX_ATTEMPTS. The scheduling rules live in
+#  hall_of_fame.py so they can be unit-tested without a Discord harness.
+# =========================================================================
+
+# In-process handle for the pending retry. The persisted marker is the source of
+# truth across restarts, but a marker overwrite can't stop a task that is already
+# sleeping -- so a superseding run needs this handle to cancel it, or the old
+# loop wakes up later and double-posts. Same single-slot pattern as
+# slowmode_auto_disable_task.
+hof_retry_task: list[asyncio.Task | None] = [None]
+
+
+def _hof_alert_embed(
+    matcherino_id: str,
+    tourney_name: str,
+    attempt: int,
+    next_retry_at: float | None,
+    resolution: str | None = None,
+) -> discord.Embed:
+    """The #tourney-admin alert. `resolution` set means it is finished."""
+    link = f"https://matcherino.com/tournaments/{matcherino_id}"
+    if resolution:
+        return discord.Embed(
+            title="🏆 Hall of Fame — prize pool",
+            url=link,
+            description=resolution,
+            color=discord.Color.greyple(),
+        )
+
+    lines = [
+        f"Could not read the prize pool for **{tourney_name}** from Matcherino, "
+        "so the Hall of Fame post was **not** published.",
+        "",
+        f"Attempt **{attempt}/{HOF_MAX_ATTEMPTS}**.",
+    ]
+    if next_retry_at is not None:
+        lines.append(f"Next automatic retry: <t:{int(next_retry_at)}:R>.")
+    else:
+        lines.append("No retries left — set the amount manually.")
+    return discord.Embed(
+        title="⚠️ Hall of Fame — prize pool unavailable",
+        url=link,
+        description="\n".join(lines),
+        color=discord.Color.orange(),
+    )
+
+
+async def _edit_hof_alert(bot, marker: dict, resolution: str) -> None:
+    """Close out an alert message: final text, controls removed."""
+    try:
+        channel = bot.get_channel(marker["alert_channel_id"])
+        if not isinstance(channel, discord.TextChannel):
+            return
+        message = await channel.fetch_message(marker["alert_message_id"])
+        await message.edit(
+            embed=_hof_alert_embed(
+                marker["matcherino_id"], "", marker["attempt"], None, resolution
+            ),
+            view=None,
+        )
+    except Exception as e:
+        print(f"[HOF] could not edit alert message: {e}")
+
+
+async def _clear_pending_hof(bot, marker: dict | None, resolution: str | None) -> None:
+    """Cancel the in-flight retry, close the alert, and drop the marker."""
+    cancel_task_slot(hof_retry_task)
+    if marker and resolution:
+        await _edit_hof_alert(bot, marker, resolution)
+    await set_setting(PENDING_HOF_KEY, "")
+
+
+async def _hof_already_posted(guild, matcherino_id: str) -> bool:
+    """True if a Hall of Fame post for this tournament is already up.
+
+    Guards the double-post window a supersede opens: the loop being cancelled
+    may have posted moments earlier. Same history-scan self-heal that
+    _post_pending_winner uses.
+    """
+    channel = guild.get_channel(HALL_OF_FAME_CHANNEL_ID)
+    if not isinstance(channel, discord.TextChannel):
+        return False
+    link = f"https://matcherino.com/tournaments/{matcherino_id}"
+    try:
+        async for recent in channel.history(limit=20):
+            if recent.author == guild.me and any(e.url == link for e in recent.embeds):
+                return True
+    except Exception as e:
+        print(f"[HOF] duplicate check failed: {e}")
+    return False
+
+
+async def _hof_retry_loop(bot, guild_id: int, marker: dict):
+    """Sleep until this marker's retry time, then re-run the Hall of Fame post.
+
+    This loop owns the attempt budget: run_hall_of_fame only reports whether an
+    attempt succeeded. Deadlines come from the marker's original alert time, so
+    they are unaffected by button clicks and survive restarts (the boot reconcile
+    re-arms from the persisted marker).
+    """
+    try:
+        while True:
+            due = next_hof_retry_at(marker["first_alerted_at"], marker["attempt"])
+            delay = due - _now_ts()
+            if delay > 0:
+                await asyncio.sleep(delay)
+
+            guild = bot.get_guild(guild_id)
+            if guild is None:
+                print("[HOF] retry aborted: guild unavailable")
+                return
+
+            success, _ = await run_hall_of_fame(
+                bot, guild, marker["matcherino_id"], _retry_marker=marker
+            )
+            if success:
+                return
+
+            nxt = marker_after_failed_attempt(marker)
+            if nxt is None:
+                await _clear_pending_hof(
+                    bot,
+                    marker,
+                    f"❌ Gave up after {HOF_MAX_ATTEMPTS} attempts — the prize pool "
+                    "could not be read. Publish it with `/hall-of-fame` and the "
+                    "`prize_pool` option.",
+                )
+                return
+
+            marker = nxt
+            await set_setting(PENDING_HOF_KEY, hof_marker_dumps(marker))
+            await _refresh_hof_alert(bot, marker)
+    except asyncio.CancelledError:
+        return
+    except Exception as e:
+        print(f"[HOF] retry loop error: {e}")
+
+
+async def _refresh_hof_alert(bot, marker: dict, tourney_name: str = "") -> None:
+    """Re-render a live alert with its new attempt count and next retry time."""
+    try:
+        channel = bot.get_channel(marker["alert_channel_id"])
+        if not isinstance(channel, discord.TextChannel):
+            return
+        message = await channel.fetch_message(marker["alert_message_id"])
+        await message.edit(
+            embed=_hof_alert_embed(
+                marker["matcherino_id"],
+                tourney_name,
+                marker["attempt"],
+                next_hof_retry_at(marker["first_alerted_at"], marker["attempt"]),
+            ),
+            view=HallOfFamePrizeView(bot),
+        )
+    except Exception as e:
+        print(f"[HOF] could not refresh alert: {e}")
+
+
+async def _arm_hof_retry(bot, guild_id: int, marker: dict) -> None:
+    """Persist the marker and start the retry loop, replacing any in flight."""
+    await set_setting(PENDING_HOF_KEY, hof_marker_dumps(marker))
+    cancel_task_slot(hof_retry_task)
+    hof_retry_task[0] = asyncio.create_task(_hof_retry_loop(bot, guild_id, marker))
+
+
+class HallOfFamePrizeModal(discord.ui.Modal, title="Set Hall of Fame prize pool"):
+    """Manual override for a prize pool the bot could not read."""
+
+    amount = discord.ui.TextInput(
+        label="Total prize pool (USD)",
+        placeholder="1250.00",
+        max_length=20,
+        required=True,
+    )
+
+    def __init__(self, bot, marker: dict):
+        super().__init__()
+        self.bot = bot
+        self.marker = marker
+
+    async def on_submit(self, interaction: discord.Interaction):
+        raw = str(self.amount.value).replace("$", "").replace(",", "").strip()
+        try:
+            value = float(raw)
+        except ValueError:
+            await interaction.response.send_message(
+                f"❌ `{self.amount.value}` is not a number.", ephemeral=True
+            )
+            return
+        if value < 0:
+            await interaction.response.send_message(
+                "❌ The prize pool cannot be negative.", ephemeral=True
+            )
+            return
+
+        # The alert may have been superseded while this modal sat open.
+        current = hof_marker_loads(await get_setting(PENDING_HOF_KEY))
+        if (
+            current is None
+            or current["alert_message_id"] != self.marker["alert_message_id"]
+        ):
+            await interaction.response.send_message(
+                "❌ This alert is no longer active — it was superseded or already "
+                "resolved. Run `/hall-of-fame` with the `prize_pool` option instead.",
+                ephemeral=True,
+            )
+            return
+
+        await interaction.response.defer(ephemeral=True)
+        success, message = await run_hall_of_fame(
+            self.bot,
+            interaction.guild,
+            current["matcherino_id"],
+            prize_pool=value,
+            _resolution=(
+                f"✅ Resolved — prize pool set manually to **${value:,.2f}** by "
+                f"{interaction.user.mention}."
+            ),
+        )
+        await interaction.followup.send(message, ephemeral=True)
+
+
+class HallOfFamePrizeView(discord.ui.View):
+    """Persistent controls on the #tourney-admin alert.
+
+    Static custom_ids are safe here: PENDING_HOF_KEY is a single settings doc, so
+    only one alert is ever live and the tournament id is read from the marker
+    rather than encoded per-message.
+    """
+
+    def __init__(self, bot):
+        super().__init__(timeout=None)
+        self.bot = bot
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if not isinstance(interaction.user, discord.Member) or not is_staff(
+            interaction.user
+        ):
+            await interaction.response.send_message(
+                "❌ Permission denied.", ephemeral=True
+            )
+            return False
+        return True
+
+    async def _marker_or_complain(self, interaction: discord.Interaction):
+        marker = hof_marker_loads(await get_setting(PENDING_HOF_KEY))
+        if marker is None:
+            await interaction.response.send_message(
+                "❌ This alert is no longer active.", ephemeral=True
+            )
+        return marker
+
+    @discord.ui.button(
+        label="Set prize pool manually",
+        style=discord.ButtonStyle.primary,
+        custom_id="hof_prize_set_manual",
+    )
+    async def set_manually(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ):
+        marker = await self._marker_or_complain(interaction)
+        if marker is None:
+            return
+        await interaction.response.send_modal(HallOfFamePrizeModal(self.bot, marker))
+
+    @discord.ui.button(
+        label="Acknowledge",
+        style=discord.ButtonStyle.secondary,
+        custom_id="hof_prize_acknowledge",
+    )
+    async def acknowledge(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ):
+        # Deliberately does not touch the schedule: the retry is anchored to the
+        # original alert, so acknowledging cannot move it. Labelled "Acknowledge"
+        # rather than "Retry in 1 hour" for that reason.
+        marker = await self._marker_or_complain(interaction)
+        if marker is None:
+            return
+        due = next_hof_retry_at(marker["first_alerted_at"], marker["attempt"])
+        await interaction.response.send_message(
+            f"👍 Acknowledged. The next automatic retry is still <t:{int(due)}:R> "
+            "— acknowledging does not reschedule it.",
+            ephemeral=True,
+        )
+
+
+async def run_hall_of_fame(
+    bot,
+    guild: discord.Guild,
+    tournament_id: str,
+    prize_pool: float | None = None,
+    _retry_marker: dict | None = None,
+    _resolution: str | None = None,
+) -> tuple[bool, str]:
+    """Fetch results for tournament_id and post them to the Hall of Fame channel.
+
+    Returns (success, message) instead of talking to a discord.Interaction so it
+    can be called from the /hall-of-fame slash command, from !endtourney, from the
+    retry loop and from the manual-override modal.
+
+    `prize_pool` overrides the scraped amount. When the amount cannot be read and
+    no override is given, nothing is posted: an alert goes to #tourney-admin and a
+    retry is armed. A new call always supersedes a pending alert.
+    """
+    target_channel = guild.get_channel(HALL_OF_FAME_CHANNEL_ID)
+    if not target_channel or not isinstance(target_channel, discord.TextChannel):
+        return (
+            False,
+            f"❌ Could not find Hall of Fame channel (ID: {HALL_OF_FAME_CHANNEL_ID}).",
+        )
+
+    clean_id = "".join(filter(str.isdigit, tournament_id))
+    # Blocking requests call -- keep it off the event loop.
+    data = await asyncio.to_thread(fetch_payout_report, clean_id)
+
+    if "error" in data:
+        return False, f"❌ **Error:** {data['error']}"
+
+    existing = hof_marker_loads(await get_setting(PENDING_HOF_KEY))
+    is_retry = _retry_marker is not None
+    # A fresh run supersedes whatever is pending; a retry is continuing its own.
+    superseding = not is_retry and should_supersede(existing, clean_id)
+
+    tourney_name = data["tourney_name"]
+    total = data["total"] if prize_pool is None else float(prize_pool)
+
+    if total is None:
+        if is_retry:
+            # The loop owns the attempt budget and the re-arm; just say it failed.
+            return False, "⚠️ Hall of Fame: prize pool still unavailable."
+
+        if superseding:
+            await _clear_pending_hof(
+                bot,
+                existing,
+                "⤻ Superseded by a newer `/hall-of-fame` run "
+                f"(tournament `{clean_id}`).",
+            )
+
+        admin_channel = bot.get_channel(TOURNEY_ADMIN_CHANNEL_ID)
+        if not isinstance(admin_channel, discord.TextChannel):
+            return (
+                False,
+                "❌ Could not read the prize pool from Matcherino, and the tourney "
+                "admin channel is unavailable to alert. Nothing was posted.",
+            )
+
+        now = _now_ts()
+        placeholder = _hof_alert_embed(
+            clean_id, tourney_name, 1, next_hof_retry_at(now, 1)
+        )
+        alert = await admin_channel.send(
+            embed=placeholder, view=HallOfFamePrizeView(bot)
+        )
+        await _arm_hof_retry(
+            bot,
+            guild.id,
+            fresh_marker(clean_id, guild.id, admin_channel.id, alert.id, now),
+        )
+        return (
+            False,
+            "⚠️ Could not read the prize pool from Matcherino, so nothing was "
+            f"posted. Alerted {admin_channel.mention} — it will retry automatically, "
+            "or set the amount there.",
+        )
+
+    # --- We have an amount (0.0 is legitimate: a free tourney) ---
+    if await _hof_already_posted(guild, clean_id):
+        await _clear_pending_hof(
+            bot, _retry_marker or existing, "✅ Already posted — nothing further to do."
+        )
+        return True, "ℹ️ A Hall of Fame post for this tournament already exists."
+
+    if prize_pool is None:
+        res = data["results"]
+        splits = (res["p1"], res["p2"], res["p3"], res["p4"])
+    else:
+        res = data["results"]
+        splits = (total * 0.50, total * 0.25, total * 0.15, total * 0.10)
+
+    link = f"https://matcherino.com/tournaments/{clean_id}"
+    embed = discord.Embed(
+        title=f"🏆 {tourney_name}",
+        url=link,
+        description=(
+            f"💰 **Total Prize:** ${total:.2f}\n\n"
+            f"🥇 **{res['1st']}** — ${splits[0]:.2f} (50%)\n"
+            f"🥈 **{res['2nd']}** — ${splits[1]:.2f} (25%)\n"
+            f"🥉 **{res['3rd']}** — ${splits[2]:.2f} (15%)\n"
+            f"4️⃣ **{res['4th']}** — ${splits[3]:.2f} (10%)"
+        ),
+        color=discord.Color.gold(),
+    )
+    embed.set_footer(text="Congratulations to the winners! 🎉")
+
+    try:
+        await target_channel.send(embed=embed)
+    except discord.Forbidden:
+        return (
+            False,
+            f"❌ I don't have permission to post in {target_channel.mention}.",
+        )
+
+    marker = _retry_marker or existing
+    if marker is not None:
+        if marker["matcherino_id"] != clean_id:
+            resolution = (
+                "⤻ Superseded by a newer `/hall-of-fame` run for tournament "
+                f"`{clean_id}`."
+            )
+        else:
+            resolution = _resolution or (
+                f"✅ Resolved — prize pool read as **${total:,.2f}**; "
+                "Hall of Fame posted."
+            )
+        await _clear_pending_hof(bot, marker, resolution)
+
+    return True, f"✅ Hall of Fame post sent to {target_channel.mention}!"
+
+
 class QueueDashboard(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
@@ -276,12 +714,33 @@ class QueueDashboard(commands.Cog):
         # The match_refresher starts automatically to monitor any active tickets
         self.match_refresher_task.start()
         self.winner_reconcile_task.start()
+        self.hof_reconcile_task.start()
 
     def cog_unload(self):
         self.dashboard_task.cancel()
         self.progress_dashboard_task.cancel()
         self.match_refresher_task.cancel()
         self.winner_reconcile_task.cancel()
+        self.hof_reconcile_task.cancel()
+
+    # --- HALL OF FAME PRIZEPOOL RECONCILE (crash recovery, #443) ---
+    @tasks.loop(count=1)
+    async def hof_reconcile_task(self):
+        """Cold-boot-only. Re-arm a pending prizepool retry from its persisted
+        marker; the in-process task did not survive the restart. The deadline is
+        anchored to the original alert, so an elapsed one fires immediately."""
+        await self.bot.wait_until_ready()
+        try:
+            marker = hof_marker_loads(await get_setting(PENDING_HOF_KEY))
+            if marker is None:
+                return
+            await _arm_hof_retry(self.bot, marker["guild_id"], marker)
+            print(
+                f"♻️ Hall of Fame prizepool retry re-armed "
+                f"(attempt {marker['attempt']}/{HOF_MAX_ATTEMPTS})."
+            )
+        except Exception as e:
+            print(f"❌ Hall of Fame prizepool reconcile failed: {e}")
 
     # --- WINNER ANNOUNCEMENT RECONCILE (crash recovery) ---
     @tasks.loop(count=1)
@@ -1291,6 +1750,10 @@ def setup_tourney_commands(bot: commands.Bot):
         None
     ]  # mutable container for closure
 
+    # Re-attach the Hall of Fame prizepool alert controls after a restart so the
+    # buttons on an outstanding alert keep working (#443).
+    bot.add_view(HallOfFamePrizeView(bot))
+
     @bot.command(name="close", aliases=["c"])
     async def close_command(ctx: commands.Context):
         """Close a tourney ticket (staff only)."""
@@ -1935,7 +2398,9 @@ def setup_tourney_commands(bot: commands.Bot):
             matcherino_id = session.get("matcherino_id")
             if matcherino_id:
                 try:
-                    payout_data = fetch_payout_report(str(matcherino_id))
+                    payout_data = await asyncio.to_thread(
+                        fetch_payout_report, str(matcherino_id)
+                    )
                     if "error" not in payout_data:
                         tourney_name = payout_data.get("tourney_name")
                 except Exception as e:
@@ -2023,7 +2488,9 @@ def setup_tourney_commands(bot: commands.Bot):
                 except Exception as e:
                     print(f"⚠️ Could not auto-generate Hall of Fame post: {e}")
                     await ctx.send(
-                        "⚠️ Hall of Fame auto-generation failed — run `/hall-of-fame` manually."
+                        f"⚠️ Hall of Fame auto-generation failed — run `/hall-of-fame` "
+                        f"manually (add `prize_pool:` if the amount can't be read). "
+                        f"Details: {e}"
                     )
         # ------------------------------
 
@@ -2355,62 +2822,29 @@ def setup_tourney_commands(bot: commands.Bot):
         )
 
     async def post_hall_of_fame(
-        guild: discord.Guild, tournament_id: str
+        guild: discord.Guild, tournament_id: str, prize_pool: float | None = None
     ) -> tuple[bool, str]:
-        """Fetch results for tournament_id and post them to the Hall of Fame channel.
+        """Thin wrapper so !endtourney keeps its existing call shape.
 
-        Returns (success, message) instead of talking to a discord.Interaction so it
-        can be called both from the /hall-of-fame slash command and from !endtourney.
+        All behaviour -- including the prizepool-unavailable alert and retry --
+        lives in the module-level run_hall_of_fame so the retry loop and the
+        override modal can reach it too.
         """
-        target_channel = guild.get_channel(HALL_OF_FAME_CHANNEL_ID)
-        if not target_channel or not isinstance(target_channel, discord.TextChannel):
-            return (
-                False,
-                f"❌ Could not find Hall of Fame channel (ID: {HALL_OF_FAME_CHANNEL_ID}).",
-            )
-
-        # Clean ID and fetch data using the new scraper
-        clean_id = "".join(filter(str.isdigit, tournament_id))
-        data = fetch_payout_report(clean_id)
-
-        if "error" in data:
-            return False, f"❌ **Error:** {data['error']}"
-
-        # Map variables for the embed
-        tourney_name = data["tourney_name"]
-        link = f"https://matcherino.com/tournaments/{clean_id}"
-        total = data["total"]
-        res = data["results"]
-
-        embed = discord.Embed(
-            title=f"🏆 {tourney_name}",
-            url=link,
-            description=(
-                f"💰 **Total Prize:** ${total:.2f}\n\n"
-                f"🥇 **{res['1st']}** — ${res['p1']:.2f} (50%)\n"
-                f"🥈 **{res['2nd']}** — ${res['p2']:.2f} (25%)\n"
-                f"🥉 **{res['3rd']}** — ${res['p3']:.2f} (15%)\n"
-                f"4️⃣ **{res['4th']}** — ${res['p4']:.2f} (10%)"
-            ),
-            color=discord.Color.gold(),
-        )
-        embed.set_footer(text="Congratulations to the winners! 🎉")
-
-        try:
-            await target_channel.send(embed=embed)
-            return True, f"✅ Hall of Fame post sent to {target_channel.mention}!"
-        except discord.Forbidden:
-            return (
-                False,
-                f"❌ I don't have permission to post in {target_channel.mention}.",
-            )
+        return await run_hall_of_fame(bot, guild, tournament_id, prize_pool=prize_pool)
 
     @app_commands.command(
         name="hall-of-fame",
         description="Automatically fetch results and post to Hall of Fame.",
     )
-    @app_commands.describe(tournament_id="The Matcherino ID (e.g. 183089)")
-    async def hall_of_fame(interaction: discord.Interaction, tournament_id: str):
+    @app_commands.describe(
+        tournament_id="The Matcherino ID (e.g. 183089)",
+        prize_pool="Override the total prize pool if the bot can't read it from the page",
+    )
+    async def hall_of_fame(
+        interaction: discord.Interaction,
+        tournament_id: str,
+        prize_pool: float | None = None,
+    ):
         if not isinstance(interaction.user, discord.Member) or not is_staff(
             interaction.user
         ):
@@ -2421,7 +2855,9 @@ def setup_tourney_commands(bot: commands.Bot):
 
         await interaction.response.defer()
 
-        success, message = await post_hall_of_fame(interaction.guild, tournament_id)
+        success, message = await post_hall_of_fame(
+            interaction.guild, tournament_id, prize_pool=prize_pool
+        )
         await interaction.followup.send(message, ephemeral=not success)
 
     # =========================================================================

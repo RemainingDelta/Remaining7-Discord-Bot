@@ -5,6 +5,7 @@ persistence and supersede rules can be tested without a Discord harness (the
 repo has none). The cog is a thin shell over these functions.
 """
 
+import asyncio
 import json
 
 import pytest
@@ -188,3 +189,65 @@ def test_superseding_resets_the_attempt_count_and_reanchors():
     assert new["attempt"] == 1
     assert new["first_alerted_at"] == later
     assert next_hof_retry_at(new["first_alerted_at"], new["attempt"]) == later + 3600
+
+
+# --- cancel_task_slot: a running task must not cancel itself ---
+
+
+async def test_cancel_task_slot_cancels_a_pending_task():
+    from features.tourney.hall_of_fame import cancel_task_slot
+
+    async def sleeper():
+        await asyncio.sleep(60)
+
+    task = asyncio.create_task(sleeper())
+    slot = [task]
+    await asyncio.sleep(0)
+    cancel_task_slot(slot)
+    assert slot[0] is None
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+
+async def test_cancel_task_slot_is_a_noop_on_an_empty_slot():
+    from features.tourney.hall_of_fame import cancel_task_slot
+
+    slot = [None]
+    cancel_task_slot(slot)
+    assert slot[0] is None
+
+
+async def test_cancel_task_slot_does_not_cancel_the_calling_task():
+    """The retry loop clears its own slot on the way out. If that cancelled the
+    running task, CancelledError would fire at the next await and skip the
+    remaining cleanup (closing the alert, dropping the marker)."""
+    from features.tourney.hall_of_fame import cancel_task_slot
+
+    reached_the_end = False
+
+    async def self_clearing():
+        nonlocal reached_the_end
+        cancel_task_slot(slot)
+        await asyncio.sleep(0)  # would raise here if we had cancelled ourselves
+        reached_the_end = True
+
+    slot = [None]
+    task = asyncio.create_task(self_clearing())
+    slot[0] = task
+    await task
+    assert reached_the_end is True
+    assert slot[0] is None
+
+
+async def test_cancel_task_slot_ignores_an_already_finished_task():
+    from features.tourney.hall_of_fame import cancel_task_slot
+
+    async def done_quick():
+        return 1
+
+    task = asyncio.create_task(done_quick())
+    await task
+    slot = [task]
+    cancel_task_slot(slot)
+    assert slot[0] is None
+    assert task.result() == 1
