@@ -44,7 +44,16 @@ esac
 [[ "$branch" =~ ^[0-9]+-(Bug|Feature|Enhancement)$ ]] || exit 0
 
 # --- does this branch touch tests? -------------------------------------------
-base=$(git merge-base dev HEAD 2>/dev/null)
+# Base off origin/dev, not the local dev ref. A local dev that has not been
+# fetched lately puts the merge-base further back, so test files from other
+# people's already-merged PRs get counted as "this branch touched tests" and the
+# gate silently opens. Fall back to local dev only if there is no remote ref.
+if git rev-parse --verify --quiet origin/dev >/dev/null; then
+  base_ref=origin/dev
+else
+  base_ref=dev
+fi
+base=$(git merge-base "$base_ref" HEAD 2>/dev/null)
 
 if [[ -n "$base" ]]; then
   committed=$(git diff --name-only "$base"...HEAD 2>/dev/null)

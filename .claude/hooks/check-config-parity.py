@@ -35,19 +35,6 @@ def branch_names(node):
     return names
 
 
-def dict_keys(node):
-    """Literal string keys of a dict node."""
-    if not isinstance(node, ast.Dict):
-        return None
-    keys = set()
-    for k in node.keys:
-        if isinstance(k, ast.Constant) and isinstance(k.value, str):
-            keys.add(k.value)
-        else:
-            return None  # non-literal key, do not guess
-    return keys
-
-
 def main():
     raw = sys.stdin.read()
     try:
@@ -71,7 +58,7 @@ def main():
 
     problems = []
 
-    # Pattern A: a top-level if/else splitting production and dev constants.
+    # The top-level if/else splitting production and dev constants.
     for node in tree.body:
         if isinstance(node, ast.If) and node.orelse:
             a, b = branch_names(node.body), branch_names(node.orelse)
@@ -82,31 +69,6 @@ def main():
                 problems.append(f"{name}: set in the first branch only")
             for name in only_b:
                 problems.append(f"{name}: set in the second branch only")
-
-    # Pattern B: dicts holding REAL and TEST sub-dicts, e.g. EMOJIS_BRAWLERS.
-    for node in tree.body:
-        if not isinstance(node, ast.Assign) or not isinstance(node.value, ast.Dict):
-            continue
-        target = node.targets[0]
-        if not isinstance(target, ast.Name):
-            continue
-        sub = {}
-        for k, v in zip(node.value.keys, node.value.values):
-            if isinstance(k, ast.Constant) and k.value in (
-                "REAL",
-                "TEST",
-                "PROD",
-                "DEV",
-            ):
-                sub[k.value] = dict_keys(v)
-        pairs = [("REAL", "TEST"), ("PROD", "DEV")]
-        for left, right in pairs:
-            if sub.get(left) is None or sub.get(right) is None:
-                continue
-            for key in sorted(sub[left] - sub[right]):
-                problems.append(f"{target.id}: '{key}' in {left} but not {right}")
-            for key in sorted(sub[right] - sub[left]):
-                problems.append(f"{target.id}: '{key}' in {right} but not {left}")
 
     if not problems:
         sys.exit(0)

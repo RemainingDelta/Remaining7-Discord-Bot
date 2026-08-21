@@ -4,14 +4,16 @@ test:
 	BOT_MODE=TEST pytest
 
 lint:
-	ruff check .
-	ruff format --check .
+	@ruff check . -q
+	@ruff format --check .
+	@echo "Lint passed"
 
 fix:
 	ruff check . --fix
 	ruff format .
 
-ci: lint test
+ci:
+	@$(MAKE) lint && $(MAKE) test && printf "\033[1;32mAll checks passed!\033[0m\n"
 
 up:
 	python main.py
@@ -23,3 +25,4 @@ endif
 	git add .
 	git commit -m "$(m)"
 	git push
+	
