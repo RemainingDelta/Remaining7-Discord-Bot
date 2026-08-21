@@ -96,3 +96,119 @@ def test_clear_bracket_teams_cache_idempotent():
     clear_bracket_teams_cache()
     clear_bracket_teams_cache()  # calling twice should not raise
     assert len(matcherino._bracket_teams_cache) == 0
+
+
+# =========================================================================
+#  Prize pool / tournament name parsing (issue #443)
+#
+#  The bug: total_prize was initialised to 0.0 and the name scrape shared a
+#  single bare-except try block with the prize scrape, so a failure to read
+#  the amount was indistinguishable from a genuinely $0 prizepool and was
+#  published as "$0.00" with no error and no log line.
+#
+#  Contract under test: the parsers return None for "could not read it" and
+#  a float (possibly 0.0) for "read it successfully".
+# =========================================================================
+
+from bs4 import BeautifulSoup  # noqa: E402
+
+from features.tourney.matcherino import (  # noqa: E402
+    _parse_prize_pool,
+    _parse_tournament_name,
+)
+
+
+def _soup(html: str) -> BeautifulSoup:
+    return BeautifulSoup(html, "html.parser")
+
+
+PAGE_WITH_AMOUNT = """
+<div class="title mr-08">Remaining 7 Weekly #42</div>
+<div class="prize-pool-amt"><span>$1,250.00</span></div>
+"""
+
+PAGE_ZERO_AMOUNT = """
+<div class="title mr-08">Free Entry Cup</div>
+<div class="prize-pool-amt"><span>$0.00</span></div>
+"""
+
+PAGE_NO_PRIZE_DIV = """
+<div class="title mr-08">Remaining 7 Weekly #42</div>
+"""
+
+PAGE_NO_SPAN = """
+<div class="title mr-08">Remaining 7 Weekly #42</div>
+<div class="prize-pool-amt"></div>
+"""
+
+PAGE_UNPARSEABLE = """
+<div class="title mr-08">Remaining 7 Weekly #42</div>
+<div class="prize-pool-amt"><span>TBD</span></div>
+"""
+
+
+# --- _parse_prize_pool ---
+
+
+def test_prize_pool_reads_real_amount():
+    assert _parse_prize_pool(_soup(PAGE_WITH_AMOUNT)) == 1250.0
+
+
+def test_prize_pool_zero_is_a_real_value_not_a_failure():
+    # A genuinely free tourney must parse as 0.0, NOT None -- it should still post.
+    assert _parse_prize_pool(_soup(PAGE_ZERO_AMOUNT)) == 0.0
+
+
+def test_prize_pool_missing_div_returns_none():
+    # This is the silent case that caused #443: no exception, nothing logged.
+    assert _parse_prize_pool(_soup(PAGE_NO_PRIZE_DIV)) is None
+
+
+def test_prize_pool_missing_span_returns_none():
+    assert _parse_prize_pool(_soup(PAGE_NO_SPAN)) is None
+
+
+def test_prize_pool_unparseable_text_returns_none():
+    assert _parse_prize_pool(_soup(PAGE_UNPARSEABLE)) is None
+
+
+def test_prize_pool_strips_currency_and_separators():
+    assert (
+        _parse_prize_pool(
+            _soup('<div class="prize-pool-amt"><span>$12,345.67</span></div>')
+        )
+        == 12345.67
+    )
+
+
+def test_prize_pool_handles_whitespace():
+    assert (
+        _parse_prize_pool(
+            _soup('<div class="prize-pool-amt"><span>  $500  </span></div>')
+        )
+        == 500.0
+    )
+
+
+# --- _parse_tournament_name ---
+
+
+def test_name_parsed_from_primary_selector():
+    assert _parse_tournament_name(_soup(PAGE_WITH_AMOUNT)) == "Remaining 7 Weekly #42"
+
+
+def test_name_falls_back_to_title_container():
+    html = '<div class="title-container">Fallback Cup</div>'
+    assert _parse_tournament_name(_soup(html)) == "Fallback Cup"
+
+
+def test_name_returns_none_when_absent():
+    assert _parse_tournament_name(_soup("<div>nothing here</div>")) is None
+
+
+def test_name_survives_a_missing_prize_pool():
+    # The whole point of splitting the try blocks: a prize failure must not
+    # cost us the name, and vice versa.
+    soup = _soup(PAGE_NO_PRIZE_DIV)
+    assert _parse_tournament_name(soup) == "Remaining 7 Weekly #42"
+    assert _parse_prize_pool(soup) is None
