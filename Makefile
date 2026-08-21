@@ -1,7 +1,12 @@
 .PHONY: test lint fix ci up commit
 
+# Use the project venv when it exists so `make test` does not fall through to
+# whatever `pytest` happens to be on PATH (e.g. a system/conda install missing
+# the runtime deps). CI has no venv and lands on python3, which is correct there.
+PYTHON := $(shell [ -x .venv/bin/python ] && echo .venv/bin/python || echo python3)
+
 test:
-	BOT_MODE=TEST pytest
+	BOT_MODE=TEST $(PYTHON) -m pytest
 
 lint:
 	@ruff check . -q

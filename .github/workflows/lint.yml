@@ -17,8 +17,10 @@ jobs:
           python-version: "3.10"
 
       - name: Install Ruff
-        # Pin to match the version used locally so CI and local agree.
-        run: pip install ruff==0.15.15
+        # Version comes from requirements.txt (the single source of truth) via a
+        # pip constraint, so CI and local never drift. -c installs only ruff, not
+        # the whole runtime, keeping this job fast.
+        run: pip install -c requirements.txt ruff
 
       - name: Check lint
         run: ruff check .
