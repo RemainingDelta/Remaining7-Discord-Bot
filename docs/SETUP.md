@@ -29,6 +29,10 @@ requests-cache>=1.3
 beautifulsoup4>=4.14
 pytest>=7.0
 pytest-asyncio>=0.23
+opencv-python-headless>=4.8
+numpy>=1.26
+aiohttp>=3.9
+ruff==0.16.0
 ```
 
 | Package | Used by |
