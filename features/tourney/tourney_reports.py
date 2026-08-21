@@ -8,7 +8,7 @@ from discord.ext import commands, tasks
 
 from database.mongo import get_setting, set_setting
 from features.config import (
-    ALLOWED_STAFF_ROLES,
+    TOURNEY_STAFF_ROLES,
     TOURNEY_REPORT_CHANNEL_ID,
 )
 
@@ -20,7 +20,7 @@ LAST_MONTHLY_REPORT_KEY = "last_monthly_report_month"
 
 
 def is_staff(member: discord.Member) -> bool:
-    return any(role.id in ALLOWED_STAFF_ROLES for role in member.roles)
+    return any(role.id in TOURNEY_STAFF_ROLES for role in member.roles)
 
 
 def _prev_month(year: int, month: int) -> tuple[int, int]:

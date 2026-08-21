@@ -13,7 +13,7 @@ from features.config import (
     PRE_TOURNEY_CATEGORY_ID,
     TOURNEY_CLOSED_CATEGORY_ID,
     PRE_TOURNEY_CLOSED_CATEGORY_ID,
-    ALLOWED_STAFF_ROLES,
+    TOURNEY_STAFF_ROLES,
     LOG_CHANNEL_ID,
     TOURNEY_ADMIN_CHANNEL_ID,
     TOURNEY_ADMIN_ROLE_ID,
@@ -254,7 +254,7 @@ async def create_tourney_ticket_channel(
         ),
     }
 
-    for role_id in ALLOWED_STAFF_ROLES:
+    for role_id in TOURNEY_STAFF_ROLES:
         role = guild.get_role(role_id)
         if role is not None:
             overwrites[role] = discord.PermissionOverwrite(
@@ -354,7 +354,7 @@ def _is_staff(member: discord.abc.User | discord.Member) -> bool:
     """Check if the user has any of the allowed staff roles."""
     if not isinstance(member, discord.Member):
         return False
-    return any(role.id in ALLOWED_STAFF_ROLES for role in member.roles)
+    return any(role.id in TOURNEY_STAFF_ROLES for role in member.roles)
 
 
 async def create_pre_tourney_ticket_channel(
@@ -410,7 +410,7 @@ async def create_pre_tourney_ticket_channel(
         ),
     }
 
-    for role_id in ALLOWED_STAFF_ROLES:
+    for role_id in TOURNEY_STAFF_ROLES:
         role = guild.get_role(role_id)
         if role:
             overwrites[role] = discord.PermissionOverwrite(
@@ -569,7 +569,7 @@ async def close_ticket_via_command(ctx: commands.Context):
             overwrite.view_channel = True
             await channel.set_permissions(target, overwrite=overwrite)
 
-    for role_id in ALLOWED_STAFF_ROLES:
+    for role_id in TOURNEY_STAFF_ROLES:
         staff_role = guild.get_role(role_id)
         if staff_role is not None:
             await channel.set_permissions(
