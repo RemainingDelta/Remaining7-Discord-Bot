@@ -66,6 +66,10 @@ Remaining7-Discord-Bot/
 ├── scripts/
 │   └── generate_specs.py            # Generates docs/logs/ SPECS & CHANGELOG from GitHub data
 ├── tests/                            # Pytest unit tests (pure functions & regex helpers)
+├── .claude/                          # Claude Code project config (tracked, see Workflow)
+│   ├── settings.json                # Hook registrations
+│   ├── hooks/                       # format-file, require-tests, stop-checks, check-config-parity
+│   └── skills/                      # Repo slash commands (/ship, /pr-desc, /write-tests, ...)
 └── .github/
     ├── ISSUE_TEMPLATE/
     │   ├── bug.md
@@ -370,6 +374,11 @@ Uses MongoDB database `r7_bot_db` with the following collections:
 - Common dev tasks are wrapped in the `Makefile`: `make test`, `make lint`, `make fix`, `make ci`, `make up`, and `make commit m="..."` (stages, commits, and pushes in one step).
 - PRs into `main` are blocked unless `pyproject.toml`'s version was bumped (`version-check.yml`).
 - PRs into `dev` are checked for a consistent issue number across branch name, title, and body (`pr-issue-reference-check.yml`).
+- `.claude/` is tracked in git, so hooks and skills survive a fresh clone. Three hooks run automatically in Claude Code sessions:
+  - **On every Python write** — `ruff format` on that one file, and the bot is flagged for restart. Formatting only; `ruff check --fix` deletes unused imports, which breaks a multi-edit sequence that writes an import before the line using it.
+  - **Before editing `features/` or `database/`** — the edit is blocked unless the ticket branch has touched something under `tests/`. Bypass a session with `SKIP_TEST_GATE=1 claude`.
+  - **At the end of a turn** — `features/config.py` is checked for IDs added to only one of the REAL/TEST branches (a silent break on one server), then `ruff check --fix` runs and the bot is relaunched from `.venv/`. Suppress the restart with `touch /tmp/claude-no-restart`.
+- Machine-specific Claude config (`.claude/settings.local.json`) stays ignored.
 
 ---
 

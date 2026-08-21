@@ -1,0 +1,45 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/format-file.sh",
+            "args": [],
+            "timeout": 10,
+            "statusMessage": "Formatting"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/require-tests.sh",
+            "args": [],
+            "timeout": 10,
+            "statusMessage": "Checking for test coverage on this branch"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/stop-checks.sh",
+            "args": [],
+            "timeout": 30,
+            "statusMessage": "Checking config, restarting bot..."
+          }
+        ]
+      }
+    ]
+  }
+}
