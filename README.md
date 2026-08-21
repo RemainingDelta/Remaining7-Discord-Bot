@@ -90,7 +90,7 @@ Remaining7-Discord-Bot/
 - **Passive Income:** Users earn 2–5 R7 Tokens per message (20-second cooldown), restricted to the general and booster channels. Server Boosters get a ~10% increase in tokens on average.
 - **Daily Rewards:** `/daily` grants 80–160 tokens (scaled by level). Requires 5 messages sent since last claim and a 24-hour cooldown.
 - **Supply Drop:** `/drop <amount>` (Admin) to force a token drop in general chat.
-- **Balance & Ranking:** `/balance [user]`, `/leaderboard [page]`.
+- **Balance & Ranking:** `/balance [user]`, `/leaderboard token`.
 - **Give & Set:** `/give <user> <token/xp/level> <amount>`, `/set-balance <user> <amount>` (Admin).
 - **Permissions:** `/perm <user> <add/remove>` to grant/revoke command access.
 - **Guide:** `/economy-help` for a full user-facing guide.
@@ -107,7 +107,7 @@ Remaining7-Discord-Bot/
 ### Leveling & XP
 - XP earned passively from messages alongside tokens, restricted to the general and booster channels.
 - `/level [user]` — progress bar and next-level XP goal.
-- `/levels-leaderboard [page]` — server-wide level rankings (paginated).
+- `/leaderboard level` — server-wide level rankings (paginated).
 
 ### Quest System
 Every user always has **4 active quests** — one daily and one weekly per category:

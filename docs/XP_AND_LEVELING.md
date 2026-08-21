@@ -43,10 +43,14 @@ So a Level 16+ member earns the max 160 tokens from `/daily`, while a Level 0 me
 ### `/level [user]`
 Reads `(level, exp)` via `get_leveling_data()` and displays an embed showing the user's current level, total XP, and XP needed for the next level.
 
-### `/levels-leaderboard [page]`
-Paginates with `LevelsLeaderboardView` (10 per page). Uses `get_levels_page(offset, per_page)` — a MongoDB `find()` sorted by `exp` descending. The viewer's own level rank is fetched with `get_user_level_rank()` and shown in the footer.
+### `/leaderboard level`
+Paginates with `LevelsLeaderboardView` (10 per page). Uses `get_levels_page(offset, per_page)` — a MongoDB `find()` sorted by `level` descending with `exp` as the tiebreak, restricted to users that have a `level` field. Page bounds come from `get_levels_total()`, which counts the same filtered set. The viewer's own level rank is fetched with `get_user_level_rank()` and shown in the footer.
+
+`get_user_level_rank()` reads the viewer's document directly rather than through `get_leveling_data()`, which creates a document when one is missing — ranking is a read, and making it write meant viewing this board produced field-less user documents.
+
+The view shares `BaseLeaderboardView` with the token board, so pagination, buttons and the footer are defined once and cannot drift between the two.
 
 ---
 
 ## Source File
-`features/economy.py` — `on_message` listener and `/level`, `/levels-leaderboard` commands
+`features/economy.py` — `on_message` listener and `/level`, `/leaderboard level` commands

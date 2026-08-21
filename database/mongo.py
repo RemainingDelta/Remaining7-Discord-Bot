@@ -926,11 +926,19 @@ async def remove_story_banlist_item(kind: str, item: str) -> bool:
 # --- LEADERBOARD HELPERS ---
 
 
+# get_user_data creates docs holding only _id/currencies/brawlers, so plenty of
+# users have no balance/level/exp at all. Mongo sorts missing fields last under
+# -1, which parked those docs on the final pages of both boards. Filtering them
+# out here keeps the boards to users who actually have a score.
+HAS_BALANCE = {"balance": {"$exists": True}}
+HAS_LEVEL = {"level": {"$exists": True}}
+
+
 async def get_leaderboard_page(offset: int, limit: int):
     """Get a slice of users sorted by balance."""
     if db is None:
         return []
-    cursor = db.users.find().sort("balance", -1).skip(offset).limit(limit)
+    cursor = db.users.find(HAS_BALANCE).sort("balance", -1).skip(offset).limit(limit)
     return await cursor.to_list(length=limit)
 
 
@@ -940,15 +948,26 @@ async def get_levels_page(offset: int, limit: int):
         return []
     # Sort by level DESC, then exp DESC
     cursor = (
-        db.users.find().sort([("level", -1), ("exp", -1)]).skip(offset).limit(limit)
+        db.users.find(HAS_LEVEL)
+        .sort([("level", -1), ("exp", -1)])
+        .skip(offset)
+        .limit(limit)
     )
     return await cursor.to_list(length=limit)
 
 
-async def get_total_users():
+async def get_leaderboard_total():
+    """Counts only users the token board actually pages over."""
     if db is None:
         return 0
-    return await db.users.count_documents({})
+    return await db.users.count_documents(HAS_BALANCE)
+
+
+async def get_levels_total():
+    """Counts only users the level board actually pages over."""
+    if db is None:
+        return 0
+    return await db.users.count_documents(HAS_LEVEL)
 
 
 async def get_user_rank(user_id: str) -> int:
@@ -987,7 +1006,13 @@ async def get_user_rank(user_id: str) -> int:
 async def get_user_level_rank(user_id: str):
     if db is None:
         return 0
-    lvl, exp = await get_leveling_data(user_id)
+    # Read the viewer directly rather than via get_leveling_data -> get_user_data,
+    # which *inserts* a doc when one is missing. Ranking is a read; making it
+    # write meant merely viewing the level board minted the field-less documents
+    # that then had to be filtered back out of both boards.
+    doc = await db.users.find_one({"_id": str(user_id)})
+    lvl = doc.get("level", 1) if doc else 1
+    exp = doc.get("exp", 0) if doc else 0
     # Complex count: People with higher level OR (same level AND higher exp)
     count = await db.users.count_documents(
         {"$or": [{"level": {"$gt": lvl}}, {"level": lvl, "exp": {"$gt": exp}}]}

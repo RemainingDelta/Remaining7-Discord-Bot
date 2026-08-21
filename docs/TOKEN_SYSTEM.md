@@ -50,9 +50,11 @@ On claim:
 | `/balance [user]` | Anyone | Shows token balance; defaults to self |
 | `/give <user> <amount>` | Anyone | Transfers from caller to target; fails if insufficient balance |
 | `/set-balance <user> <amount>` | Admin only | Directly sets balance, no transfer logic |
-| `/leaderboard [page]` | Anyone | Paginated 10-per-page view using `LeaderboardView`; shows your rank in the footer |
+| `/leaderboard token` | Anyone | Paginated 10-per-page view using `LeaderboardView`; shows your rank in the footer |
 
-The leaderboard paginates using `get_leaderboard_page(offset, per_page)` — a MongoDB `find()` sorted by `balance` descending. The viewer's own rank is fetched separately with `get_user_rank()` and shown in the footer on every page.
+The leaderboard paginates using `get_leaderboard_page(offset, per_page)` — a MongoDB `find()` sorted by `balance` descending, restricted to users that have a `balance` field. Page bounds come from `get_leaderboard_total()`, which counts the same filtered set. The viewer's own rank is fetched separately with `get_user_rank()` and shown in the footer on every page.
+
+Both boards share `BaseLeaderboardView`, so their buttons, footer and pagination are one implementation; `/leaderboard token` and `/leaderboard level` differ only in the data they read and their titles.
 
 ---
 

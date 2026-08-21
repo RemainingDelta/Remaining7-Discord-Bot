@@ -27,9 +27,10 @@ from database.mongo import (
     claim_drop,
     ensure_drop_claims_ttl_index,
     get_leaderboard_page,
-    get_total_users,
+    get_leaderboard_total,
     get_user_rank,
     get_levels_page,
+    get_levels_total,
     get_user_level_rank,
     add_redemption_queue_entry,
     get_redemption_queue,
@@ -770,48 +771,81 @@ async def shop_item_autocomplete(
 # --- VIEWS ---
 
 
-class LeaderboardView(discord.ui.View):
+def _rank_prefix(index: int) -> str:
+    """🥇🥈🥉 for the podium, a bold number after it."""
+    return {1: "🥇", 2: "🥈", 3: "🥉"}.get(index, f"**#{index}**")
+
+
+def _format_token_line(index: int, user_doc: dict) -> str:
+    # .get with a default, not [..]: a doc created by get_user_data has no
+    # `balance` key at all and used to raise KeyError here.
+    balance = user_doc.get("balance", 0)
+    return f"{_rank_prefix(index)} <@{user_doc['_id']}> - 💰 **{int(balance)}**"
+
+
+def _format_level_line(index: int, user_doc: dict) -> str:
+    # Defaults match the ones get_leveling_data already applies.
+    level = user_doc.get("level", 1)
+    exp = user_doc.get("exp", 0)
+    return (
+        f"{_rank_prefix(index)} <@{user_doc['_id']}> - "
+        f"Level **{level}** | **{exp}** EXP"
+    )
+
+
+def _leaderboard_footer(page: int, rank: int) -> str:
+    return f"Page {page + 1} | Your Rank: #{rank}"
+
+
+def _max_page(total: int, per_page: int) -> int:
+    return max(0, (total - 1) // per_page)
+
+
+class BaseLeaderboardView(discord.ui.View):
+    """Shared pagination for the token and level boards.
+
+    Both boards used to be separate copies of this logic and had quietly drifted
+    apart -- different button labels, a `#` on one footer but not the other.
+    Subclasses now supply only the data and the wording.
+    """
+
+    title = ""
+    empty_text = "No entries to display."
+
     def __init__(self, author: discord.User):
         super().__init__(timeout=60)
         self.page = 0
-        self.author = author  # This is now correctly a User object
+        self.author = author
         self.per_page = 10
+
+    async def fetch_page(self, offset: int, limit: int):
+        raise NotImplementedError
+
+    async def fetch_total(self) -> int:
+        raise NotImplementedError
+
+    async def fetch_viewer_rank(self) -> int:
+        raise NotImplementedError
+
+    @staticmethod
+    def format_row(index: int, user_doc: dict) -> str:
+        raise NotImplementedError
 
     async def generate_embed(self) -> discord.Embed:
         offset = self.page * self.per_page
-        entries = await get_leaderboard_page(offset, self.per_page)
+        entries = await self.fetch_page(offset, self.per_page)
 
-        embed = discord.Embed(
-            title="🏆 **R7 Token Leaderboard** 🏆", color=discord.Color.gold()
-        )
-
+        embed = discord.Embed(title=self.title, color=discord.Color.gold())
         if entries:
-            description_lines = []
-            for index, user_doc in enumerate(entries, start=offset + 1):
-                uid = user_doc["_id"]
-                bal = user_doc["balance"]
-
-                if index == 1:
-                    rank = "🥇"
-                elif index == 2:
-                    rank = "🥈"
-                elif index == 3:
-                    rank = "🥉"
-                else:
-                    rank = f"**#{index}**"
-
-                # Format: 🥇 <@User> - 💰 **Balance**
-                line = f"{rank} <@{uid}> - 💰 **{int(bal)}**"
-                description_lines.append(line)
-
-            embed.description = "\n".join(description_lines)
+            embed.description = "\n".join(
+                self.format_row(index, user_doc)
+                for index, user_doc in enumerate(entries, start=offset + 1)
+            )
         else:
-            embed.description = "No entries to display."
+            embed.description = self.empty_text
 
-        # Ensure we pass the ID as a String to the database
-        user_rank = await get_user_rank(str(self.author.id))
-
-        embed.set_footer(text=f"Page {self.page + 1} | Your Rank: {user_rank}")
+        rank = await self.fetch_viewer_rank()
+        embed.set_footer(text=_leaderboard_footer(self.page, rank))
         return embed
 
     @discord.ui.button(label="Previous", style=discord.ButtonStyle.blurple)
@@ -827,9 +861,8 @@ class LeaderboardView(discord.ui.View):
 
     @discord.ui.button(label="Next", style=discord.ButtonStyle.blurple)
     async def next(self, interaction: discord.Interaction, button: discord.ui.Button):
-        total = await get_total_users()
-        max_page = (total - 1) // self.per_page
-        if self.page < max_page:
+        total = await self.fetch_total()
+        if self.page < _max_page(total, self.per_page):
             self.page += 1
             embed = await self.generate_embed()
             await interaction.response.edit_message(embed=embed, view=self)
@@ -837,71 +870,41 @@ class LeaderboardView(discord.ui.View):
             await interaction.response.defer()
 
 
-class LevelsLeaderboardView(discord.ui.View):
-    def __init__(self, author: discord.User):
-        super().__init__(timeout=60)
-        self.page = 0
-        self.author = author
-        self.per_page = 10
+class LeaderboardView(BaseLeaderboardView):
+    title = "🏆 **R7 Token Leaderboard** 🏆"
+    empty_text = "No entries to display."
 
-    async def generate_embed(self) -> discord.Embed:
-        offset = self.page * self.per_page
-        entries = await get_levels_page(offset, self.per_page)
+    async def fetch_page(self, offset: int, limit: int):
+        return await get_leaderboard_page(offset, limit)
 
-        embed = discord.Embed(
-            title="🏆 **Server Level Leaderboard** 🏆", color=discord.Color.gold()
-        )
+    async def fetch_total(self) -> int:
+        return await get_leaderboard_total()
 
-        if entries:
-            description_lines = []
-            for index, user_doc in enumerate(entries, start=offset + 1):
-                uid = user_doc["_id"]
-                lvl = user_doc["level"]
-                exp = user_doc["exp"]
+    async def fetch_viewer_rank(self) -> int:
+        # Pass the ID as a string; the collection is keyed by string _id.
+        return await get_user_rank(str(self.author.id))
 
-                # Match emojis to the Token Leaderboard
-                if index == 1:
-                    rank = "🥇"
-                elif index == 2:
-                    rank = "🥈"
-                elif index == 3:
-                    rank = "🥉"
-                else:
-                    rank = f"**#{index}**"
+    @staticmethod
+    def format_row(index: int, user_doc: dict) -> str:
+        return _format_token_line(index, user_doc)
 
-                # Format: 🥇 <@User> - Level **10** | **500** EXP
-                line = f"{rank} <@{uid}> - Level **{lvl}** | **{exp}** EXP"
-                description_lines.append(line)
 
-            embed.description = "\n".join(description_lines)
-        else:
-            embed.description = "No leveled users yet!"
+class LevelsLeaderboardView(BaseLeaderboardView):
+    title = "🏆 **Server Level Leaderboard** 🏆"
+    empty_text = "No leveled users yet!"
 
-        user_rank = await get_user_level_rank(str(self.author.id))
-        embed.set_footer(text=f"Page {self.page + 1} | Your Rank: #{user_rank}")
-        return embed
+    async def fetch_page(self, offset: int, limit: int):
+        return await get_levels_page(offset, limit)
 
-    @discord.ui.button(label="⬅️ Previous", style=discord.ButtonStyle.blurple)
-    async def previous(
-        self, interaction: discord.Interaction, button: discord.ui.Button
-    ):
-        if self.page > 0:
-            self.page -= 1
-            embed = await self.generate_embed()
-            await interaction.response.edit_message(embed=embed, view=self)
-        else:
-            await interaction.response.defer()
+    async def fetch_total(self) -> int:
+        return await get_levels_total()
 
-    @discord.ui.button(label="Next ➡️", style=discord.ButtonStyle.blurple)
-    async def next(self, interaction: discord.Interaction, button: discord.ui.Button):
-        total = await get_total_users()
-        max_page = (total - 1) // self.per_page
-        if self.page < max_page:
-            self.page += 1
-            embed = await self.generate_embed()
-            await interaction.response.edit_message(embed=embed, view=self)
-        else:
-            await interaction.response.defer()
+    async def fetch_viewer_rank(self) -> int:
+        return await get_user_level_rank(str(self.author.id))
+
+    @staticmethod
+    def format_row(index: int, user_doc: dict) -> str:
+        return _format_level_line(index, user_doc)
 
 
 class ShopPaginationView(discord.ui.View):
@@ -1052,6 +1055,12 @@ def build_drop_view(amount: int) -> discord.ui.View:
 
 
 class Economy(commands.Cog):
+    # Must be a class attribute: CogMeta collects class-level groups, and Cog.__new__
+    # deep-copies this one per instance so `self` binds to the cog inside subcommands.
+    leaderboard_group = app_commands.Group(
+        name="leaderboard", description="View the server's leaderboards."
+    )
+
     def __init__(self, bot):
         self.bot = bot
         self.supply_drop_task.start()
@@ -1950,16 +1959,6 @@ class Economy(commands.Cog):
         await interaction.followup.send(embed=embed)
 
     @app_commands.command(
-        name="leaderboard", description="View the server's R7 token leaderboard."
-    )
-    async def leaderboard(self, interaction: discord.Interaction):
-        await interaction.response.defer()
-        # FIX: Pass interaction.user, NOT interaction
-        view = LeaderboardView(interaction.user)
-        embed = await view.generate_embed()
-        await interaction.followup.send(embed=embed, view=view)
-
-    @app_commands.command(
         name="level", description="Check your or another user's level and progress."
     )
     @app_commands.describe(user="The user whose level you want to check")
@@ -2006,10 +2005,19 @@ class Economy(commands.Cog):
         embed.set_footer(text=footer)
         await interaction.response.send_message(embed=embed)
 
-    @app_commands.command(
-        name="levels-leaderboard", description="View the server's level leaderboard"
+    @leaderboard_group.command(
+        name="token", description="View the server's R7 token leaderboard."
     )
-    async def levels_leaderboard(self, interaction: discord.Interaction):
+    async def leaderboard_token(self, interaction: discord.Interaction):
+        await interaction.response.defer()
+        view = LeaderboardView(interaction.user)
+        embed = await view.generate_embed()
+        await interaction.followup.send(embed=embed, view=view)
+
+    @leaderboard_group.command(
+        name="level", description="View the server's level leaderboard."
+    )
+    async def leaderboard_level(self, interaction: discord.Interaction):
         await interaction.response.defer()
         view = LevelsLeaderboardView(interaction.user)
         embed = await view.generate_embed()
@@ -2344,9 +2352,9 @@ class Economy(commands.Cog):
             "`/balance` - View your token total\n"
             "`/daily` - Claim daily tokens & check progress\n"
             "`/quests` - View active daily and weekly quests\n"
-            "`/leaderboard` - See top token holders\n"
+            "`/leaderboard token` - See top token holders\n"
             "`/level` - Check your rank & XP progress\n"
-            "`/levels-leaderboard` - See top server levels\n"
+            "`/leaderboard level` - See top server levels\n"
             "`/shop` - Browse the token store\n"
             "`/buy` - Purchase an item from the shop\n"
             "`/redeem` - Claim your purchased rewards\n\n"
