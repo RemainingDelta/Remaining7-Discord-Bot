@@ -3,6 +3,7 @@ from discord.ext import commands
 
 from features.config import (
     BOOSTER_SHOUTOUT_CATEGORY_ID,
+    EVENT_TICKET_CATEGORY_ID,
     REDEMPTION_TICKET_CATEGORY_ID,
     SUPPORT_ISSUES_CATEGORY_ID,
     SUPPORT_PARTNERSHIP_CATEGORY_ID,
@@ -55,6 +56,14 @@ def is_booster_shoutout_ticket_channel(
     return channel.category_id == BOOSTER_SHOUTOUT_CATEGORY_ID
 
 
+def is_event_ticket_channel(channel: discord.abc.GuildChannel | None) -> bool:
+    if not isinstance(channel, discord.TextChannel):
+        return False
+    if not isinstance(EVENT_TICKET_CATEGORY_ID, int) or EVENT_TICKET_CATEGORY_ID <= 0:
+        return False
+    return channel.category_id == EVENT_TICKET_CATEGORY_ID
+
+
 async def route_shared_ticket_command(ctx: commands.Context, action: str) -> bool:
     """
     Route shared prefix ticket commands to support/redemption ticket handlers.
@@ -92,6 +101,23 @@ async def route_shared_ticket_command(ctx: commands.Context, action: str) -> boo
             return True
         if action == "reopen":
             await reopen_booster_shoutout_ticket_via_command(ctx)
+            return True
+
+    if is_event_ticket_channel(ctx.channel):
+        from features.event_tickets import (
+            close_event_ticket_via_command,
+            delete_event_ticket_via_command,
+            reopen_event_ticket_via_command,
+        )
+
+        if action == "close":
+            await close_event_ticket_via_command(ctx)
+            return True
+        if action == "delete":
+            await delete_event_ticket_via_command(ctx)
+            return True
+        if action == "reopen":
+            await reopen_event_ticket_via_command(ctx)
             return True
 
     if not is_support_ticket_channel(ctx.channel):
