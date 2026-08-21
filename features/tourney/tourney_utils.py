@@ -456,7 +456,7 @@ async def create_pre_tourney_ticket_channel(
             inline=False,
         )
 
-    await channel.send(embed=ticket_embed)
+    await channel.send(content=interaction.user.mention, embed=ticket_embed)
 
     await _post_submitted_images(channel, interaction.user, images)
 
