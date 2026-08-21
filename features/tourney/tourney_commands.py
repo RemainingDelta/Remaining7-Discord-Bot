@@ -55,7 +55,7 @@ from database.mongo import (
 
 # Import Config and Utils
 from features.config import (
-    ALLOWED_STAFF_ROLES,
+    TOURNEY_STAFF_ROLES,
     OTHER_TICKET_CHANNEL_ID,
     MEMBER_ROLE_ID,
     ADMIN_ROLE_ID,
@@ -100,7 +100,7 @@ TOURNEY_STAGE_HYPE_GIF_URL = "https://cdn.discordapp.com/attachments/80724315569
 
 def is_staff(member: discord.Member) -> bool:
     """Return True if the member has any of the allowed staff roles."""
-    return any(role.id in ALLOWED_STAFF_ROLES for role in member.roles)
+    return any(role.id in TOURNEY_STAFF_ROLES for role in member.roles)
 
 
 class PayoutResetConfirmView(discord.ui.View):
@@ -2052,7 +2052,7 @@ def setup_tourney_commands(bot: commands.Bot):
                 view_channel=True, send_messages=False
             )
 
-            for role_id in ALLOWED_STAFF_ROLES:
+            for role_id in TOURNEY_STAFF_ROLES:
                 role = guild.get_role(role_id)
                 if role:
                     overwrites[role] = discord.PermissionOverwrite(
@@ -2113,7 +2113,7 @@ def setup_tourney_commands(bot: commands.Bot):
                 view_channel=False
             )
 
-            for role_id in ALLOWED_STAFF_ROLES:
+            for role_id in TOURNEY_STAFF_ROLES:
                 role = guild.get_role(role_id)
                 if role:
                     overwrites[role] = discord.PermissionOverwrite(
@@ -2546,7 +2546,7 @@ def setup_tourney_commands(bot: commands.Bot):
                 view_channel=False
             )
 
-            for role_id in ALLOWED_STAFF_ROLES:
+            for role_id in TOURNEY_STAFF_ROLES:
                 role = guild.get_role(role_id)
                 if role:
                     overwrites[role] = discord.PermissionOverwrite(
@@ -2575,7 +2575,7 @@ def setup_tourney_commands(bot: commands.Bot):
                 view_channel=True, send_messages=False
             )
 
-            for role_id in ALLOWED_STAFF_ROLES:
+            for role_id in TOURNEY_STAFF_ROLES:
                 role = guild.get_role(role_id)
                 if role:
                     overwrites[role] = discord.PermissionOverwrite(
@@ -3287,7 +3287,7 @@ def setup_tourney_commands(bot: commands.Bot):
         enabled="True to enable test mode, False to return to production."
     )
     async def tourney_test_mode(interaction: discord.Interaction, enabled: bool):
-        # Updated Security check: Now allows anyone in ALLOWED_STAFF_ROLES
+        # Updated Security check: Now allows anyone in TOURNEY_STAFF_ROLES
         if not is_staff(interaction.user):
             await interaction.response.send_message(
                 "❌ Staff permissions required.", ephemeral=True
