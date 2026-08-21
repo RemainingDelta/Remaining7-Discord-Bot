@@ -552,5 +552,12 @@ BRAWLER_UPGRADE_COSTS = {
 
 TOURNEY_TEST_MODE = False
 
+# Hall of Fame prizepool retry (#443). Not environment-specific, so these live
+# outside the PROD/DEV split. When the prizepool can't be read from Matcherino
+# the bot alerts #tourney-admin and retries on this interval, anchored to the
+# original alert, for at most HOF_MAX_ATTEMPTS attempts including the first.
+HOF_RETRY_INTERVAL_SECONDS = 3600
+HOF_MAX_ATTEMPTS = 3
+
 GITHUB_REPO = "RemainingDelta/Remaining7-Discord-Bot"
 TICKET_CREATOR_ID = 408419700729708545

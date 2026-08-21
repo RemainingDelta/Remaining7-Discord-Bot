@@ -14,6 +14,13 @@ HEADERS = {
     "Origin": "https://matcherino.com",
 }
 
+# HEADERS is tuned for the JSON API; an HTML page needs an HTML Accept or the
+# server may negotiate a non-HTML response and the selectors silently miss.
+PAGE_HEADERS = {
+    **HEADERS,
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+}
+
 # Initialize a cached session
 session = requests_cache.CachedSession(
     "matcherino_cache", expire_after=timedelta(seconds=60)
@@ -557,40 +564,84 @@ def fetch_ticket_context(
         return {"error": f"An unexpected error occurred: {e}"}
 
 
+def _parse_tournament_name(soup) -> str | None:
+    """Read the tournament name from a tournament page, or None if absent.
+
+    Kept free of HTTP so it can be unit-tested in isolation.
+    """
+    # 1st choice: the specific title class. 2nd: the sidebar title container.
+    name_tag = soup.find("div", class_="title mr-08") or soup.find(
+        "div", class_="title-container"
+    )
+    if not name_tag:
+        return None
+    return name_tag.get_text(strip=True) or None
+
+
+def _parse_prize_pool(soup) -> float | None:
+    """Read the prize pool from a tournament page.
+
+    Returns a float -- 0.0 is a legitimate value for a free tourney -- or None
+    when the amount could not be read. Keeping those two distinct is the whole
+    point: conflating them is what made the Hall of Fame publish "$0.00" for a
+    scrape failure, with no error and no log line.
+
+    Kept free of HTTP so it can be unit-tested in isolation.
+    """
+    container = soup.find("div", class_="prize-pool-amt")
+    if not container:
+        print("[PAYOUT] prize pool element (div.prize-pool-amt) not found on page")
+        return None
+
+    span = container.find("span")
+    if not span:
+        print("[PAYOUT] prize pool container has no <span> child")
+        return None
+
+    raw_text = span.get_text(strip=True)
+    try:
+        return float(raw_text.replace("$", "").replace(",", "").strip())
+    except ValueError:
+        print(f"[PAYOUT] prize pool text is not numeric: {raw_text!r}")
+        return None
+
+
+def _fetch_tournament_page(url: str) -> str | None:
+    """GET a tournament page's HTML, retrying once so a transient 429 or timeout
+    doesn't surface as an unreadable prize pool. None if both attempts fail."""
+    for attempt in (1, 2):
+        try:
+            res = session.get(url, headers=PAGE_HEADERS, timeout=10)
+            res.raise_for_status()
+            return res.text
+        except Exception as e:
+            print(f"[PAYOUT] page fetch attempt {attempt}/2 failed: {e}")
+            if attempt == 1:
+                time.sleep(1)
+    return None
+
+
 def fetch_payout_report(tournament_id: str) -> dict:
     """
     Scrapes Tourney Name & Prize Pool from HTML.
     Targeting specific classes for white-labeled tournament pages.
+
+    "total" is a float when the prize pool was read (0.0 is valid -- a free
+    tourney) and None when it could not be read; when it is None the "results"
+    prize values are None too and the caller must not publish the report. The
+    name and prize scrapes are independent, so one failing never silently
+    zeroes the other.
     """
     url = f"https://matcherino.com/tournaments/{tournament_id}"
-    total_prize = 0.0
+    total_prize = None
     tourney_name = "Tournament Results"
 
-    # 1. Scrape Name & Amount from HTML
-    try:
-        page_res = requests.get(url, headers=HEADERS, timeout=10)
-        soup = BeautifulSoup(page_res.text, "html.parser")
-
-        # --- GET TOURNAMENT NAME ---
-        # 1st Choice: The specific class you identified
-        name_tag = soup.find("div", class_="title mr-08")
-
-        # 2nd Choice: Fallback to the title container class found in the sidebars
-        if not name_tag:
-            name_tag = soup.find("div", class_="title-container")
-
-        if name_tag:
-            # We strip to remove extra spaces/newlines
-            tourney_name = name_tag.get_text(strip=True)
-
-        # --- GET PRIZE POOL ---
-        amt_container = soup.find("div", class_="prize-pool-amt")
-        if amt_container:
-            raw_text = amt_container.find("span").text
-            total_prize = float(raw_text.replace("$", "").replace(",", ""))
-
-    except Exception as e:
-        print(f"Scraping Error: {e}")
+    # 1. Scrape Name & Amount from HTML (independently -- see docstring)
+    html = _fetch_tournament_page(url)
+    if html is not None:
+        soup = BeautifulSoup(html, "html.parser")
+        tourney_name = _parse_tournament_name(soup) or tourney_name
+        total_prize = _parse_prize_pool(soup)
 
     # 2. Fetch API Bracket Data
     api_url = f"https://api.matcherino.com/__api/brackets?bountyId={tournament_id}&id=0&isAdmin=false"
@@ -643,18 +694,24 @@ def fetch_payout_report(tournament_id: str) -> dict:
     p1_team, p2_team = resolve_names(final_match)
     p3_team, p4_team = resolve_names(bronze_match)
 
+    def _split(pct: float) -> float | None:
+        # None total means "unknown", so the splits are unknown too. Computing
+        # them would raise on None, and defaulting them to 0.0 would recreate
+        # the original bug.
+        return None if total_prize is None else total_prize * pct
+
     return {
         "tourney_name": tourney_name,
         "total": total_prize,
         "results": {
             "1st": p1_team,
-            "p1": total_prize * 0.50,
+            "p1": _split(0.50),
             "2nd": p2_team,
-            "p2": total_prize * 0.25,
+            "p2": _split(0.25),
             "3rd": p3_team,
-            "p3": total_prize * 0.15,
+            "p3": _split(0.15),
             "4th": p4_team,
-            "p4": total_prize * 0.10,
+            "p4": _split(0.10),
         },
     }
 
