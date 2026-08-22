@@ -19,7 +19,7 @@ Tournament tickets are private Discord text channels created when a member submi
    - Calls `_check_ticket_limits_for_user()` — max 3 open tickets, 180s cooldown
    - Allocates the next ticket number via `get_next_ticket_number()`
    - Creates a text channel named `「❗」ticket-NNN` at **position 0** (top of category)
-   - Sets permission overwrites: opener gets full access + slash commands; all `ALLOWED_STAFF_ROLES` get full access + manage messages; `@everyone` is hidden
+   - Sets permission overwrites: opener gets full access + slash commands; all `TOURNEY_STAFF_ROLES` get full access + manage messages; `@everyone` is hidden
    - Writes the channel topic: `tourney-opener:{user_id}|team:{team}|bracket:{num}|issue:{issue}`
    - Auto-detects and translates the issue text if non-English
    - Sends the ticket embed

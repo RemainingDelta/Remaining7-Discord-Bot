@@ -29,8 +29,9 @@ Draft a PR description based on: $ARGUMENTS
 
 5. Rules:
    - VERY IMPORTANT:Don't forget the "Closes #" at the end 
-   - One bullet per ticket/branch merged
-   - Lead with the action verb: Fixed, Added, Updated, Removed
+   - Keep it short. The whole description is normally just the `### Changes` bullets plus the `Closes #` line.
+   - One bullet per logical change, lead with the action verb: Fixed, Added, Updated, Removed
    - Mention the command, file, or system affected if it adds clarity
-   - Keep it short — no overviews, no headers beyond `### Changes`
+   - No overview/summary section, and don't restate the ticket
+   - The only header allowed beyond `### Changes` is `### Notes`, and only in the rare case it's actually needed (e.g. a deferred item, a deliberate spec deviation, or a caveat a reviewer must know). Default to omitting it.
    - Output as a markdown code snippet wrapped in triple backticks
