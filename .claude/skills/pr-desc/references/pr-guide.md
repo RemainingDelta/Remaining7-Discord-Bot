@@ -16,4 +16,5 @@ Closes #<branch number, ex. for 279-Bug, it would be Closes #279>
 - One bullet per ticket/branch merged
 - Keep bullets short — lead with the action (Fixed, Added, Updated, Removed)
 - Mention the command, file, or system affected if it adds clarity
-- No need for headers, overviews, or extra context — that belongs in the release notes
+- No overviews or extra context — that belongs in the release notes
+- The only header beyond `### Changes` is `### Notes`, used rarely and only when a reviewer must know a deferred item, spec deviation, or caveat. Default to omitting it.
