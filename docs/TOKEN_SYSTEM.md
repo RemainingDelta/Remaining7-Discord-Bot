@@ -91,16 +91,22 @@ The supply (`/drop` and the auto `supply_drop_task`), booster, and admin drops a
 A simple allow-list (`allowed_users: set` in-memory) that gates certain admin-like economy commands (e.g. `/set-balance`) for non-Admin users:
 
 ```python
-allowed_users = set()  # module-level set; reset on restart
+allowed_users = set()  # module-level set, rehydrated on startup
 
 # Grant access:
 allowed_users.add(user.id)
+await _persist_allowed_users()
 
 # Revoke:
 allowed_users.discard(user.id)
+await _persist_allowed_users()
 ```
 
-This is volatile — resets on bot restart. It's intended for temporary delegation, not permanent grants.
+Grants are persisted to the MongoDB `settings` collection under the
+`perm_allowed_users` key (a JSON list of user IDs) whenever `/perm` adds or
+removes a user, and `Economy.cog_load` calls `_load_allowed_users()` to
+rehydrate the set on startup. So a `/perm` grant survives a bot restart, and a
+revocation deletes the persisted record rather than only the in-memory entry.
 
 ---
 
