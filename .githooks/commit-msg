@@ -1,0 +1,7 @@
+#!/bin/bash
+# Backstop: strip Claude attribution even if the attribution setting is ignored.
+# Fail OPEN — a backstop must never block a commit if the strip errors.
+set -u
+msg_file="$1"
+perl -i -ne 'print unless /^Co-authored-by:\s*Claude/i || /Generated with \[?Claude Code\]?/i' "$msg_file" || true
+exit 0
