@@ -17,8 +17,10 @@ Implemented in `features/event_tickets.py` (a self-contained cog), wired into th
    `EVENT_TICKET_PANEL_CHANNEL_ID` when that ID is configured).
 2. A member clicks the **🎫 Open Event Ticket** button (`custom_id="event_open_ticket"`).
 3. `create_event_ticket_channel()` runs:
-   - Rejects the request if the member already has an open event ticket (**one ticket
-     per user at a time**), pointing them at their existing channel.
+   - Rejects the request if the member already has an **open** event ticket (**one open
+     ticket per user at a time**), pointing them at their existing channel. Closed
+     (`「👍」`) tickets do not block a new one, so a member can open another ticket once
+     staff have closed the previous one.
    - Creates a private text channel named `「❗」event-<username>`, where `<username>` is
      the opener's Discord username sanitized to Discord's channel-name charset (lowercase,
      `[a-z0-9-]`, hyphen-collapsed; falls back to the user ID if nothing usable remains).

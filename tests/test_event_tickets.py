@@ -97,6 +97,54 @@ class TestIsEventTicketChannel:
         assert event_tickets.is_event_ticket_channel(None) is False
 
 
+class TestFindExistingTicket:
+    def _category(self, *channels):
+        category = MagicMock(spec=discord.CategoryChannel)
+        category.channels = list(channels)
+        return category
+
+    def _ticket(self, name, topic):
+        channel = MagicMock(spec=discord.TextChannel)
+        channel.name = name
+        channel.topic = topic
+        return channel
+
+    def test_open_ticket_blocks(self):
+        ticket = self._ticket("「❗」event-foo", "event-opener:123")
+        category = self._category(ticket)
+        assert event_tickets._find_existing_ticket(category, 123) is ticket
+
+    def test_closed_ticket_does_not_block(self):
+        """A closed ticket stays in the category, but must not lock the user out."""
+        ticket = self._ticket("「👍」event-foo", "event-opener:123")
+        category = self._category(ticket)
+        assert event_tickets._find_existing_ticket(category, 123) is None
+
+    def test_id_prefix_does_not_collide(self):
+        """User 123 must not match user 1234's ticket."""
+        ticket = self._ticket("「❗」event-other", "event-opener:1234")
+        category = self._category(ticket)
+        assert event_tickets._find_existing_ticket(category, 123) is None
+
+    def test_other_user_ticket_ignored(self):
+        ticket = self._ticket("「❗」event-other", "event-opener:999")
+        category = self._category(ticket)
+        assert event_tickets._find_existing_ticket(category, 123) is None
+
+    def test_channel_without_topic_ignored(self):
+        category = self._category(self._ticket("「❗」event-foo", None))
+        assert event_tickets._find_existing_ticket(category, 123) is None
+
+    def test_empty_category(self):
+        assert event_tickets._find_existing_ticket(self._category(), 123) is None
+
+    def test_finds_open_ticket_alongside_closed_one(self):
+        closed = self._ticket("「👍」event-foo", "event-opener:123")
+        open_ticket = self._ticket("「❗」event-foo", "event-opener:123")
+        category = self._category(closed, open_ticket)
+        assert event_tickets._find_existing_ticket(category, 123) is open_ticket
+
+
 class TestEventStaffRoleIds:
     def test_includes_configured_role(self, monkeypatch):
         monkeypatch.setattr(event_tickets, "EVENT_STAFF_ROLE_ID", 12345)

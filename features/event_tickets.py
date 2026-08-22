@@ -92,11 +92,19 @@ def is_event_ticket_channel(channel: discord.abc.GuildChannel | None) -> bool:
 def _find_existing_ticket(
     category: discord.CategoryChannel, user_id: int
 ) -> discord.TextChannel | None:
-    """Return the caller's existing event ticket in this category, if any."""
+    """Return the caller's OPEN event ticket in this category, if any.
+
+    Closed tickets stay in the category (close happens in place), so they must not
+    block a new one. The opener ID is parsed exactly rather than substring-matched,
+    so user 123 is not matched by a ticket belonging to user 1234.
+    """
     for ch in category.channels:
-        if isinstance(ch, discord.TextChannel) and ch.topic:
-            if f"event-opener:{user_id}" in ch.topic:
-                return ch
+        if not isinstance(ch, discord.TextChannel):
+            continue
+        if _extract_opener_id(ch.topic) != user_id:
+            continue
+        if "「❗」" in ch.name:  # only an open ticket blocks a new one
+            return ch
     return None
 
 
@@ -160,15 +168,22 @@ async def _build_transcript_text(channel: discord.TextChannel) -> str:
 
 
 async def create_event_ticket_channel(interaction: discord.Interaction) -> None:
+    # Defer first: creating the channel takes two API writes, which can exceed
+    # Discord's 3s interaction window and raise Unknown Interaction (10062).
+    try:
+        await interaction.response.defer(ephemeral=True)
+    except discord.NotFound:
+        return
+
     guild = interaction.guild
     if guild is None:
-        await interaction.response.send_message(
+        await interaction.followup.send(
             "This can only be used in a server.", ephemeral=True
         )
         return
 
     if not isinstance(EVENT_TICKET_CATEGORY_ID, int) or EVENT_TICKET_CATEGORY_ID <= 0:
-        await interaction.response.send_message(
+        await interaction.followup.send(
             "Event tickets are not configured yet. Ask an admin to set "
             "`EVENT_TICKET_CATEGORY_ID` in config.",
             ephemeral=True,
@@ -177,7 +192,7 @@ async def create_event_ticket_channel(interaction: discord.Interaction) -> None:
 
     category = guild.get_channel(EVENT_TICKET_CATEGORY_ID)
     if not isinstance(category, discord.CategoryChannel):
-        await interaction.response.send_message(
+        await interaction.followup.send(
             "Configured event ticket category was not found. Please contact an admin.",
             ephemeral=True,
         )
@@ -186,7 +201,7 @@ async def create_event_ticket_channel(interaction: discord.Interaction) -> None:
     # One open ticket per user at a time.
     existing = _find_existing_ticket(category, interaction.user.id)
     if existing is not None:
-        await interaction.response.send_message(
+        await interaction.followup.send(
             f"You already have an open event ticket: {existing.mention}\n"
             "Please use your existing ticket.",
             ephemeral=True,
@@ -230,7 +245,7 @@ async def create_event_ticket_channel(interaction: discord.Interaction) -> None:
         reason="Store event ticket opener",
     )
 
-    await interaction.response.send_message(
+    await interaction.followup.send(
         f"Your event ticket has been created: {channel.mention}",
         ephemeral=True,
     )
@@ -350,7 +365,8 @@ async def delete_event_ticket_channel(
                     ),
                     file=dm_file,
                 )
-            except discord.Forbidden:
+            except discord.HTTPException:
+                # DMs closed, or transcript too large. Never block deletion.
                 pass
 
     log_channel = (
@@ -360,14 +376,18 @@ async def delete_event_ticket_channel(
         else None
     )
     if isinstance(log_channel, discord.TextChannel):
-        log_file = discord.File(io.BytesIO(transcript_bytes), filename=filename)
-        await log_channel.send(
-            content=(
-                f"📝 Transcript for event ticket **#{channel.name}** "
-                f"deleted by **{actor.name}** (opener: {opener_display})."
-            ),
-            file=log_file,
-        )
+        try:
+            log_file = discord.File(io.BytesIO(transcript_bytes), filename=filename)
+            await log_channel.send(
+                content=(
+                    f"📝 Transcript for event ticket **#{channel.name}** "
+                    f"deleted by **{actor.name}** (opener: {opener_display})."
+                ),
+                file=log_file,
+            )
+        except discord.HTTPException:
+            # Missing permissions or oversized transcript must not block deletion.
+            pass
 
     await channel.delete(reason=f"Event ticket deleted by {actor}")
     return True
