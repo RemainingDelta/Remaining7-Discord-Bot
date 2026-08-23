@@ -105,6 +105,8 @@ This is non-blocking — the ticket opens regardless.
 
 `close_ticket_via_command()` (triggered by `!close` or `!c`):
 
+A `!c` sent while the bot was restarting is replayed on the next boot rather than lost — see **Missed `!c` replay** in `TOURNEY_OVERVIEW.md`.
+
 1. Checks the caller has a staff role
 2. Determines destination category (Closed) based on current category (Active)
 3. Checks if the Closed category is at its 40-channel soft limit; if so, auto-deletes the oldest closed tickets to make room

@@ -50,6 +50,12 @@ The MongoDB session survives a bot restart, but all runtime state (dashboard loo
 
 This is fully automatic and a no-op when no session is active. Milestone announcements (semi-final / finals / winner) self-heal separately: their history cross-check window is wide enough that the next progress tick re-adopts the existing messages instead of re-posting.
 
+### Missed `!c` replay
+
+Discord does not deliver messages sent while the process is offline, so a `!c` typed during a restart was simply lost — the ticket stayed open and the staff member got no closure credit (#469). On boot, if a session is active, `missed_close_reconcile_task` reads the downtime window from the `bot_last_seen` setting (stamped every minute by the `Heartbeat` cog) and scans the **open** ticket categories (`TOURNEY_CATEGORY_ID`, `PRE_TOURNEY_CATEGORY_ID`) over that window. The first `!c` / `!close` it finds in each channel is replayed through the normal command path via `bot.get_context()` + `bot.invoke()`, so the original author is credited, not the bot.
+
+Only the open categories are scanned, and that is what makes the sweep safe to run on every boot: a ticket that was already closed has moved to a closed category and is never revisited. `increment_staff_closure` and `update_tourney_queue` are both raw `$inc` and the `!close` callback runs them *before* the category check, so a replay into an already-closed ticket would double-credit the staff member and double-decrement the queue. The lookback is capped at 2 hours and only `!c` / `!close` are replayed — never `!delete` or `!reopen`.
+
 Because the bot auto-resumes, re-running `!starttourney` while a session is active is treated as an error (it would purge channels, delete pre-tourney tickets, and reset the session clock). It replies with a warning and does nothing. To intentionally tear down and restart setup from scratch, pass `force`: `!starttourney [region] force`.
 
 ---

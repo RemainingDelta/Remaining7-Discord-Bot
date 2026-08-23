@@ -93,9 +93,11 @@ class Quests(commands.Cog):
         # Invite cache kept for stability, but unused for quests now
         self.invite_cache = {}
         self.quest_reward_reconcile_task.start()
+        self.invite_cache_task.start()
 
     def cog_unload(self):
         self.quest_reward_reconcile_task.cancel()
+        self.invite_cache_task.cancel()
 
     # --- CRASH RECOVERY ---
     @tasks.loop(count=1)
@@ -127,7 +129,13 @@ class Quests(commands.Cog):
         await init_default_quests(DEFAULT_QUESTS)
         print("✅ Quests System Loaded")
 
-        # Build Invite Cache (Passive tracking only)
+    # --- INVITE CACHE ---
+    @tasks.loop(count=1)
+    async def invite_cache_task(self):
+        """Build the invite cache (passive tracking only). Cogs now load in
+        setup_hook, before the gateway connects, so bot.guilds is empty until the
+        bot is ready (#469)."""
+        await self.bot.wait_until_ready()
         for guild in self.bot.guilds:
             try:
                 self.invite_cache[guild.id] = {}

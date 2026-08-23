@@ -37,6 +37,8 @@ Remaining7-Discord-Bot/
 │   └── mongo.py                     # All MongoDB helper functions
 ├── features/
 │   ├── config.py                    # IDs, shop data, loot tables, emojis (REAL/TEST branches)
+│   ├── startup.py                   # Extension list & startup error handling (setup_hook)
+│   ├── heartbeat.py                 # Minute-by-minute liveness stamp for downtime detection
 │   ├── economy.py                   # R7 Tokens, shop, daily, leveling, leaderboards
 │   ├── quests.py                    # Daily & weekly quest system
 │   ├── security.py                  # Hacked protocol (timeout, purge, flag)
@@ -62,6 +64,7 @@ Remaining7-Discord-Bot/
 │       ├── tourney_utils.py         # Ticket lifecycle helpers, auto-translation
 │       ├── tourney_views.py         # discord.ui.View classes for ticket buttons
 │       ├── tourney_reports.py       # Monthly tournament report generation
+│       ├── tourney_recovery.py      # Replays a !c missed while the bot was restarting
 │       └── matcherino.py            # Matcherino API integration
 ├── scripts/
 │   └── generate_specs.py            # Generates docs/logs/ SPECS & CHANGELOG from GitHub data
@@ -351,6 +354,8 @@ Uses MongoDB database `r7_bot_db` with the following collections:
 | Progress dashboard | Every 5 minutes (live) | Semi-final/final bracket announcements |
 | Match refresher | Every 1 minute (live) | Refresh Matcherino scores in active tickets |
 | Budget reset | On interaction | Auto-reset monthly redemption cap on month change |
+| Heartbeat | Every 1 minute | Stamp `bot_last_seen` so the next boot can measure how long the bot was down |
+| Missed `!c` replay | Once per boot | During a live tourney, replay a `!c` sent while the bot was down (open ticket categories only) |
 
 ---
 

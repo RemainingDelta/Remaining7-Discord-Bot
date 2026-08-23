@@ -146,6 +146,7 @@ Key entries:
 | `pending_winner_announcement` | JSON marker (`matcherino_id`, `updates_channel_id`, `expires_at`) driving the crash-safe `!endtourney` winner retry |
 | `last_monthly_report_month` | `"YYYY-MM"` of the last month a tournament report was generated for (idempotent gate + catch-up) |
 | `last_event_cleanup_day` | `"YYYY-MM-DD"` (ET) of the last event-channel cleanup run (missed-run logging) |
+| `bot_last_seen` | ISO-8601 UTC timestamp rewritten every minute while the bot is alive. The gap between it and boot time is the downtime window used to find a `!c` missed during a restart |
 
 ---
 
