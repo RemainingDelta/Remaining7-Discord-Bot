@@ -54,7 +54,18 @@ This is fully automatic and a no-op when no session is active. Milestone announc
 
 Discord does not deliver messages sent while the process is offline, so a `!c` typed during a restart was simply lost — the ticket stayed open and the staff member got no closure credit (#469). On boot, if a session is active, `missed_close_reconcile_task` reads the downtime window from the `bot_last_seen` setting (stamped every minute by the `Heartbeat` cog) and scans the **open** ticket categories (`TOURNEY_CATEGORY_ID`, `PRE_TOURNEY_CATEGORY_ID`) over that window. The first `!c` / `!close` it finds in each channel is replayed through the normal command path via `bot.get_context()` + `bot.invoke()`, so the original author is credited, not the bot.
 
-Only the open categories are scanned, and that is what makes the sweep safe to run on every boot: a ticket that was already closed has moved to a closed category and is never revisited. `increment_staff_closure` and `update_tourney_queue` are both raw `$inc` and the `!close` callback runs them *before* the category check, so a replay into an already-closed ticket would double-credit the staff member and double-decrement the queue. The lookback is capped at 2 hours and only `!c` / `!close` are replayed — never `!delete` or `!reopen`.
+Four filters decide what gets replayed, and each one exists to stop a specific false positive:
+
+| Filter | Prevents |
+|---|---|
+| Only the open categories (`TOURNEY_CATEGORY_ID`, `PRE_TOURNEY_CATEGORY_ID`) | Re-closing an already-closed ticket. `increment_staff_closure` and `update_tourney_queue` are both raw `$inc` and the `!close` callback runs them *before* the category check, so a replay into a closed ticket would double-credit the staff member and double-decrement the queue |
+| History bounded to the downtime window, capped at 2h, skipped under a 10s gap | Replaying anything the bot was alive to handle |
+| Scan is newest-first and stops at the first *settling* message — a `!reopen`, or the bot's own `Ticket closed by …` confirmation | Re-closing a ticket that was closed and then deliberately reopened. `!reopen` moves it back into a scanned category, leaving the old `!c` looking unprocessed |
+| Author must pass `_is_staff` | A non-staff `!c` moving the queue and closure counters before `close_ticket_via_command` rejects it |
+
+Only `!c` / `!close` are replayed — never `!delete` or `!reopen`. Bot messages are skipped, and matching is on the first whitespace token only, so `!cancel` and `!closed` do not match while `!c all done` does (discord.py ignores extra arguments, so that really is a close).
+
+Two residual cases are not covered. If the bot died in the narrow gap between the `$inc` calls and the category move, the replay will double-count — closing that would need a per-message processed marker. And if the staff member who ran `!c` has since left the server, `_is_staff` returns `False` and the close is skipped rather than replayed.
 
 Because the bot auto-resumes, re-running `!starttourney` while a session is active is treated as an error (it would purge channels, delete pre-tourney tickets, and reset the session clock). It replies with a warning and does nothing. To intentionally tear down and restart setup from scratch, pass `force`: `!starttourney [region] force`.
 

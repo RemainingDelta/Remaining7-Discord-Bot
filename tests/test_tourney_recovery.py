@@ -22,20 +22,34 @@ from features.config import (
     PRE_TOURNEY_CLOSED_CATEGORY_ID,
     TOURNEY_CATEGORY_ID,
     TOURNEY_CLOSED_CATEGORY_ID,
+    TOURNEY_STAFF_ROLES,
 )
 from features.tourney.tourney_recovery import (
     is_missed_close_message,
+    is_settling_message,
     sweep_missed_closes,
 )
 
 WINDOW = datetime.datetime(2026, 8, 22, 22, 0, 0, tzinfo=datetime.timezone.utc)
 
 
-def _msg(content, *, is_bot=False):
+def _msg(content, *, is_bot=False, staff=True):
+    """A history message. Channel history is walked newest-first, so lists of these
+    are written newest-first too."""
     message = MagicMock(spec=discord.Message)
     message.content = content
-    message.author = MagicMock()
-    message.author.bot = is_bot
+
+    if is_bot:
+        message.author = MagicMock()
+        message.author.bot = True
+        return message
+
+    author = MagicMock(spec=discord.Member)
+    author.bot = False
+    role = MagicMock()
+    role.id = TOURNEY_STAFF_ROLES[0] if staff else -1
+    author.roles = [role]
+    message.author = author
     return message
 
 
@@ -81,6 +95,29 @@ def test_plain_chatter_does_not_match():
 
 def test_the_bots_own_messages_are_ignored():
     assert not is_missed_close_message(_msg("!c", is_bot=True))
+
+
+# --- which messages settle a ticket, making an earlier !c stale ---
+
+
+def test_reopen_settles_a_ticket():
+    assert is_settling_message(_msg("!reopen"))
+
+
+def test_the_bots_close_confirmation_settles_a_ticket():
+    assert is_settling_message(
+        _msg("Ticket closed by SomeStaff and moved to Closed", is_bot=True)
+    )
+
+
+def test_ordinary_messages_do_not_settle_a_ticket():
+    for content in ("!c", "gg", "!close", "reopen"):
+        assert not is_settling_message(_msg(content)), content
+
+
+def test_a_member_quoting_the_confirmation_does_not_settle_a_ticket():
+    """Only the bot's own confirmation counts, or anyone could block a replay."""
+    assert not is_settling_message(_msg("Ticket closed by me and moved to Closed"))
 
 
 # --- the sweep ---
@@ -175,13 +212,53 @@ async def test_closed_categories_are_never_swept():
     assert PRE_TOURNEY_CLOSED_CATEGORY_ID not in asked
 
 
-async def test_only_the_first_missed_close_per_channel_is_replayed():
+async def test_only_one_close_is_replayed_per_channel():
     """Two !c in the same gap is still one close."""
     channel = _channel("ticket-2", [_msg("!c"), _msg("!c")])
     bot = _bot({TOURNEY_CATEGORY_ID: _category([channel])})
 
     assert await sweep_missed_closes(bot, WINDOW, sleep_between=0) == 1
     bot.invoke.assert_awaited_once()
+
+
+async def test_a_reopen_after_the_close_prevents_the_replay():
+    """!reopen puts a closed ticket back in a scanned category, leaving the old !c
+    looking unprocessed. Re-closing it would undo a deliberate reopen."""
+    channel = _channel("ticket-10", [_msg("!reopen"), _msg("!c")])
+    bot = _bot({TOURNEY_CATEGORY_ID: _category([channel])})
+
+    assert await sweep_missed_closes(bot, WINDOW, sleep_between=0) == 0
+    bot.invoke.assert_not_awaited()
+
+
+async def test_a_close_after_the_reopen_is_still_replayed():
+    """The other ordering: reopened, then closed again, then the bot died."""
+    channel = _channel("ticket-11", [_msg("!c"), _msg("!reopen")])
+    bot = _bot({TOURNEY_CATEGORY_ID: _category([channel])})
+
+    assert await sweep_missed_closes(bot, WINDOW, sleep_between=0) == 1
+
+
+async def test_a_completed_close_prevents_the_replay():
+    """The bot's confirmation means the close already ran to completion."""
+    channel = _channel(
+        "ticket-12",
+        [_msg("Ticket closed by Staff and moved to Closed", is_bot=True), _msg("!c")],
+    )
+    bot = _bot({TOURNEY_CATEGORY_ID: _category([channel])})
+
+    assert await sweep_missed_closes(bot, WINDOW, sleep_between=0) == 0
+    bot.invoke.assert_not_awaited()
+
+
+async def test_a_non_staff_close_is_not_replayed():
+    """close_command bumps the closure count and the queue before checking
+    permissions, so a non-staff !c must never reach it."""
+    channel = _channel("ticket-13", [_msg("!c", staff=False)])
+    bot = _bot({TOURNEY_CATEGORY_ID: _category([channel])})
+
+    assert await sweep_missed_closes(bot, WINDOW, sleep_between=0) == 0
+    bot.invoke.assert_not_awaited()
 
 
 async def test_a_channel_with_no_missed_close_is_left_alone():
@@ -199,7 +276,7 @@ async def test_history_is_bounded_to_the_downtime_window():
     await sweep_missed_closes(bot, WINDOW, sleep_between=0)
 
     assert channel.history.kwargs["after"] == WINDOW
-    assert channel.history.kwargs["oldest_first"] is True
+    assert channel.history.kwargs["oldest_first"] is False
 
 
 async def test_one_unreadable_channel_does_not_abort_the_sweep():
