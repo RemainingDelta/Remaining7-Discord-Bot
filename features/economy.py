@@ -32,6 +32,10 @@ from database.mongo import (
     get_levels_page,
     get_levels_total,
     get_user_level_rank,
+    increment_supply_drop_count,
+    get_supply_drops_page,
+    get_supply_drops_total,
+    get_user_supply_drop_rank,
     add_redemption_queue_entry,
     get_redemption_queue,
     remove_redemption_queue_entry,
@@ -793,6 +797,18 @@ def _format_level_line(index: int, user_doc: dict) -> str:
     )
 
 
+def _format_supply_drop_line(index: int, user_doc: dict) -> str:
+    # .get with defaults: docs that predate drop tracking (or have only one type)
+    # are missing these keys and must render as zeroes rather than raise KeyError.
+    normal = int(user_doc.get("supply_drops_normal", 0))
+    booster = int(user_doc.get("supply_drops_booster", 0))
+    total = normal + booster
+    return (
+        f"{_rank_prefix(index)} <@{user_doc['_id']}> - "
+        f"📦 **{total}** total (🪂 {normal} Normal | 🚀 {booster} Booster)"
+    )
+
+
 def _leaderboard_footer(page: int, rank: int) -> str:
     return f"Page {page + 1} | Your Rank: #{rank}"
 
@@ -907,6 +923,24 @@ class LevelsLeaderboardView(BaseLeaderboardView):
         return _format_level_line(index, user_doc)
 
 
+class SupplyDropsLeaderboardView(BaseLeaderboardView):
+    title = "🏆 **Supply Drop Leaderboard** 🏆"
+    empty_text = "No supply drops claimed yet!"
+
+    async def fetch_page(self, offset: int, limit: int):
+        return await get_supply_drops_page(offset, limit)
+
+    async def fetch_total(self) -> int:
+        return await get_supply_drops_total()
+
+    async def fetch_viewer_rank(self) -> int:
+        return await get_user_supply_drop_rank(str(self.author.id))
+
+    @staticmethod
+    def format_row(index: int, user_doc: dict) -> str:
+        return _format_supply_drop_line(index, user_doc)
+
+
 class ShopPaginationView(discord.ui.View):
     def __init__(
         self, data: dict, items_per_page: int = 4, booster_discount: bool = False
@@ -1018,6 +1052,14 @@ class DropClaimButton(
 
         # 1. Pay atomically ($inc) — no read-modify-write.
         await increment_user_balance(str(interaction.user.id), self.amount)
+
+        # 1b. Track the claim for the supply-drop leaderboard. Drops in the
+        #     booster channel count as booster drops; everything else (general
+        #     random and admin drops) counts as a normal drop.
+        is_booster = message.channel.id == BOOSTER_CHANNEL_ID
+        await increment_supply_drop_count(
+            str(interaction.user.id), is_booster=is_booster
+        )
 
         # 2. Clear the booster-drop marker if this was the live booster drop. The
         #    persistent button has no on_claim closure, so do it here directly.
@@ -2023,6 +2065,16 @@ class Economy(commands.Cog):
         embed = await view.generate_embed()
         await interaction.followup.send(embed=embed, view=view)
 
+    @leaderboard_group.command(
+        name="supply-drops",
+        description="View the server's supply drop leaderboard.",
+    )
+    async def leaderboard_supply_drops(self, interaction: discord.Interaction):
+        await interaction.response.defer()
+        view = SupplyDropsLeaderboardView(interaction.user)
+        embed = await view.generate_embed()
+        await interaction.followup.send(embed=embed, view=view)
+
     @app_commands.command(
         name="check-budget", description="Check the remaining budget for redemptions."
     )
@@ -2355,6 +2407,7 @@ class Economy(commands.Cog):
             "`/leaderboard token` - See top token holders\n"
             "`/level` - Check your rank & XP progress\n"
             "`/leaderboard level` - See top server levels\n"
+            "`/leaderboard supply-drops` - See top supply drop claimers\n"
             "`/shop` - Browse the token store\n"
             "`/buy` - Purchase an item from the shop\n"
             "`/redeem` - Claim your purchased rewards\n\n"

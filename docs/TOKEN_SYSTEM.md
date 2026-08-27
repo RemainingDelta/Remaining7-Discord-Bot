@@ -51,10 +51,13 @@ On claim:
 | `/give <user> <amount>` | Anyone | Transfers from caller to target; fails if insufficient balance |
 | `/set-balance <user> <amount>` | Admin only | Directly sets balance, no transfer logic |
 | `/leaderboard token` | Anyone | Paginated 10-per-page view using `LeaderboardView`; shows your rank in the footer |
+| `/leaderboard supply-drops` | Anyone | Paginated 10-per-page view using `SupplyDropsLeaderboardView`; ranks users by total supply drops claimed, showing Normal and Booster counts, and your rank in the footer |
 
 The leaderboard paginates using `get_leaderboard_page(offset, per_page)` — a MongoDB `find()` sorted by `balance` descending, restricted to users that have a `balance` field. Page bounds come from `get_leaderboard_total()`, which counts the same filtered set. The viewer's own rank is fetched separately with `get_user_rank()` and shown in the footer on every page.
 
-Both boards share `BaseLeaderboardView`, so their buttons, footer and pagination are one implementation; `/leaderboard token` and `/leaderboard level` differ only in the data they read and their titles.
+The supply-drop board works the same way: `get_supply_drops_page(offset, per_page)` sorts by `supply_drops_total` descending, restricted to users who have claimed at least one drop; `get_supply_drops_total()` counts that same set for the page bounds, and `get_user_supply_drop_rank()` supplies the viewer's rank. Each row shows the user's total alongside their Normal and Booster counts. Tracking starts from zero — drops claimed before this board shipped are not backfilled.
+
+All three boards share `BaseLeaderboardView`, so their buttons, footer and pagination are one implementation; `/leaderboard token`, `/leaderboard level` and `/leaderboard supply-drops` differ only in the data they read and their titles.
 
 ---
 
@@ -82,7 +85,7 @@ Channel access is restricted to the Server Booster role via manual Discord permi
 
 ### Persistent claim button (all drop types)
 
-The supply (`/drop` and the auto `supply_drop_task`), booster, and admin drops all share one claim button, `DropClaimButton` — a `discord.ui.DynamicItem` whose `custom_id` is `drop_claim:{amount}`. It's re-registered once in `Economy.cog_load` via `bot.add_dynamic_items(DropClaimButton)`, so a drop message posted **before** a restart stays claimable (the token amount is recovered from the `custom_id`; the old plain `DropView` had no `custom_id` and was never re-added, leaving pre-restart buttons dead). The single-claim guard is the atomic `claim_drop(message_id, user_id)` (a `$setOnInsert` on the `drop_claims` collection, TTL-expired after 7 days), which replaces the old in-memory `claimed` flag — so it survives restarts and serializes two near-simultaneous clicks. Payout is the atomic `increment_user_balance()` (`$inc`).
+The supply (`/drop` and the auto `supply_drop_task`), booster, and admin drops all share one claim button, `DropClaimButton` — a `discord.ui.DynamicItem` whose `custom_id` is `drop_claim:{amount}`. It's re-registered once in `Economy.cog_load` via `bot.add_dynamic_items(DropClaimButton)`, so a drop message posted **before** a restart stays claimable (the token amount is recovered from the `custom_id`; the old plain `DropView` had no `custom_id` and was never re-added, leaving pre-restart buttons dead). The single-claim guard is the atomic `claim_drop(message_id, user_id)` (a `$setOnInsert` on the `drop_claims` collection, TTL-expired after 7 days), which replaces the old in-memory `claimed` flag — so it survives restarts and serializes two near-simultaneous clicks. Payout is the atomic `increment_user_balance()` (`$inc`). A winning claim also calls `increment_supply_drop_count(user_id, is_booster=...)`, which `$inc`s the claimer's per-type counter and the denormalized `supply_drops_total` that feeds `/leaderboard supply-drops`. Drops in the booster channel (`BOOSTER_CHANNEL_ID`) count as **Booster** drops; general random and admin `/drop` crates count as **Normal** drops. Only the winner is counted, so a losing race does not inflate the board.
 
 ---
 
