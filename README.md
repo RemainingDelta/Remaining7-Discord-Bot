@@ -2,10 +2,11 @@
 
 ## Overview
 **Name:** Remaining7 Discord Bot
-**Version:** v1.12.0
+**Version:** v1.13.0
 **Contributors:** remainingdelta, nightwarrior5
 **Objective:** A feature-rich Discord bot for the Remaining7 community server (16k+ members). Handles an R7 Token economy, leveling, quests, a Brawl Stars collection minigame, tournament management with Matcherino integration, support tickets, event operations, a security protocol, and multi-language translation.
 **Server Link:** https://discord.gg/6MzrjS2X8k
+**Privacy:** What the bot stores about members and why — [`PRIVACY_POLICY.md`](./PRIVACY_POLICY.md)
 
 ---
 
@@ -31,6 +32,7 @@ Remaining7-Discord-Bot/
 ├── .env.example
 ├── .gitignore
 ├── README.md
+├── PRIVACY_POLICY.md                # Privacy policy (mirrored by /privacy-policy)
 ├── docs/                             # Feature implementation guides
 │   └── logs/                         # SPECS.md & CHANGELOG.md — development history
 ├── database/
@@ -43,6 +45,7 @@ Remaining7-Discord-Bot/
 │   ├── scam_detection.py            # Scam image detection (MD5/pHash/ORB blacklist)
 │   ├── event.py                     # Event channel cleanup & reward payouts
 │   ├── general.py                   # /help, /mod-help, /admin-help, /version, /convert-time
+│   ├── privacy_policy.py            # Policy content, /privacy-policy, startup repost
 │   ├── translation.py               # !t prefix & /translate slash command (54 languages)
 │   ├── counting.py                  # Sequential counting game with /set-count
 │   ├── story.py                     # Collaborative one-word story game (staff-run, moderated)
@@ -244,6 +247,7 @@ Every user always has **4 active quests** — one daily and one weekly per categ
 ### Utility
 - `/convert-time <date> <time> <timezone>` — convert a date and time to all Discord timestamp formats. Supports 20+ timezone aliases (EST, PT, GMT, etc.) and IANA names.
 - `/version` — view the bot's current version.
+- `/privacy-policy` — view what data the bot collects, why, and how to request deletion. Public, no permission gate. The same policy is posted in the privacy channel and kept current on every restart, and lives in [`PRIVACY_POLICY.md`](./PRIVACY_POLICY.md).
 
 ### Help Commands
 - `/help` — user command directory.
@@ -351,6 +355,7 @@ Uses MongoDB database `r7_bot_db` with the following collections:
 | Progress dashboard | Every 5 minutes (live) | Semi-final/final bracket announcements |
 | Match refresher | Every 1 minute (live) | Refresh Matcherino scores in active tickets |
 | Budget reset | On interaction | Auto-reset monthly redemption cap on month change |
+| Privacy policy repost | On startup | Delete the bot's old copy in the privacy channel and post the current policy |
 
 ---
 

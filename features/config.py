@@ -65,6 +65,11 @@ if MODE == "PROD":
 
     EVENT_STAFF_ROLE_ID = 811495204346789938
 
+    # Channel the privacy policy is reposted to on every startup (#490). Set
+    # this to the real channel on each server — 0 means "not set up yet" and the
+    # startup post is skipped with a warning instead of failing.
+    PRIVACY_CHANNEL_ID = 0
+
     ECONOMY_COMMANDS_CHANNEL_ID = 1352841132735860746
     BOT_COMMANDS_CHANNEL_ID = 546405233736155151
     COUNTING_CHANNEL_ID = 909853678863790092
@@ -252,6 +257,8 @@ else:
     POLLS_CHANNEL_ID = 1510921417036927098
 
     EVENT_STAFF_ROLE_ID = 1450350588209533019
+
+    PRIVACY_CHANNEL_ID = 0  # See the note in the PROD branch (#490)
 
     ECONOMY_COMMANDS_CHANNEL_ID = 1484768262649675776
     BOT_COMMANDS_CHANNEL_ID = 1484768347756167228

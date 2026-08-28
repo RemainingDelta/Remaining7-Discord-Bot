@@ -49,6 +49,7 @@ PROD_GUILD_ID = 294192597939912714
 PROD_TICKETS_CHANNEL_ID = 1259649295649472602
 
 GUILD_ID = 111111111
+CONFIGURED_PRIVACY_CHANNEL_ID = 222222222
 
 
 def _sections():
@@ -87,6 +88,14 @@ def _privacy_channel(messages):
     channel.history = MagicMock(return_value=_AsyncIter(messages))
     channel.send = AsyncMock()
     return channel
+
+
+@pytest.fixture
+def privacy_channel_configured(monkeypatch):
+    """Stand in for a server that has had its privacy channel set up."""
+    import features.privacy_policy as module
+
+    monkeypatch.setattr(module, "PRIVACY_CHANNEL_ID", CONFIGURED_PRIVACY_CHANNEL_ID)
 
 
 def _message(author):
@@ -293,7 +302,9 @@ async def test_privacy_command_response_links_the_tickets_channel(
 # --- startup repost ---
 
 
-async def test_repost_deletes_the_previous_bot_messages_before_posting(mock_bot):
+async def test_repost_deletes_the_previous_bot_messages_before_posting(
+    mock_bot, privacy_channel_configured
+):
     order = []
     stale = [_message(mock_bot.user), _message(mock_bot.user)]
     for message in stale:
@@ -307,7 +318,9 @@ async def test_repost_deletes_the_previous_bot_messages_before_posting(mock_bot)
     assert order == ["delete", "delete", "send"]
 
 
-async def test_repost_leaves_messages_from_other_authors_alone(mock_bot):
+async def test_repost_leaves_messages_from_other_authors_alone(
+    mock_bot, privacy_channel_configured
+):
     other = _message(MagicMock())
     mine = _message(mock_bot.user)
     channel = _privacy_channel([other, mine])
@@ -319,7 +332,9 @@ async def test_repost_leaves_messages_from_other_authors_alone(mock_bot):
     mine.delete.assert_called_once()
 
 
-async def test_repost_posts_the_full_embed_sequence(mock_bot):
+async def test_repost_posts_the_full_embed_sequence(
+    mock_bot, privacy_channel_configured
+):
     channel = _privacy_channel([])
     mock_bot.get_channel = MagicMock(return_value=channel)
 
@@ -330,7 +345,9 @@ async def test_repost_posts_the_full_embed_sequence(mock_bot):
     assert len(embeds) == len(build_privacy_embeds(GUILD_ID))
 
 
-async def test_repost_uses_the_channels_own_guild_for_the_tickets_link(mock_bot):
+async def test_repost_uses_the_channels_own_guild_for_the_tickets_link(
+    mock_bot, privacy_channel_configured
+):
     channel = _privacy_channel([])
     mock_bot.get_channel = MagicMock(return_value=channel)
 
@@ -341,7 +358,9 @@ async def test_repost_uses_the_channels_own_guild_for_the_tickets_link(mock_bot)
     assert expected in _rendered(embeds)
 
 
-async def test_repost_posts_even_when_the_channel_is_empty(mock_bot):
+async def test_repost_posts_even_when_the_channel_is_empty(
+    mock_bot, privacy_channel_configured
+):
     channel = _privacy_channel([])
     mock_bot.get_channel = MagicMock(return_value=channel)
 
@@ -350,20 +369,20 @@ async def test_repost_posts_even_when_the_channel_is_empty(mock_bot):
     channel.send.assert_called_once()
 
 
-async def test_repost_skips_a_missing_channel(mock_bot):
+async def test_repost_skips_a_missing_channel(mock_bot, privacy_channel_configured):
     mock_bot.get_channel = MagicMock(return_value=None)
 
     await repost_privacy_policy(mock_bot)  # must not raise
 
 
-async def test_repost_skips_a_non_text_channel(mock_bot):
+async def test_repost_skips_a_non_text_channel(mock_bot, privacy_channel_configured):
     voice = MagicMock(spec=discord.VoiceChannel)
     mock_bot.get_channel = MagicMock(return_value=voice)
 
     await repost_privacy_policy(mock_bot)  # must not raise
 
 
-async def test_repost_survives_a_discord_error(mock_bot):
+async def test_repost_survives_a_discord_error(mock_bot, privacy_channel_configured):
     channel = _privacy_channel([])
     channel.send = AsyncMock(side_effect=discord.HTTPException(MagicMock(), "boom"))
     mock_bot.get_channel = MagicMock(return_value=channel)
