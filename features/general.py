@@ -47,6 +47,7 @@ class General(commands.Cog):
         brawler_text = (
             "`/profile` - View your profile, collection progress, and currencies\n"
             "`/brawlers` - View your owned brawlers and their levels\n"
+            "`/brawler` - View full details for a specific brawler\n"
             "`/buy-brawler` - Purchase new brawlers using Credits\n"
             "`/upgrade` - Level up your brawlers\n"
             "`/buy-ability` - Buy Gadgets, Star Powers, and Hypercharges\n"

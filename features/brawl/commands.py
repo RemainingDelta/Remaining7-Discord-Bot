@@ -891,6 +891,23 @@ class BrawlCommands(commands.Cog):
             print(f"Autocomplete Error: {e}")
             return []
 
+    async def brawler_roster_autocomplete(
+        self, interaction: discord.Interaction, current: str
+    ) -> list[app_commands.Choice[str]]:
+        """Suggest brawler names from the full roster (owned or not)."""
+        try:
+            query = current.lower()
+            choices = []
+            for b in BRAWLER_ROSTER:
+                if query in b.name.lower():
+                    choices.append(app_commands.Choice(name=b.name, value=b.id))
+                if len(choices) >= 25:  # Discord limit
+                    break
+            return choices
+        except Exception as e:
+            print(f"Autocomplete Error: {e}")
+            return []
+
     @app_commands.command(
         name="upgrade", description="Interactive upgrade menu for your brawlers"
     )
@@ -971,6 +988,93 @@ class BrawlCommands(commands.Cog):
 
         embed = view.generate_embed()
         await interaction.response.send_message(embed=embed, view=view)
+
+    @app_commands.command(
+        name="brawler", description="View full details for a specific brawler"
+    )
+    @app_commands.autocomplete(brawler=brawler_roster_autocomplete)
+    async def brawler_details(self, interaction: discord.Interaction, brawler: str):
+        # Resolve the query against the full roster by id or name (case-insensitive).
+        query = brawler.lower().strip()
+        b_obj = next(
+            (
+                b
+                for b in BRAWLER_ROSTER
+                if b.id.lower() == query or b.name.lower() == query
+            ),
+            None,
+        )
+
+        if not b_obj:
+            return await interaction.response.send_message(
+                f"❌ No brawler found matching **{brawler}**. Check the spelling and try again.",
+                ephemeral=True,
+            )
+
+        await interaction.response.defer()
+        user_id = str(interaction.user.id)
+
+        from database.mongo import get_user_data
+
+        user_doc = await get_user_data(user_id)
+        brawlers_data = (user_doc or {}).get("brawlers", {})
+        # Normalize keys to lowercase so lookup matches regardless of stored casing.
+        brawlers_lower = {k.lower(): v for k, v in brawlers_data.items()}
+        owned_data = brawlers_lower.get(b_obj.id.lower())
+        is_owned = owned_data is not None
+
+        owned_gadgets = owned_data.get("gadgets", []) if is_owned else []
+        owned_sps = owned_data.get("star_powers", []) if is_owned else []
+        owned_hc = owned_data.get("hypercharge") if is_owned else None
+
+        b_emoji = EMOJIS_BRAWLERS.get(b_obj.id.lower(), "❓")
+        rarity_key = b_obj.rarity.lower().replace(" ", "_")
+        r_emoji = EMOJIS_RARITIES.get(rarity_key, "⚪")
+
+        embed = discord.Embed(
+            title=f"{b_emoji} {b_obj.name}",
+            color=discord.Color.blue(),
+        )
+        embed.add_field(name="Rarity", value=f"{r_emoji} {b_obj.rarity}", inline=True)
+
+        if is_owned:
+            embed.add_field(
+                name="Status",
+                value=f"✅ Owned • Lvl {owned_data.get('level', 1)}",
+                inline=True,
+            )
+        else:
+            embed.add_field(name="Status", value="❌ Not owned", inline=True)
+
+        def _ability_lines(names, owned):
+            # ✅ for abilities the caller owns, ▫️ otherwise.
+            return "\n".join(
+                f"{'✅' if name in owned else '▫️'} {name}" for name in names
+            )
+
+        embed.add_field(
+            name=f"{EMOJI_GADGET_DEFAULT} Gadgets",
+            value=_ability_lines(b_obj.gadgets, owned_gadgets) or "—",
+            inline=False,
+        )
+        embed.add_field(
+            name=f"{EMOJI_STARPOWER_DEFAULT} Star Powers",
+            value=_ability_lines(b_obj.star_powers, owned_sps) or "—",
+            inline=False,
+        )
+        if b_obj.hypercharge:
+            hc_mark = "✅" if owned_hc else "▫️"
+            hc_value = f"{hc_mark} {b_obj.hypercharge}"
+        else:
+            hc_value = "—"
+        embed.add_field(
+            name=f"{EMOJI_HYPERCHARGE_DEFAULT} Hypercharge",
+            value=hc_value,
+            inline=False,
+        )
+
+        embed.set_footer(text=SUPERCELL_DISCLAIMER)
+        await interaction.followup.send(embed=embed)
 
 
 # This function is required for main.py to load this file as an extension
