@@ -1,0 +1,30 @@
+name: PR Title Format Check
+
+# Enforce the PR title convention: "<issue>-<Type> <lowercase word> ...".
+# No colon after the type, and the first word after the type must be lowercase
+# (e.g. "462-Feature add /brawler command", not "462-Feature: Add ...").
+# <Type> mirrors the branch-name convention (Bug | Feature | Enhancement).
+
+on:
+  pull_request:
+    branches: [dev]
+    types: [opened, edited, reopened, synchronize]
+
+jobs:
+  pr-title-format-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check PR title has no colon and a lowercase word after the type
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          pattern='^[0-9]+-(Bug|Feature|Enhancement) [a-z].*$'
+          if [[ "$PR_TITLE" =~ $pattern ]]; then
+            echo "PR title format OK: $PR_TITLE"
+          else
+            echo "ERROR: PR title must be '<issue>-<Type> <lowercase word> ...' with no colon."
+            echo "  <Type> is one of Bug, Feature, Enhancement."
+            echo "  e.g. '462-Feature add /brawler command'"
+            echo "  Got: '$PR_TITLE'"
+            exit 1
+          fi
