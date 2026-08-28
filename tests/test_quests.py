@@ -1,9 +1,12 @@
 """Tests for the quest system: booster threshold reduction and crash-safe
 reward payout (rewarded flag, retry gate, and startup reconcile)."""
 
+import inspect
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+
+import features.quests as quests_module
 
 import database.mongo as mongo
 from database.mongo import booster_quest_target, update_quest_progress
@@ -208,3 +211,33 @@ async def test_reconcile_noop_when_nothing_pending(monkeypatch):
 
     pay.assert_not_awaited()
     flag.assert_not_awaited()
+
+
+# --- vestigial invite cache removal (#463) ---
+
+
+def test_no_invite_cache_references_in_quests_source():
+    # Acceptance: `grep -r invite_cache features/` returns no matches.
+    source = inspect.getsource(quests_module)
+    assert "invite_cache" not in source
+
+
+def test_cog_does_not_register_on_invite_create_listener():
+    # Acceptance: the quests cog no longer registers an on_invite_create listener.
+    listener_names = {name for name, _ in Quests.__cog_listeners__}
+    assert "on_invite_create" not in listener_names
+
+
+def test_cog_does_not_register_on_member_join_listener():
+    # on_member_join existed only to diff invite use-counts; dropped with the cache.
+    listener_names = {name for name, _ in Quests.__cog_listeners__}
+    assert "on_member_join" not in listener_names
+
+
+def test_fresh_cog_has_no_invite_cache_attribute(monkeypatch):
+    # __init__ must not build an invite cache anymore.
+    monkeypatch.setattr(
+        Quests, "quest_reward_reconcile_task", MagicMock(start=MagicMock())
+    )
+    cog = Quests(MagicMock())
+    assert not hasattr(cog, "invite_cache")
