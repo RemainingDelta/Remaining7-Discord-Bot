@@ -67,6 +67,7 @@ Listed in the Utility section of `/help`.
 The flow:
 
 1. If `PRIVACY_CHANNEL_ID` is falsy (`0` = not set up on this server yet), log a warning and return. Startup is never blocked by an unconfigured channel.
+
 2. Resolve the channel; skip if it is missing or not a `TextChannel`.
 3. Scan `channel.history(limit=HISTORY_SCAN_LIMIT)` and delete **every** message authored by the bot.
 4. Post the fresh sequence with `channel.send(embeds=...)`.
