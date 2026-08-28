@@ -1,7 +1,8 @@
 {
   "attribution": {
     "commit": "",
-    "pr": ""
+    "pr": "",
+    "sessionUrl": false
   },
   "hooks": {
     "SessionStart": [
@@ -10,7 +11,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "git config core.hooksPath .githooks"
+            "command": "bash \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/session-setup.sh"
           }
         ]
       }

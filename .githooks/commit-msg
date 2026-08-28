@@ -1,7 +1,30 @@
 #!/bin/bash
-# Backstop: strip Claude attribution even if the attribution setting is ignored.
-# Fail OPEN — a backstop must never block a commit if the strip errors.
+# Backstop: strip Claude attribution trailers even if the attribution setting is
+# ignored. Fail OPEN — a backstop must never block a commit if the strip errors,
+# and it must never blank an otherwise-valid message.
+#
+# Uses sed -> temp file -> mv (portable macOS/Ubuntu, no `sed -i`). Case
+# variation on the "Co-Authored-By" label is handled with bracket classes
+# because BSD sed lacks GNU's `I` flag. LC_ALL=C keeps the emoji match
+# byte-deterministic and avoids a BSD "illegal byte sequence" abort. Trailing
+# blank lines are collapsed with awk (a whitespace-only line has NF==0), which
+# is portable unlike a sed label/branch idiom.
 set -u
 msg_file="$1"
-perl -i -ne 'print unless /^Co-authored-by:\s*Claude/i || /Generated with \[?Claude Code\]?/i' "$msg_file" || true
+
+tmp="$(mktemp "${msg_file}.XXXXXX")" || exit 0   # same dir -> atomic mv
+LC_ALL=C sed -E \
+  -e '/^Claude-Session:/d' \
+  -e '/^[Cc]o-[Aa]uthored-[Bb]y:[[:space:]]*Claude/d' \
+  -e '/^🤖 Generated with \[Claude Code\]/d' \
+  "$msg_file" \
+  | awk 'NF{p=NR} {a[NR]=$0} END{for(i=1;i<=p;i++) print a[i]}' \
+  > "$tmp" 2>/dev/null || { rm -f "$tmp"; exit 0; }
+
+# Never blank the message: sed|awk reports only awk's status, so a sed failure
+# would otherwise leave an empty $tmp that gets mv'd over the message. An empty
+# result only happens for a trailers-only message, which git rejects anyway, so
+# bailing (leaving the original untouched) is correct either way.
+[ -s "$tmp" ] || { rm -f "$tmp"; exit 0; }
+mv "$tmp" "$msg_file" 2>/dev/null || rm -f "$tmp"
 exit 0
