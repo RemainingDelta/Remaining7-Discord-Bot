@@ -71,7 +71,7 @@ Remaining7-Discord-Bot/
 ├── tests/                            # Pytest unit tests (pure functions & regex helpers)
 ├── .claude/                          # Claude Code project config (tracked, see Workflow)
 │   ├── settings.json                # Hook registrations
-│   ├── hooks/                       # format-file, require-tests, stop-checks, check-config-parity
+│   ├── hooks/                       # format-file, require-tests, stop-checks, check-config-parity, session-setup
 │   └── skills/                      # Repo slash commands (/ship, /pr-desc, /write-tests, ...)
 └── .github/
     ├── ISSUE_TEMPLATE/
@@ -82,7 +82,9 @@ Remaining7-Discord-Bot/
         ├── lint.yml                 # Ruff linting CI
         ├── tests.yml                # Pytest CI
         ├── version-check.yml        # Blocks PRs into main without a pyproject.toml version bump
-        └── pr-issue-reference-check.yml  # Verifies issue number matches across branch/title/body
+        ├── pr-issue-reference-check.yml  # Verifies issue number matches across branch/title/body
+        ├── pr-title-format-check.yml     # Enforces PR title shape on PRs into dev (no colon, lowercase verb)
+        └── strip-pr-footer.yml           # Strips the Claude Code footer from PR bodies targeting dev
 ```
 
 ---
@@ -232,7 +234,7 @@ Every user always has **4 active quests** — one daily and one weekly per categ
 - Auto-detects source language. Google Translate backend.
 
 ### Counting Game
-- Sequential counting game in a designated channel — users must send the next number in sequence.
+- Sequential counting game in a designated channel — users send the next number in sequence, as a plain number or a basic arithmetic expression (`7*10` counts as `70`, evaluated by a safe `ast` parser). Off-sequence, repeat-user, or invalid messages are removed and the count is left unchanged.
 - `/set-count <number>` (Staff) — manually set the current count.
 
 ### One-Word Story
@@ -378,8 +380,9 @@ Uses MongoDB database `r7_bot_db` with the following collections:
 - Ruff enforced via CI (`.github/workflows/lint.yml`); pytest suite runs on every push/PR (`tests.yml`).
 - Common dev tasks are wrapped in the `Makefile`: `make test`, `make lint`, `make fix`, `make ci`, `make up`, and `make commit m="..."` (stages, commits, and pushes in one step).
 - PRs into `main` are blocked unless `pyproject.toml`'s version was bumped (`version-check.yml`).
-- PRs into `dev` are checked for a consistent issue number across branch name, title, and body (`pr-issue-reference-check.yml`).
-- `.claude/` is tracked in git, so hooks and skills survive a fresh clone. Three hooks run automatically in Claude Code sessions:
+- PRs into `dev` are checked for a consistent issue number across branch name, title, and body (`pr-issue-reference-check.yml`), must follow the `<issue>-<Type> <lowercase verb> …` title convention (`pr-title-format-check.yml`), and have any Claude Code footer stripped from the PR body (`strip-pr-footer.yml`).
+- `.claude/` is tracked in git, so hooks and skills survive a fresh clone. Four hooks run automatically in Claude Code sessions:
+  - **At session start** — the git hooks path is pointed at `.githooks` and the commit author is pinned to `RemainingDelta` so cloud and routine commits are authored correctly (`session-setup.sh`).
   - **On every Python write** — `ruff format` on that one file, and the bot is flagged for restart. Formatting only; `ruff check --fix` deletes unused imports, which breaks a multi-edit sequence that writes an import before the line using it.
   - **Before editing `features/` or `database/`** — the edit is blocked unless the ticket branch has touched something under `tests/`. Bypass a session with `SKIP_TEST_GATE=1 claude`.
   - **At the end of a turn** — `features/config.py` is checked for IDs added to only one of the REAL/TEST branches (a silent break on one server), then `ruff check --fix` runs and the bot is relaunched from `.venv/`. Suppress the restart with `touch /tmp/claude-no-restart`.

@@ -23,3 +23,17 @@ async def test_help_embed_has_title(mock_bot, mock_interaction):
 
     embed = mock_interaction.response.send_message.call_args.kwargs["embed"]
     assert "R7 Bot" in embed.title
+
+
+async def test_help_counting_field_matches_behavior(mock_bot, mock_interaction):
+    """The counting help must reflect real behavior: math expressions are
+    accepted, and a wrong number is deleted rather than resetting the count
+    (regression guard for the #325-class 'wrong number resets the count' error).
+    """
+    cog = General(mock_bot)
+    await cog.help_command.callback(cog, mock_interaction)
+
+    embed = mock_interaction.response.send_message.call_args.kwargs["embed"]
+    counting = next(f.value for f in embed.fields if "Counting" in f.name)
+    assert "reset" not in counting.lower()
+    assert "7*10" in counting
