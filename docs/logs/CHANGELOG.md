@@ -1391,3 +1391,41 @@ Closes #436
 Closes #435
 
 ---
+
+## v1.13.0 — 2026-08-30
+
+# 🚀 Release Notes v1.13.0
+
+## 🎯 Features & Enhancements
+- Added a privacy policy system: the `/privacy-policy` command, a repo-level `PRIVACY_POLICY.md`, and a dedicated privacy channel that is wiped and reposted on every restart — the policy text lives in exactly one place and renders to all three surfaces
+- The level leaderboard shipped: `/leaderboard` is now a command group with `token` and `level` subcommands, the level board mirroring the token board's format
+- Added a collaborative one-word story game with configurable banned-word and banned-character lists
+- The counting channel now accepts math expressions (e.g. `7*10` counts as `70`), evaluated through a safe `ast`-based parser that rejects anything that isn't plain arithmetic
+- Renamed the `ALLOWED_STAFF_ROLES` config constant to `TOURNEY_STAFF_ROLES` to reflect its tourney-only scope (no behavior change; same role IDs)
+- (dev tooling) Tracked `.claude/` hooks and skills in the repo so they survive a fresh clone, reversing the earlier decision to ignore them, and documented `.claude` in the README
+- (dev tooling) Hardened authorship for cloud sessions: commits are authored as `RemainingDelta` with no AI attribution trailers, session URLs, or PR footer, and a new CI check enforces the PR-title format
+- (dev tooling) Pinned Ruff to one version across local and CI and fixed `make lint` / `make test` failing on a clean checkout
+
+## 🐛 Bug Fixes & Improvements
+- **Hall of Fame** no longer shows `$0` when the prizepool can't be read — a failed read is now distinguished from a genuine `$0`, and instead of rendering a permanent public `$0.00` the bot alerts `#tourney-admin` with a manual override and capped automatic retries
+- **Leaderboards** no longer crash for members who have no `balance`, `level`, or `exp` field yet — missing fields are defaulted and sorted last
+- **Pre-tourney tickets** now ping the opener in the newly created ticket channel so they can find it
+
+## 📝 Documentation
+- Added the `v1.13.0` section to `docs/logs/SPECS.md` (every issue in the release) and `docs/logs/CHANGELOG.md` (release notes + PR descriptions)
+- Added `docs/PRIVACY_SYSTEM.md` and `docs/ONE_WORD_STORY.md`; feature docs (`TOKEN_SYSTEM`, `XP_AND_LEVELING`, `TOURNEY_OVERVIEW`, `CONFIG_SYSTEM`, `COUNTING_GAME`, `DATABASE`, `SETUP`, `TOURNEY_TICKETS`) were updated alongside their respective changes
+
+**Full Changelog**: https://github.com/RemainingDelta/Remaining7-Discord-Bot/compare/v1.12.0...v1.13.0
+
+
+### PR Descriptions
+
+#### PR #494 — 494-Enhancement update documentation for v1.13.0 release (pending)
+
+### Changes
+* Added the `v1.13.0` section to `docs/logs/SPECS.md`, documenting every issue in the release (#355, #356, #388, #408, #443, #448, #450, #455, #457, #477, #484, #486, #490, #493, #494)
+* Added the `v1.13.0` release notes and these PR descriptions to `docs/logs/CHANGELOG.md`
+
+Closes #494
+
+---
