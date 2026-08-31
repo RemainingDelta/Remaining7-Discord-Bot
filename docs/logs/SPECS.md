@@ -3803,3 +3803,246 @@ Implemented in `<pending — set to the 436-Enhancement doc commit sha once comm
 ✅ Reviewed against the diff: implementation matches the filed spec.
 
 📝 Review note: Self-referential — this is the release-doc pass that wrote this very v1.12.0 SPECS section and the v1.12.0 CHANGELOG release notes + PR descriptions. The README/`pyproject.toml` version bump is handled separately by #435 (PR #440). The commit sha above is a placeholder until this branch is committed and merged.
+
+### v1.13.0 — 2026-08-30
+
+#### #355 — Enhancement: Add mathematical computation support to counting channel (Enhancement)
+
+> ### Overview
+> This enhancement modifies the existing counting channel feature to allow users to input mathematical computations instead of just plain numbers for counting up.
+>
+> ### Proposed Behavior
+> The bot should be updated to parse messages in the counting channel. If a message contains a valid mathematical computation (e.g., `7*10`, `6+9`), the bot should evaluate the expression and use its result as the number for counting…
+>
+> ### Technical Requirements
+> - [ ] Implement a parser to detect and evaluate mathematical expressions in user messages.
+> - [ ] Integrate a safe math evaluation library or mechanism to process computations.
+> - [ ] Update the counting channel's message processing logic to accept evaluated results.
+> - [ ] Handle error cases for invalid or malformed mathematical expressions gracef …(truncated)
+
+Implemented in `142ba1a`. Files: `features/counting.py`, `docs/COUNTING_GAME.md`, `tests/test_counting.py`
+
+✅ Reviewed against the diff: implementation matches the filed spec.
+
+📝 Review note: The "safe math evaluation mechanism" is an `ast`-based allowlist (`ast.parse` walked through `_eval_node`, permitting only `Add/Sub/Mult/Div` and unary `+/-` over numeric constants) — no `eval()` on user input. Anything that isn't an integer-valued arithmetic expression falls through to `None` and is rejected exactly as a non-numeric message would be.
+
+#### #356 — Feature: Implement Enhanced Story Bot (Feature)
+
+> ### Overview
+> This feature replaces the existing one-word story bot with a more robust and versatile story-building bot, allowing for new moderation capabilities and extended functionality.
+>
+> ### Technical Requirements
+> - [ ] Reimplement core story-building logic for a collaborative story.
+> - [ ] Add functionality for a configurable banned word list.
+> - [ ] Add functionality for a configurable banned character list.
+> - [ ] Integrate the new bot into the existing Discord server environ …(truncated)
+
+Implemented in `f6f2e25`. Files: `features/story.py`, `database/mongo.py`, `features/config.py`, `features/general.py`, `main.py`, `docs/ONE_WORD_STORY.md`, `docs/DATABASE.md`, `README.md`, `tests/test_story.py`
+
+✅ Reviewed against the diff: both a configurable banned-word list and a configurable banned-character list ship (`validate_word` returns `"banned_word"` / `"banned_char"` reasons), with the collaborative story state persisted in Mongo.
+
+📝 Review note: The issue is framed as *replacing* "the existing one-word story bot," but no prior story feature existed at v1.12.0 — `features/story.py` is net-new, so there was nothing to migrate. It also ships as a cog inside R7, not as the standalone "bot… invited to a Discord server" the acceptance criteria describe; that wording is generic template boilerplate, not a second bot.
+
+#### #388 — Bug: Pre-tourney ticket opening fails to ping user (Bug)
+
+> ### Overview
+> When a user opens a pre-tourney ticket, the bot currently does not ping the user in the newly created ticket channel. This results in the user potentially not knowing where their ticket has been created.
+>
+> ### Acceptance Criteria
+> - [ ] The user who opens a pre-tourney ticket receives a ping (@mention) in the newly created ticket channel.
+> - [ ] The ping is visible and clickable, directing the user to the tic …(truncated)
+
+Implemented in `935a34b`. Files: `features/tourney/tourney_utils.py`
+
+✅ Reviewed against the diff: implementation matches the filed spec — a one-line change adding the opener's mention to the pre-tourney ticket channel's opening message.
+
+#### #448 — Enhancement: Track Claude Code configuration in the repository (Enhancement)
+
+> ### Overview
+> Reverse #158 and track `.claude/` and `CLAUDE.md` in git, so hooks, skills, and project context survive a fresh clone instead of living on one machine.
+>
+> ### Technical Requirements
+> - [ ] Replace the `.claude/` and `CLAUDE.md` entries in `.gitignore` with an allowlist… then re-ignore `.claude/settings.local.json`
+> - [ ] Confirm the hook scripts are committed as mode `100755` so they stay executable
+> - [ ] Replace the absolute path in the `PostToolUse` handler with `${CLAUDE_PROJECT_DIR}`
+>
+> ### Notes
+> Reverses #158. Note that in the SPECS entry, as #274 did for #254 …(truncated)
+
+Implemented in `7f745e3`, `792b330`. Files: `.gitignore`, `.claude/settings.json`, `.claude/hooks/` (`check-config-parity.py`, `require-tests.sh`, `stop-checks.sh`, `format-file.sh`), `.claude/skills/` (docs-sync, spec-record, ship, write-tests, new-cog, pr-desc, commit-message, release-notes, write-ticket, improve-codebase-architecture, thermo-nuclear-code-quality-review), `Makefile`, `README.md`
+
+**Reverses #158**, which had un-tracked and git-ignored `.claude/` and `CLAUDE.md` back when the directory only held machine-specific `settings.local.json`. The allowlist (`.claude/*` ignored, then specific paths un-ignored, `settings.local.json` re-ignored) preserves the #143 accident guard while tracking the now-shared hook/skill config. The `PostToolUse` absolute path was replaced with `${CLAUDE_PROJECT_DIR}` as specced.
+
+⚠️ as-implemented differs from #448: the ticket's title and Technical Requirements call for tracking `CLAUDE.md`, but no repo-level `CLAUDE.md` exists — the workspace `CLAUDE.md` lives one directory above the repo root, outside version control — so only `.claude/` was tracked and that acceptance criterion is unmet by necessity, not satisfied. Separately, the second commit (`792b330`) bundles a hook-quality refactor beyond "track the config": it adds `format-file.sh`, rewrites `check-config-parity.py` (−40 lines), and reworks `require-tests.sh`, `stop-checks.sh`, and the `Makefile`.
+
+#### #450 — Bug: `make lint` and `make test` fail locally while CI passes (Bug)
+
+> ### Overview
+> The `Makefile` dev targets don't resolve to the same toolchain CI uses… Two separate symptoms, one root cause — nothing pins the local toolchain.
+> **1. Ruff version drift.** … Ruff 0.16 formats Python code blocks *inside markdown*, which 0.15.15 does not…
+> **2. `make test` uses bare `pytest`.** It resolves through `PATH` rather than the project venv…
+>
+> ### Acceptance Criteria
+> - [ ] … Local and CI resolve to the same ruff version…
+> - [ ] An explicit decision on markdown: either reformat the 9 `docs/*.md` files… or exclude `*.md` from the formatter…
+> - [ ] `make test` invokes the venv interpreter rather than whatever `pytest` is on `PATH …(truncated)
+
+Implemented in `1a2acd8`. Files: `.github/workflows/lint.yml`, `Makefile`, `pyproject.toml`, `requirements.txt`, `docs/SETUP.md`
+
+✅ Reviewed against the diff: implementation matches the filed spec, and picks a concrete answer to each open decision the ticket posed.
+
+📝 Review note: Of the two either/or choices the acceptance criteria offered, both were resolved toward pinning-newer rather than pinning-older: ruff is exact-pinned to `0.16.0` in `requirements.txt` (the one source of truth `lint.yml` now installs against), and `*.md` is excluded from the formatter via `[tool.ruff.format] exclude = ["*.md"]` rather than reformatting the 9 docs. `make test` now runs the `.venv` interpreter, and the stale contradictory comments in `lint.yml`/`pyproject.toml` were corrected.
+
+#### #443 — Bug: Hall of Fame command sometimes shows $0 prizepool (Bug)
+
+> ### Overview
+> The `hall of fame` command occasionally displays a total prizepool of $0, even when there should be a non-zero value. This issue appears intermittently.
+>
+> ### Acceptance Criteria
+> - [ ] The `hall of fame` command consistently displays the correct total prizepool amount.
+> - [ ] The command never displays $0 as the total prizepool when the actual prizepool value is greater than z …(truncated)
+
+Implemented in `c489642`, `d62a5e7`. Files: `features/tourney/hall_of_fame.py`, `features/tourney/matcherino.py`, `features/tourney/tourney_commands.py`, `features/config.py`, `pyproject.toml`, `docs/TOURNEY_OVERVIEW.md`, `tests/test_hall_of_fame.py`, `tests/test_matcherino.py`
+
+⚠️ as-implemented differs from #443: the ticket describes a display bug ("sometimes shows $0"), and `c489642` is the proportionate fix — it distinguishes an *unknown* prizepool (read failure → `None`) from a genuine `$0`, so a failed read no longer renders as `$0.00`. But `d62a5e7` then builds an entire prizepool retry/alert subsystem that the ticket never asked for: on a failed read it posts an alert embed to `#tourney-admin` with a manual-override control, schedules capped automatic retries (`HOF_MAX_ATTEMPTS`) anchored to a persisted `next_hof_retry_at` marker, and closes the alert out on resolution. This is a crash-safety epic bundled into a display-bug fix (the `tourney_commands.py` change alone is ~538 lines).
+
+📝 Review note: The retry uses an in-memory `asyncio.Task` handle (`hof_retry_task`) to cancel a superseded run, but the persisted marker is the source of truth, so a restart mid-wait is recoverable rather than silently dropped. This PR also carried the version bump `1.12.0 → 1.12.1` (see #493 on the per-PR bump cadence).
+
+#### #408 — Feature: Implement Level Leaderboard (Feature)
+
+> ### Overview
+> This sub-issue focuses on implementing a new level leaderboard feature, allowing users to view a ranked list of server members based on their experience points (XP) and levels.
+>
+> ### Technical Requirements
+> - [ ] … Create a new command (e.g., `/leaderboard level`) to trigger the display.
+> - [ ] Ensure the display format is consistent with the existing token leaderboard.
+>
+> ### Notes
+> Refer to the existing token leaderboard implementation for guidance… to maintain consist …(truncated)
+
+Implemented in `a4568e9`, `8edc6aa`. Files: `features/economy.py`, `database/mongo.py`, `features/general.py`, `pyproject.toml`, `README.md`, `docs/TOKEN_SYSTEM.md`, `docs/XP_AND_LEVELING.md`, `tests/test_leaderboards.py`
+
+⚠️ as-implemented differs from #408: the ticket scopes a single new level leaderboard "consistent with the existing token leaderboard." The implementation instead restructured *both* into an `app_commands.Group` — `/leaderboard token` and `/leaderboard level` under one group — reshaping the existing token command rather than leaving it alone, and bundled an unspecced crash fix: ranking previously raised `KeyError` for users with no `balance`/`level`/`exp` field, now guarded with `.get(..., default)` plus a Mongo `{"$exists": True}` filter so missing-field users sort last. The bug fix is related to level ranking (users without XP fields) but also touches the token/balance path.
+
+📝 Review note: This PR carried the version bump `1.12.1 → 1.12.2` (see #493).
+
+#### #457 — Enhancement: Rename ALLOWED_STAFF_ROLES to TOURNEY_STAFF_ROLES (Enhancement)
+
+> ### Overview
+> Rename the `ALLOWED_STAFF_ROLES` config constant to `TOURNEY_STAFF_ROLES`, and update every reference. The current name sounds like a general server-wide staff list, but it's used exclusively by the tourney feature.
+>
+> ### Acceptance Criteria
+> - [ ] No occurrences of `ALLOWED_STAFF_ROLES` remain in code or docs
+> - [ ] `TOURNEY_STAFF_ROLES` holds the same role IDs
+> - [ ] Tourney behavior is unchanged; lint and tests p …(truncated)
+
+Implemented in `70796d4`. Files: `features/config.py`, `features/tourney/tourney_commands.py`, `features/tourney/tourney_reports.py`, `features/tourney/tourney_utils.py`, `docs/CONFIG_SYSTEM.md`, `docs/SETUP.md`, `docs/TOURNEY_TICKETS.md`
+
+✅ Reviewed against the diff: pure rename, same role IDs, no behavior change. A repo-wide grep confirms no `ALLOWED_STAFF_ROLES` occurrences remain outside `docs/logs/`.
+
+#### #455 — Enhancement: Disable Claude attribution and tighten the pr-desc skill (Enhancement)
+
+> ### Overview
+> Two small changes ahead of running scheduled Claude Code tasks against this repo: stop Claude attribution appearing in commits and PR bodies, and make the `pr-desc` skill state that PR descriptions stay short.
+>
+> ### Technical Requirements
+> - [ ] Add an `attribution` block to `.claude/settings.json` with `commits` and `pullRequests` both set to `false`…
+> - [ ] Add a tracked `.githooks/commit-msg` hook that strips any `Co-Authored-By: Claude`… lines, as a backstop…
+> - [ ] Update the `pr-desc` skill to state that descriptions are sho …(truncated)
+
+Implemented in `5d70e82`. Files: `.claude/settings.json`, `.githooks/commit-msg`, `.claude/skills/pr-desc/SKILL.md`, `.claude/skills/pr-desc/references/pr-guide.md`
+
+✅ Reviewed against the diff: implementation matches the filed spec.
+
+📝 Review note: First of the attribution-hardening cluster [#455 → #477 → #484 → #486]. This ticket establishes the `attribution` block and the `.githooks/commit-msg` backstop; the git-author identity (`session-setup.sh`) and the `Claude-Session:`/PR-footer stripping arrive later in #477 and #484, and the PR-title-shape CI check in #486.
+
+#### #484 — Enhancement: Correct commit author and strip the Claude Code PR footer in cloud sessions (Enhancement)
+
+> ### Overview
+> Two attribution problems in Claude Code cloud/remote sessions:
+> 1. **Commit author.** Commits are authored by `Claude <noreply@anthropic.com>` instead of `RemainingDelta`…
+> 2. **PR footer.** A `_Generated by [Claude Code](...)_` footer is appended to PR bodies… added **server-side by the GitHub MCP integration at PR-creation time**…
+>
+> ### Notes
+> Overlaps with the still-open PR #482 (`477-Enhancement`), which introduces an equivalent `session-setup.sh` but not the footer-stripping workflow. If #482 merges first, the hook half here becomes a no-op; the workflow is additive either w …(truncated)
+
+Implemented in `4083a80`, `b0ad17d`. Files: `.claude/hooks/session-setup.sh`, `.claude/settings.json`, `.github/workflows/strip-pr-footer.yml`
+
+✅ Reviewed against the diff: adds the `SessionStart` `session-setup.sh` (pins `core.hooksPath`, `user.name`, `user.email`) and the `strip-pr-footer.yml` workflow that removes the server-injected `_Generated by [Claude Code]_` footer from PR bodies targeting `dev`.
+
+📝 Review note: The overlap the ticket predicted with #477 played out in reverse — #485 (this) merged *before* #482 (#477), so this PR's `session-setup.sh` landed first and #477's equivalent reconciled onto it rather than the other way around. The tree ends with a single `session-setup.sh`; this PR's uniquely surviving contribution is the `strip-pr-footer.yml` workflow, which no other ticket in the cluster provides.
+
+#### #486 — Enhancement: Enforce PR title format in CI (no colon, lowercase word after the type) (Enhancement)
+
+> ### Overview
+> PR titles drift from the repo convention `<issue>-<Type> <lowercase verb> …` — several open PRs used `<issue>-<Type>: Capitalized …`… There is no CI check enforcing the title shape…
+>
+> ### Technical Requirements
+> - [ ] Add a GitHub Actions workflow (`.github/workflows/pr-title-format-check.yml`)… fails when the title does not match `<number>-<Type> <lowercase word> …`
+> - [ ] The check must reject a colon after the type… and reject an uppercase first word after the ty …(truncated)
+
+Implemented in `140c76f`. Files: `.github/workflows/pr-title-format-check.yml`
+
+✅ Reviewed against the diff: implementation matches the filed spec — a new workflow on PRs into `dev` rejecting a colon after the type and an uppercase first word, leaving `pr-issue-reference-check.yml` untouched.
+
+#### #490 — Feature: Privacy policy document, /privacy-policy command, and auto-posted privacy channel (Feature)
+
+> ### Overview
+> R7 Bot has no published privacy policy… This adds one policy, written once and rendered in three places: a repo document, a `/privacy-policy` slash command, and a channel that is kept current on every restart.
+> No external website exists yet, so nothing links out — the only link anywhere is to the in-server tickets channel.
+>
+> ### Acceptance Criteria
+> - [ ] `/privacy-policy` responds successfully for a member with no roles, and the response is public (not ephemeral)
+> - [ ] … No link to any external website appears in the embeds, README, or docs …(truncated)
+
+Implemented in `588c108`, `c6bb2f4`, `014b663`, `ef4462e`. Files: `features/privacy_policy.py`, `PRIVACY_POLICY.md`, `features/config.py`, `features/general.py`, `main.py`, `pyproject.toml`, `README.md`, `docs/PRIVACY_SYSTEM.md`, `tests/test_privacy_policy.py`
+
+⚠️ as-implemented differs from #490: two acceptance criteria were reversed by the final commit (`ef4462e`). The ticket states "No external website exists yet, so nothing links out" and requires "No link to any external website… in the embeds, README, or docs" — but the shipped embed carries `[Read this policy on our website](https://remaining7.netlify.app/privacy)`. And AC required the command be "public (not ephemeral)" — the shipped `/privacy-policy` replies with `ephemeral=True`. Both reversals reflect a later decision (a website now exists; the response was made private) rather than the filed spec.
+
+📝 Review note: The single-source-of-truth structure holds — the policy text lives once in `features/privacy_policy.py` and is rendered to both the slash command and the `on_ready` auto-post (delete-then-repost, per the #149 support-panel pattern). `PRIVACY_CHANNEL_ID` shipped as placeholder `0` in `c6bb2f4` (auto-post logs a warning and skips) and was set to real IDs for both servers in `014b663`. This PR also carried the version bump `1.12.2 → 1.13.0` — a *minor* jump that broke the per-PR patch cadence and pre-empted the dedicated bump ticket #493 (see below).
+
+#### #477 — Enhancement: Enforce commit authorship and strip AI attribution in cloud sessions (Enhancement)
+
+> ### Overview
+> Routine and cloud session commits are authored as Claude and carry a `Claude-Session:` trailer, and PR bodies carry the session URL. This enforces author identity and attribution suppression at the repo level so it applies to every cloud run without being restated in the prompt.
+>
+> ### Technical Requirements
+> - [ ] Add `"sessionUrl": false` to the `attribution` block…
+> - [ ] Create `.claude/hooks/session-setup.sh` setting `core.hooksPath`, `user.name`, and `user.email`…
+> - [ ] Extend `.githooks/commit-msg` to strip `Claude-Session:`… lines…
+> - [ ] Gate the bot restart in `stop-checks.sh` behind `[ "$CLAUDE_CODE_REMOTE" != "true" ]` …(truncated)
+
+Implemented in `9a049b2`. Files: `.claude/hooks/session-setup.sh`, `.claude/hooks/stop-checks.sh`, `.claude/settings.json`, `.githooks/commit-msg`
+
+✅ Reviewed against the diff: implementation matches the filed spec — `sessionUrl: false`, the `session-setup.sh` author-identity hook, an extended `commit-msg` that strips `Claude-Session:`/`Co-Authored-By: Claude`/`Generated with [Claude Code]` and collapses trailing blanks, and the cloud-gated bot restart in `stop-checks.sh`.
+
+📝 Review note: Closes the attribution-hardening cluster [#455 → #477 → #484 → #486]. Although #477's code was authored earliest, its PR (#482) merged *last* — after #484 had already landed an equivalent `session-setup.sh` — so the final tree carries one reconciled script rather than two. Its uniquely surviving contributions are the `sessionUrl: false` key, the extended `commit-msg` trailer stripping, and the `CLAUDE_CODE_REMOTE` gate on the Stop-hook bot restart.
+
+#### #493 — Enhancement: Bump project version to v1.13.0 (Enhancement)
+
+> ### Overview
+> This enhancement updates the project version in `pyproject.toml` from v1.12.0 to v1.13.0, preparing for a new release.
+>
+> ### Acceptance Criteria
+> - [ ] The `pyproject.toml` file reflects version `v1.13.0`
+> - [ ] All relevant CI checks pass after the version b …(truncated)
+
+Version bump only, but with no commit of its own. Files: (none — no `493-Enhancement` branch).
+
+⚠️ as-implemented differs from #493: the bump had already been applied ahead of this ticket, inside the #490 privacy-policy PR (`c6bb2f4`, `1.12.2 → 1.13.0`), so #493 was closed as absorbed rather than implemented. Note the cadence break: every intervening PR since v1.12.0 did a single *patch* bump (`1.12.0 → 1.12.1` in #443, `→ 1.12.2` in #408), but #490 jumped the *minor* digit to `1.13.0`. The end number is correct for the release — the feature set (new `/privacy-policy`, `/leaderboard` group, one-word story) warrants a minor bump — but a feature PR unilaterally setting the release's minor version is the reason this ticket had nothing left to do.
+
+#### #494 — Enhancement: Update documentation for v1.13.0 release (Enhancement)
+
+> ### Overview
+> This enhancement aims to update all relevant documentation to reflect the changes introduced in release v1.13.0, ensuring accuracy and currency for users and developers.
+>
+> ### Technical Requirements
+> - [ ] Identify all changes/features introduced in v1.13.0.
+> - [ ] Review existing documentation (e.g., README, command help, wiki).
+> - [ ] U …(truncated)
+
+Implemented in `<pending — set to the 494-Enhancement doc commit sha once committed>`. Files: `docs/logs/SPECS.md`, `docs/logs/CHANGELOG.md`
+
+✅ Reviewed against the diff: implementation matches the filed spec.
+
+📝 Review note: Self-referential — this is the release-doc pass that wrote this very v1.13.0 SPECS section (and the v1.13.0 CHANGELOG release notes + PR descriptions, which are the separate half of this ticket). The `README`/`pyproject.toml` version bump was handled out-of-band by #490/#493 above, not here. The full README/`docs/`/help-command audit is tracked separately as #495. The commit sha above is a placeholder until this branch is committed and merged.
