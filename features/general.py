@@ -85,7 +85,8 @@ class General(commands.Cog):
         utility_text = (
             "`/booster-perks` - View all Server Booster perks\n"
             "`/convert-time` - Convert a date and time to Discord timestamp formats\n"
-            "`/version` - View the bot's current version"
+            "`/version` - View the bot's current version\n"
+            "`/privacy-policy` - See what data the bot stores about you and why"
         )
         embed.add_field(name="🔧 Utility", value=utility_text, inline=False)
 
