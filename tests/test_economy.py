@@ -318,7 +318,6 @@ def _patch_queue_helpers(monkeypatch, entries, budgets):
     monkeypatch.setattr("features.economy.create_redemption_ticket", create_ticket)
     monkeypatch.setattr("features.economy.remove_redemption_queue_entry", remove_entry)
     monkeypatch.setattr("features.economy.apply_queue_refund", refund)
-    monkeypatch.setattr("features.economy._increment_redeem_counter", AsyncMock())
     # Crash-safe claim/record: claims succeed by default; tests that exercise a
     # lost claim or a pre-claimed entry re-patch these.
     monkeypatch.setattr(
