@@ -9,6 +9,9 @@ from features.tourney.tourney_commands import (
     restore_tourney_panels,
 )
 
+# Import the privacy policy repost (keeps the privacy channel current on restart)
+from features.privacy_policy import repost_privacy_policy
+
 # Import Database connection check
 from database.mongo import db
 
@@ -91,6 +94,9 @@ async def on_ready():
         await bot.load_extension("features.tourney.tourney_reports")
         print("✅ Loaded Feature: Tourney Reports")
 
+        await bot.load_extension("features.privacy_policy")
+        print("✅ Loaded Feature: Privacy Policy")
+
     except Exception as e:
         print(f"❌ Error loading features: {e}")
 
@@ -102,7 +108,10 @@ async def on_ready():
     except Exception as e:
         print(f"⚠️ Tourney Error: {e}")
 
-    # 4. SYNC COMMANDS (Do this LAST)
+    # 4. Repost the privacy policy so the channel reflects the current wording
+    await repost_privacy_policy(bot)
+
+    # 5. SYNC COMMANDS (Do this LAST)
     try:
         # This registers /shop, /buy, /tourney, /audit_emojis etc.
         synced = await bot.tree.sync()
