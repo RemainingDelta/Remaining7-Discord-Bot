@@ -9,6 +9,9 @@ from features.tourney.tourney_commands import (
     restore_tourney_panels,
 )
 
+# Import startup wiring (extension list, error feedback)
+from features.startup import handle_command_error, load_all_extensions
+
 # Import Database connection check
 from database.mongo import db
 
@@ -24,85 +27,58 @@ intents.invites = True
 # Initialize Bot
 bot = commands.Bot(command_prefix="!", intents=intents)
 
+# on_ready fires again on every gateway re-IDENTIFY, so the post-connect steps
+# below are guarded to run once per process.
+_startup_done = False
+
 # --- EVENTS ---
 
 
 @bot.event
-async def on_ready():
-    print(f"✅ Logged in as {bot.user}")
+async def setup_hook():
+    """Register everything before the gateway connects.
 
+    discord.py awaits this at the end of login(), ahead of connect(), so every
+    command exists before Discord can deliver the first message. This used to run
+    inside on_ready alongside message handling, which is why a !c typed right after
+    a restart silently did nothing (#469).
+    """
     # 1. Check Database Connection
     if db is not None:
         print("✅ MongoDB Connected via 'database.mongo'")
     else:
         print("❌ MongoDB Connection Failed (Check .env and MONGO_URI)")
 
-    # 2. Load Features (Cogs)
-    try:
-        # Load General Feature
-        await bot.load_extension("features.general")
-        print("✅ Loaded Feature: General")
+    # 2. Load Features (Cogs) — each one isolated, so a failure cannot skip the rest
+    failed = await load_all_extensions(bot)
+    if failed:
+        print(f"⚠️ {len(failed)} feature(s) failed to load: {', '.join(failed)}")
 
-        await bot.load_extension("features.economy")
-        print("✅ Loaded Feature: Economy")
-
-        await bot.load_extension("features.event")
-        print("✅ Loaded Feature: Event")
-
-        # Load Security/Hacked Feature
-        await bot.load_extension("features.security")
-        print("✅ Loaded Feature: Security (Hacked)")
-
-        await bot.load_extension("features.scam_detection")
-        print("✅ Loaded Feature: Scam Detection")
-
-        await bot.load_extension("features.brawl.commands")
-        print("✅ Loaded Feature: Brawl (Drops)")
-
-        # Load Quests Feature
-        await bot.load_extension("features.quests")
-        print("✅ Loaded Feature: Quests")
-
-        # Load Translation Feature
-        await bot.load_extension("features.translation")
-        print("✅ Loaded Feature: Translation")
-
-        await bot.load_extension("features.support_tickets")
-        print("✅ Loaded Feature: Support Tickets")
-
-        await bot.load_extension("features.booster_shoutout")
-        print("✅ Loaded Feature: Booster Shoutout")
-
-        await bot.load_extension("features.github_tickets")
-        print("✅ Loaded Feature: GitHub Tickets")
-
-        await bot.load_extension("features.sticky")
-        print("✅ Loaded Feature: Sticky Messages")
-
-        await bot.load_extension("features.counting")
-        print("✅ Loaded Feature: Counting")
-
-        await bot.load_extension("features.story")
-        print("✅ Loaded Feature: Story")
-
-        await bot.load_extension("features.message_mirror")
-        print("✅ Loaded Feature: Message Mirror")
-
-        await bot.load_extension("features.tourney.tourney_reports")
-        print("✅ Loaded Feature: Tourney Reports")
-
-    except Exception as e:
-        print(f"❌ Error loading features: {e}")
-
-    # 3. Load Tourney System
+    # 3. Load Tourney System (registers !c / !close and friends)
     try:
         setup_tourney_commands(bot)
         print("✅ Loaded Feature: Tournaments")
-        await restore_tourney_panels(bot)
     except Exception as e:
         print(f"⚠️ Tourney Error: {e}")
 
-    # 4. SYNC COMMANDS (Do this LAST)
+
+@bot.event
+async def on_ready():
+    global _startup_done
+
+    print(f"✅ Logged in as {bot.user}")
+
+    if _startup_done:
+        return
+
+    # 4. Restore the ticket panels. Needs the guild cache, so it cannot move into
+    #    setup_hook.
+    try:
+        await restore_tourney_panels(bot)
+    except Exception as e:
+        print(f"⚠️ Tourney Panel Restore Error: {e}")
+
+    # 5. SYNC COMMANDS (Do this LAST)
     try:
         # This registers /shop, /buy, /tourney, /audit_emojis etc.
         synced = await bot.tree.sync()
@@ -110,7 +86,14 @@ async def on_ready():
     except Exception as e:
         print(f"⚠️ Command Sync Error: {e}")
 
+    _startup_done = True
     print("🚀 Bot Startup Complete!")
+
+
+@bot.event
+async def on_command_error(ctx, error):
+    """Reply instead of going silent when a command is not available yet (#469)."""
+    await handle_command_error(ctx, error, startup_done=_startup_done)
 
 
 if __name__ == "__main__":

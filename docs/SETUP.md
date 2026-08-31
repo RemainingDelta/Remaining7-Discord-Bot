@@ -110,33 +110,57 @@ GITHUB_REPO=owner/repo-name
 
 ---
 
-## Cog Loading Order (`main.py`)
+## Startup Sequence (`main.py`)
 
-The order in `on_ready` matters for a few cogs:
+Registration happens in `setup_hook`, not `on_ready`. discord.py awaits `setup_hook` at the end of `login()` and before `connect()` opens the gateway, so every command exists before Discord can deliver a message. This used to all run in `on_ready`, concurrently with message handling, which is why a `!c` typed right after a restart silently did nothing (#469).
+
+The extension list lives in `features/startup.py` as `EXTENSIONS`, in load order:
 
 ```python
-await bot.load_extension("features.general")
-await bot.load_extension("features.economy")
-await bot.load_extension("features.event")
-await bot.load_extension("features.security")
-await bot.load_extension("features.brawl.commands")
-await bot.load_extension("features.quests")
-await bot.load_extension("features.translation")
-await bot.load_extension("features.support_tickets")
-await bot.load_extension("features.github_tickets")
-await bot.load_extension("features.sticky")
-await bot.load_extension("features.counting")
-await bot.load_extension("features.tourney.tourney_reports")
-
-# Tourney system uses a setup function, not load_extension
-setup_tourney_commands(bot)
-await restore_tourney_panels(bot)   # Re-registers persistent views after restart
-
-# Always last
-await bot.tree.sync()
+# features/startup.py
+EXTENSIONS = (
+    "features.heartbeat",
+    "features.general",
+    "features.economy",
+    "features.event",
+    "features.security",
+    "features.scam_detection",
+    "features.brawl.commands",
+    "features.quests",
+    "features.translation",
+    "features.support_tickets",
+    "features.booster_shoutout",
+    "features.github_tickets",
+    "features.sticky",
+    "features.counting",
+    "features.story",
+    "features.message_mirror",
+    "features.tourney.tourney_reports",
+)
 ```
 
-`restore_tourney_panels()` must run after `setup_tourney_commands()`. `bot.tree.sync()` must always be last — syncing before all cogs are loaded will miss slash commands.
+```python
+# main.py
+@bot.event
+async def setup_hook():
+    await load_all_extensions(bot)   # one try/except per extension
+    setup_tourney_commands(bot)      # registers !c / !close and the other prefix commands
+
+
+@bot.event
+async def on_ready():
+    if _startup_done:
+        return
+    await restore_tourney_panels(bot)   # needs the guild cache
+    await bot.tree.sync()               # always last
+    _startup_done = True
+```
+
+`load_all_extensions()` wraps each load in its own `try/except` and returns the names that failed. They previously shared one `try/except`, so a failure in the second cog silently skipped every cog after it — including the one registering `!c`.
+
+Two steps must stay in `on_ready` because they need a populated guild cache: `restore_tourney_panels()` (which must still run after `setup_tourney_commands()`) and `bot.tree.sync()`, which must always be last — syncing before all cogs are loaded will miss slash commands. `on_ready` fires again on every gateway re-IDENTIFY, so both are behind a run-once `_startup_done` guard.
+
+Anything inside a cog that touches the guild cache must now await `bot.wait_until_ready()` first, since `cog_load` runs before the gateway connects. `resume_tourney_if_active()` and the quests invite cache both do.
 
 ---
 
@@ -240,7 +264,7 @@ Steps:
 1. Copy `features/security.py`
 2. Add the three config constants
 3. Add the three mongo helpers
-4. `await bot.load_extension("features.security")` in `main.py`
+4. Add `"features.security"` to `EXTENSIONS` in `features/startup.py`
 5. Sync slash commands
 
 The 12-hour purge window and 7-day timeout duration are both constants defined inline in `_execute_hacked_action()` — trivial to adjust.
@@ -265,4 +289,6 @@ Tests use `pytest-asyncio`. Individual test files map 1:1 to feature files (e.g.
 | `MongoDB Connection Failed` | Bad `MONGO_URI` or network issue | Check Atlas IP allowlist and URI format |
 | `Command Sync Error` | Slash commands sync failed | Usually a rate limit — wait and restart |
 | Buttons dead after restart | `restore_tourney_panels()` not called or views not re-registered | Ensure `restore_tourney_panels(bot)` runs in `on_ready` |
+| A prefix command does nothing at all | Its cog failed to load — check the console for `❌ Failed to load ...` | Fix that cog. Other cogs are unaffected; each loads independently |
+| `⏳ The bot is still starting up` | Command used before `setup_hook` finished, or its cog failed to load | Retry once; if it persists, check the load errors above |
 | `Tourney category is not configured correctly` | `TOURNEY_CATEGORY_ID` points to wrong channel type | Must be a Category, not a Text Channel |

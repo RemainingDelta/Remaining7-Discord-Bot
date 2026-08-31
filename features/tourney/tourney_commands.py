@@ -13,6 +13,7 @@ from .matcherino import (
     find_match_by_team_name,
     clear_bracket_teams_cache,
 )
+from .tourney_recovery import sweep_missed_closes
 from .hall_of_fame import (
     HOF_MAX_ATTEMPTS,
     cancel_task_slot,
@@ -24,6 +25,8 @@ from .hall_of_fame import (
     next_hof_retry_at,
     should_supersede,
 )
+
+from features.heartbeat import capture_downtime_window
 
 from database.mongo import (
     add_payout_batch,
@@ -715,6 +718,7 @@ class QueueDashboard(commands.Cog):
         self.match_refresher_task.start()
         self.winner_reconcile_task.start()
         self.hof_reconcile_task.start()
+        self.missed_close_reconcile_task.start()
 
     def cog_unload(self):
         self.dashboard_task.cancel()
@@ -722,6 +726,7 @@ class QueueDashboard(commands.Cog):
         self.match_refresher_task.cancel()
         self.winner_reconcile_task.cancel()
         self.hof_reconcile_task.cancel()
+        self.missed_close_reconcile_task.cancel()
 
     # --- HALL OF FAME PRIZEPOOL RECONCILE (crash recovery, #443) ---
     @tasks.loop(count=1)
@@ -766,6 +771,26 @@ class QueueDashboard(commands.Cog):
             )
         except Exception as e:
             print(f"❌ Winner announcement reconcile failed: {e}")
+
+    # --- MISSED !c REPLAY (restart recovery, #469) ---
+    @tasks.loop(count=1)
+    async def missed_close_reconcile_task(self):
+        """Cold-boot-only. A !c typed while the bot was down was never delivered by
+        Discord, so read it back out of channel history and replay it through the
+        real command path. Only the open ticket categories are scanned, which is
+        what keeps this safe to run on every boot."""
+        await self.bot.wait_until_ready()
+        try:
+            if not await get_active_tourney_session():
+                return
+            window_start = await capture_downtime_window()
+            if window_start is None:
+                return
+            replayed = await sweep_missed_closes(self.bot, window_start)
+            if replayed:
+                print(f"♻️ Replayed {replayed} !c missed during downtime.")
+        except Exception as e:
+            print(f"❌ Missed-close reconcile failed: {e}")
 
     async def start_dashboard(self):
         """Starts dashboard loops if not already running."""
@@ -1749,10 +1774,6 @@ def setup_tourney_commands(bot: commands.Bot):
     slowmode_auto_disable_task: list[asyncio.Task | None] = [
         None
     ]  # mutable container for closure
-
-    # Re-attach the Hall of Fame prizepool alert controls after a restart so the
-    # buttons on an outstanding alert keep working (#443).
-    bot.add_view(HallOfFamePrizeView(bot))
 
     @bot.command(name="close", aliases=["c"])
     async def close_command(ctx: commands.Context):
@@ -3737,6 +3758,9 @@ def setup_tourney_commands(bot: commands.Bot):
         """After a restart, non-destructively rehydrate runtime state for an
         in-progress tourney so it continues without staff intervention. No-op if
         there is no active session."""
+        # setup_tourney_commands now runs in setup_hook, before the gateway connects,
+        # so this has to wait for the guild cache before using bot.get_channel (#469).
+        await bot.wait_until_ready()
         try:
             session = await get_active_tourney_session()
         except Exception as e:
@@ -3855,6 +3879,15 @@ def setup_tourney_commands(bot: commands.Bot):
         print("✅ Tourney resume complete.")
 
     asyncio.create_task(resume_tourney_if_active())
+
+    # Re-attach the Hall of Fame prizepool alert controls after a restart so the
+    # buttons on an outstanding alert keep working (#443). Registered last, and
+    # isolated: this used to run before the @bot.command declarations, so a failure
+    # here left !c and every other tourney prefix command unregistered (#469).
+    try:
+        bot.add_view(HallOfFamePrizeView(bot))
+    except Exception as e:
+        print(f"⚠️ Hall of Fame view registration failed: {e}")
 
     bot.tree.add_command(tourney_panel)
     bot.tree.add_command(pre_tourney_panel)
