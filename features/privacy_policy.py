@@ -22,13 +22,22 @@ from features.config import OTHER_TICKET_CHANNEL_ID, PRIVACY_CHANNEL_ID
 POLICY_TITLE = "Remaining 7 Bot Privacy Policy"
 LAST_UPDATED = "August 28, 2026"
 
+# The same policy, hosted on the web. Linked at the foot of the last embed for
+# anyone who wants to read or share it outside Discord. This is the one external
+# link the embeds carry (the footer itself can't hold a link, so the link sits
+# as the last line of the description, just above the footer).
+POLICY_URL = "https://remaining7.netlify.app/privacy"
+WEB_LINK_LINE = f"[Read this policy on our website]({POLICY_URL})"
+
 # How far back the startup repost looks for its own previous copy. The channel
 # holds nothing but this policy, so a handful of messages is plenty.
 HISTORY_SCAN_LIMIT = 50
 
-# Rendered into the contact section. The linked form needs a guild to build the
-# channel URL from; outside a guild (a DM) the plain form is used instead.
-CONTACT_LINK = "Open a ticket in [#tickets]({url}) and select Server Support."
+# Rendered into the contact section. In a guild #tickets is shown as a real
+# channel mention — the purple #channel chip — which Discord renders from the
+# `<#id>` form. Outside a guild (a DM) that mention would not resolve to a name,
+# so the plain wording is used instead.
+CONTACT_LINK = "Open a ticket in {mention} and select Server Support."
 CONTACT_PLAIN = "Open a ticket in the tickets channel and select Server Support."
 
 
@@ -53,9 +62,9 @@ POLICY_PARTS: tuple[PolicyPart, ...] = (
     PolicyPart(
         title=f"🔒 {POLICY_TITLE}",
         intro=(
-            'This policy explains what information Remaining7Bot ("the bot," '
-            '"R7 Bot") collects when you use it in the Remaining 7 Discord '
-            "server, how that information is used, and how it is protected. "
+            "This policy explains what information Remaining 7 Bot collects "
+            "when you use it in the Remaining 7 Discord server, how that "
+            "information is used, and how it is protected. "
             "This policy applies only to the bot's own data practices and is "
             "separate from Discord's own Privacy Policy, which governs the "
             "Discord platform itself."
@@ -64,7 +73,7 @@ POLICY_PARTS: tuple[PolicyPart, ...] = (
             PolicySection(
                 heading="Who we are",
                 body=(
-                    "Remaining7Bot is operated by Remaining 7, a Brawl Stars "
+                    "Remaining 7 Bot is operated by Remaining 7, a Brawl Stars "
                     "esports organization, for use within its own Discord "
                     "server. This is a private bot built for a single "
                     "community and is not available for other servers to add."
@@ -217,15 +226,16 @@ POLICY_PARTS: tuple[PolicyPart, ...] = (
 
 
 def tickets_contact_line(guild_id: int | None) -> str:
-    """The contact line, linking #tickets when there is a guild to link within.
+    """The contact line, showing #tickets as a channel mention chip in a guild.
 
-    The channel ID comes from the config split, so the dev server links its own
+    A bare `<#id>` mention only renders as the channel chip where Discord can
+    resolve it, so outside a guild (a DM) the plain wording is used instead. The
+    channel ID comes from the config split, so the dev server points at its own
     tickets channel rather than the production one.
     """
     if not guild_id:
         return CONTACT_PLAIN
-    url = f"https://discord.com/channels/{guild_id}/{OTHER_TICKET_CHANNEL_ID}"
-    return CONTACT_LINK.format(url=url)
+    return CONTACT_LINK.format(mention=f"<#{OTHER_TICKET_CHANNEL_ID}>")
 
 
 def _render(section: PolicySection, guild_id: int | None) -> str:
@@ -253,6 +263,7 @@ def build_privacy_embeds(guild_id: int | None) -> list[discord.Embed]:
             )
         )
 
+    embeds[-1].description += f"\n\n{WEB_LINK_LINE}"
     embeds[-1].set_footer(text=f"Last updated: {LAST_UPDATED}")
     return embeds
 
@@ -267,7 +278,7 @@ class PrivacyPolicy(commands.Cog):
     )
     async def privacy_policy(self, interaction: discord.Interaction):
         await interaction.response.send_message(
-            embeds=build_privacy_embeds(interaction.guild_id)
+            embeds=build_privacy_embeds(interaction.guild_id), ephemeral=True
         )
 
 

@@ -247,7 +247,7 @@ Every user always has **4 active quests** — one daily and one weekly per categ
 ### Utility
 - `/convert-time <date> <time> <timezone>` — convert a date and time to all Discord timestamp formats. Supports 20+ timezone aliases (EST, PT, GMT, etc.) and IANA names.
 - `/version` — view the bot's current version.
-- `/privacy-policy` — view what data the bot collects, why, and how to request deletion. Public, no permission gate. The same policy is posted in the privacy channel and kept current on every restart, and lives in [`PRIVACY_POLICY.md`](./PRIVACY_POLICY.md).
+- `/privacy-policy` — view what data the bot collects, why, and how to request deletion. Ephemeral (visible only to you), no permission gate. The same policy is posted publicly in the privacy channel and kept current on every restart, and lives in [`PRIVACY_POLICY.md`](./PRIVACY_POLICY.md).
 
 ### Help Commands
 - `/help` — user command directory.

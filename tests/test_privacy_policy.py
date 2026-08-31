@@ -19,6 +19,7 @@ from features.config import OTHER_TICKET_CHANNEL_ID
 from features.privacy_policy import (
     LAST_UPDATED,
     POLICY_PARTS,
+    POLICY_URL,
     PrivacyPolicy,
     build_privacy_embeds,
     repost_privacy_policy,
@@ -155,17 +156,16 @@ def test_last_updated_matches_the_filed_date():
     assert LAST_UPDATED == "August 28, 2026"
 
 
-def test_last_embed_links_the_tickets_channel():
+def test_last_embed_mentions_the_tickets_channel():
     last = _rendered([build_privacy_embeds(GUILD_ID)[-1]])
-    expected = f"https://discord.com/channels/{GUILD_ID}/{OTHER_TICKET_CHANNEL_ID}"
-    assert f"[#tickets]({expected})" in last
+    assert f"<#{OTHER_TICKET_CHANNEL_ID}>" in last
     assert "select Server Support" in last
 
 
-def test_tickets_link_is_only_in_the_last_embed():
+def test_tickets_mention_is_only_in_the_last_embed():
     embeds = build_privacy_embeds(GUILD_ID)
     for embed in embeds[:-1]:
-        assert "discord.com/channels" not in _rendered([embed])
+        assert f"<#{OTHER_TICKET_CHANNEL_ID}>" not in _rendered([embed])
 
 
 def test_dev_mode_does_not_link_the_production_tickets_channel():
@@ -173,7 +173,7 @@ def test_dev_mode_does_not_link_the_production_tickets_channel():
     assert str(PROD_TICKETS_CHANNEL_ID) not in _rendered(build_privacy_embeds(GUILD_ID))
 
 
-def test_prod_mode_links_the_production_tickets_channel():
+def test_prod_mode_mentions_the_production_tickets_channel():
     import features.config
     import features.privacy_policy
 
@@ -182,20 +182,24 @@ def test_prod_mode_links_the_production_tickets_channel():
         importlib.reload(features.config)
         prod = importlib.reload(features.privacy_policy)
         rendered = _rendered(prod.build_privacy_embeds(PROD_GUILD_ID))
-        assert (
-            f"https://discord.com/channels/{PROD_GUILD_ID}/{PROD_TICKETS_CHANNEL_ID}"
-            in rendered
-        )
+        assert f"<#{PROD_TICKETS_CHANNEL_ID}>" in rendered
     finally:
         os.environ["BOT_MODE"] = "TEST"
         importlib.reload(features.config)
         importlib.reload(features.privacy_policy)
 
 
-def test_no_external_links_in_the_embeds():
-    urls = re.findall(r"https?://\S+", _rendered(build_privacy_embeds(GUILD_ID)))
+def test_policy_site_is_the_only_external_link():
+    urls = re.findall(r"https?://[^\s)]+", _rendered(build_privacy_embeds(GUILD_ID)))
+    assert POLICY_URL in urls, "the web link should be present"
     for url in urls:
-        assert url.startswith("https://discord.com/channels/"), f"external link: {url}"
+        assert url == POLICY_URL, f"unexpected external link: {url}"
+
+
+def test_web_link_is_at_the_foot_of_the_last_embed():
+    embeds = build_privacy_embeds(GUILD_ID)
+    assert POLICY_URL not in _rendered(embeds[:-1])
+    assert embeds[-1].description.rstrip().endswith(f"({POLICY_URL})")
 
 
 def test_contact_line_has_no_broken_link_without_a_guild():
@@ -244,11 +248,11 @@ def test_readme_links_the_privacy_policy_document():
     assert "./PRIVACY_POLICY.md" in text
 
 
-def test_privacy_docs_guide_has_no_external_links():
+def test_privacy_docs_guide_links_only_the_policy_site():
     text = (REPO_ROOT / "docs" / "PRIVACY_SYSTEM.md").read_text(encoding="utf-8")
-    urls = re.findall(r"https?://\S+", text)
+    urls = re.findall(r"https?://[^\s>)]+", text)
     for url in urls:
-        assert url.startswith("https://discord.com/channels/"), f"external link: {url}"
+        assert url == POLICY_URL, f"unexpected external link: {url}"
 
 
 # --- /privacy-policy command ---
@@ -266,13 +270,13 @@ async def test_privacy_command_responds_with_the_embed_sequence(
     assert len(kwargs["embeds"]) == len(build_privacy_embeds(GUILD_ID))
 
 
-async def test_privacy_command_is_public(mock_bot, mock_interaction):
+async def test_privacy_command_is_ephemeral(mock_bot, mock_interaction):
     mock_interaction.guild_id = GUILD_ID
     cog = PrivacyPolicy(mock_bot)
     await cog.privacy_policy.callback(cog, mock_interaction)
 
     kwargs = mock_interaction.response.send_message.call_args.kwargs
-    assert not kwargs.get("ephemeral", False)
+    assert kwargs.get("ephemeral") is True
 
 
 async def test_privacy_command_works_for_a_member_with_no_roles(
@@ -287,7 +291,7 @@ async def test_privacy_command_works_for_a_member_with_no_roles(
     assert kwargs["embeds"]
 
 
-async def test_privacy_command_response_links_the_tickets_channel(
+async def test_privacy_command_response_mentions_the_tickets_channel(
     mock_bot, mock_interaction
 ):
     mock_interaction.guild_id = GUILD_ID
@@ -295,8 +299,7 @@ async def test_privacy_command_response_links_the_tickets_channel(
     await cog.privacy_policy.callback(cog, mock_interaction)
 
     embeds = mock_interaction.response.send_message.call_args.kwargs["embeds"]
-    expected = f"https://discord.com/channels/{GUILD_ID}/{OTHER_TICKET_CHANNEL_ID}"
-    assert expected in _rendered(embeds)
+    assert f"<#{OTHER_TICKET_CHANNEL_ID}>" in _rendered(embeds)
 
 
 # --- startup repost ---
@@ -345,7 +348,7 @@ async def test_repost_posts_the_full_embed_sequence(
     assert len(embeds) == len(build_privacy_embeds(GUILD_ID))
 
 
-async def test_repost_uses_the_channels_own_guild_for_the_tickets_link(
+async def test_repost_mentions_the_tickets_channel(
     mock_bot, privacy_channel_configured
 ):
     channel = _privacy_channel([])
@@ -354,8 +357,7 @@ async def test_repost_uses_the_channels_own_guild_for_the_tickets_link(
     await repost_privacy_policy(mock_bot)
 
     embeds = channel.send.call_args.kwargs["embeds"]
-    expected = f"https://discord.com/channels/{GUILD_ID}/{OTHER_TICKET_CHANNEL_ID}"
-    assert expected in _rendered(embeds)
+    assert f"<#{OTHER_TICKET_CHANNEL_ID}>" in _rendered(embeds)
 
 
 async def test_repost_posts_even_when_the_channel_is_empty(

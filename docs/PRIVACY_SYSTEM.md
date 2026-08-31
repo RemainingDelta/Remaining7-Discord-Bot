@@ -3,7 +3,7 @@
 ## Overview
 The bot publishes one privacy policy in three places: `PRIVACY_POLICY.md` at the repo root, the `/privacy-policy` slash command, and a channel the bot reposts to on every startup. The wording lives once, as data, in `features/privacy_policy.py` — both Discord surfaces render the same `POLICY_PARTS`, so a change to the policy reaches the command and the channel together.
 
-There is no privacy website. The only link the policy carries is to the in-server tickets channel, which is how deletion requests and questions arrive.
+The same policy is also hosted on the web at <https://remaining7.netlify.app/privacy>, linked at the foot of the last embed for anyone who wants to read or share it outside Discord. The only other reference the policy carries is a mention of the in-server tickets channel, which is how deletion requests and questions arrive.
 
 ---
 
@@ -39,10 +39,10 @@ Each part becomes one embed: `part.intro`, then every section as `## heading` fo
 `guild_id` only shapes the contact line. `tickets_contact_line(guild_id)` builds:
 
 ```
-Open a ticket in [#tickets](https://discord.com/channels/<guild_id>/<OTHER_TICKET_CHANNEL_ID>) and select Server Support.
+Open a ticket in <#OTHER_TICKET_CHANNEL_ID> and select Server Support.
 ```
 
-The guild comes from the caller at runtime (`interaction.guild_id` for the command, `channel.guild.id` for the startup post) and the channel from `OTHER_TICKET_CHANNEL_ID`, which is already split REAL/TEST in `features/config.py`. Nothing is hardcoded: the dev server links its own tickets channel. Called without a guild — a DM — the line degrades to plain text rather than emitting a URL with `None` in it.
+The `<#id>` form is a real Discord channel mention, so it renders as the purple `#channel` chip rather than a blue URL link. The channel comes from `OTHER_TICKET_CHANNEL_ID`, which is already split REAL/TEST in `features/config.py`, so the dev server points at its own tickets channel. `guild_id` no longer feeds the mention itself; it is only used to decide guild vs. DM. Called without a guild — a DM, where a bare mention would not resolve to a name — the line degrades to plain text instead.
 
 The `{contact}` placeholder is the only templated text in the policy; every other body is rendered verbatim.
 
@@ -50,10 +50,10 @@ The `{contact}` placeholder is the only templated text in the policy; every othe
 
 ## `/privacy-policy`
 
-Public, no permission gate, not ephemeral. One response containing the whole embed sequence:
+Ephemeral, no permission gate — the response is visible only to the member who ran it. The channel repost (below) is the everyone-can-see copy. One response containing the whole embed sequence:
 
 ```python
-await interaction.response.send_message(embeds=build_privacy_embeds(interaction.guild_id))
+await interaction.response.send_message(embeds=build_privacy_embeds(interaction.guild_id), ephemeral=True)
 ```
 
 Listed in the Utility section of `/help`.
@@ -97,11 +97,11 @@ Adding a section means adding a `PolicySection` to whichever part keeps the thre
 - section list and order against the filed policy
 - 2–3 embeds, each description under 4096, the sequence under 6000
 - every section body actually rendered, and the last embed carrying the date
-- the tickets link present only in the last embed, built from the config channel
-- production mode linking the production tickets channel (via `importlib.reload` of the config), dev mode never containing the production ID
-- no external links anywhere in the embeds, the document, or this guide
+- the tickets channel mention present only in the last embed, built from the config channel
+- production mode mentioning the production tickets channel (via `importlib.reload` of the config), dev mode never containing the production ID
+- the hosted policy site as the only external link in the embeds and in this guide (at the foot of the last embed); the standalone `PRIVACY_POLICY.md` carries none
 - the policy text existing in exactly one file under `features/`
-- the command responding publicly, including for a member with no roles
+- the command responding ephemerally, including for a member with no roles
 - the startup repost deleting the bot's messages **before** posting, leaving other authors' messages alone, and skipping a missing, non-text, or unconfigured channel without raising
 
 ---

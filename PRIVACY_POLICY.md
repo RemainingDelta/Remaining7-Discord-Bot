@@ -2,11 +2,11 @@
 
 Last updated: August 28, 2026
 
-This policy explains what information Remaining7Bot ("the bot," "R7 Bot") collects when you use it in the Remaining 7 Discord server, how that information is used, and how it is protected. This policy applies only to the bot's own data practices and is separate from Discord's own Privacy Policy, which governs the Discord platform itself.
+This policy explains what information Remaining 7 Bot collects when you use it in the Remaining 7 Discord server, how that information is used, and how it is protected. This policy applies only to the bot's own data practices and is separate from Discord's own Privacy Policy, which governs the Discord platform itself.
 
 ## Who we are
 
-Remaining7Bot is operated by Remaining 7, a Brawl Stars esports organization, for use within its own Discord server. This is a private bot built for a single community and is not available for other servers to add.
+Remaining 7 Bot is operated by Remaining 7, a Brawl Stars esports organization, for use within its own Discord server. This is a private bot built for a single community and is not available for other servers to add.
 
 ## What information we collect
 
