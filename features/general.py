@@ -70,8 +70,9 @@ class General(commands.Cog):
         embed.add_field(name="🌐 Translation", value=translation_text, inline=False)
 
         counting_text = (
-            "Type the next number in sequence in the counting channel!\n"
-            "*(Stay on track — any wrong number resets the count)*"
+            "Type the next number in the counting channel — a plain number or a "
+            "simple math expression like `7*10` both count!\n"
+            "*(Off-sequence, repeat-user, or invalid messages are removed; the count keeps going)*"
         )
         embed.add_field(name="🔢 Counting Game", value=counting_text, inline=False)
 
