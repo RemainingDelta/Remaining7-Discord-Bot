@@ -1,12 +1,18 @@
 [project]
 name = "remaining7-discord-bot"
-version = "1.12.0"
+version = "1.13.0"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
 
 [tool.ruff.lint]
-# Pin the ruleset explicitly so `ruff check` is deterministic across ruff
-# versions (CI installs ruff unpinned). This is ruff's historical default set.
+# Pin the ruleset explicitly so `ruff check` stays deterministic even if the
+# pinned ruff version changes. This is ruff's historical default set.
 select = ["E4", "E7", "E9", "F"]
+
+[tool.ruff.format]
+# Docs are prose; keep the code formatter from reformatting Python snippets
+# embedded in markdown (ruff 0.16+ does this by default, which diverged local
+# from CI). See #450.
+exclude = ["*.md"]

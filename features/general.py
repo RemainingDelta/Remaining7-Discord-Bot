@@ -33,9 +33,9 @@ class General(commands.Cog):
             "`/balance` - View your token total\n"
             "`/daily` - Claim daily tokens & check progress\n"
             "`/quests` - View active daily and weekly quests\n"
-            "`/leaderboard` - See top token holders\n"
+            "`/leaderboard token` - See top token holders\n"
             "`/level` - Check your rank & XP progress\n"
-            "`/levels-leaderboard` - See top server levels\n"
+            "`/leaderboard level` - See top server levels\n"
             "`/shop` - Browse the token store\n"
             "`/buy` - Purchase an item from the shop\n"
             "`/redeem` - Claim your purchased rewards\n"
@@ -70,15 +70,24 @@ class General(commands.Cog):
         embed.add_field(name="🌐 Translation", value=translation_text, inline=False)
 
         counting_text = (
-            "Type the next number in sequence in the counting channel!\n"
-            "*(Stay on track — any wrong number resets the count)*"
+            "Type the next number in the counting channel — a plain number or a "
+            "simple math expression like `7*10` both count!\n"
+            "*(Off-sequence, repeat-user, or invalid messages are removed; the count keeps going)*"
         )
         embed.add_field(name="🔢 Counting Game", value=counting_text, inline=False)
+
+        story_text = (
+            "Build a story one word per message in the story channel while it's active!\n"
+            "`/story-see` - View the story so far\n"
+            "*(One word per message — no spaces, emojis, or banned words, and you can't go twice in a row)*"
+        )
+        embed.add_field(name="📖 One-Word Story", value=story_text, inline=False)
 
         utility_text = (
             "`/booster-perks` - View all Server Booster perks\n"
             "`/convert-time` - Convert a date and time to Discord timestamp formats\n"
-            "`/version` - View the bot's current version"
+            "`/version` - View the bot's current version\n"
+            "`/privacy-policy` - See what data the bot stores about you and why"
         )
         embed.add_field(name="🔧 Utility", value=utility_text, inline=False)
 
@@ -143,6 +152,15 @@ class General(commands.Cog):
             "`!unsticky` - Remove the active sticky message from a channel."
         )
         embed.add_field(name="🔧 Server Tools", value=tools_text, inline=False)
+
+        story_text = (
+            "`/story-start` - Open a new story (activates the channel).\n"
+            "`/story-end` - Publish, archive & close the current story.\n"
+            "`/story-reset` - Silently archive & clear the story.\n"
+            "`/story-banword add|remove|list` - Manage banned words.\n"
+            "`/story-banchar add|remove|list` - Manage banned characters."
+        )
+        embed.add_field(name="📖 One-Word Story", value=story_text, inline=False)
 
         await interaction.response.send_message(embed=embed, ephemeral=True)
 

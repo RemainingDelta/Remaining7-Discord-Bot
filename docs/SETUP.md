@@ -29,6 +29,10 @@ requests-cache>=1.3
 beautifulsoup4>=4.14
 pytest>=7.0
 pytest-asyncio>=0.23
+opencv-python-headless>=4.8
+numpy>=1.26
+aiohttp>=3.9
+ruff==0.16.0
 ```
 
 | Package | Used by |
@@ -156,7 +160,7 @@ LOG_CHANNEL_ID                   # Ticket transcript log
 OTHER_TICKET_CHANNEL_ID          # General support channel (locked during tourney)
 SPANISH_CHANNEL_ID               # Spanish channel (only needed for SA region mode)
 GENERAL_CHANNEL_ID               # Gets 60s slowmode during live tourney
-ALLOWED_STAFF_ROLES              # list[int] — role IDs that can manage tickets
+TOURNEY_STAFF_ROLES              # list[int] — role IDs that can manage tickets
 TOURNEY_ADMIN_ROLE_ID            # Gets moderate_members during tourney
 ADMIN_ROLE_ID                    # Gets renamed during tourney
 MEMBER_ROLE_ID                   # Used for lock/unlock permission target

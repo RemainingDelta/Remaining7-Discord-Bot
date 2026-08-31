@@ -15,5 +15,8 @@ venv/
 api_debug.json
 snapshot_debug.json
 
-.claude/
-CLAUDE.md
+.claude/*
+!.claude/settings.json
+!.claude/hooks/
+!.claude/skills/
+.claude/settings.local.json

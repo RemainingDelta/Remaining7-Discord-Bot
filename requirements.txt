@@ -14,3 +14,8 @@ pytest-asyncio>=0.23
 opencv-python-headless>=4.8
 numpy>=1.26
 aiohttp>=3.9
+# Exact-pinned: ruff's formatter output changes between releases, so an
+# unpinned local install drifts from CI and invents/hides format diffs (#450).
+# lint.yml installs ruff constrained by this line, so this is the one place the
+# version lives.
+ruff==0.16.0

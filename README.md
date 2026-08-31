@@ -2,10 +2,11 @@
 
 ## Overview
 **Name:** Remaining7 Discord Bot
-**Version:** v1.12.0
+**Version:** v1.13.0
 **Contributors:** remainingdelta, nightwarrior5
 **Objective:** A feature-rich Discord bot for the Remaining7 community server (16k+ members). Handles an R7 Token economy, leveling, quests, a Brawl Stars collection minigame, tournament management with Matcherino integration, support tickets, event operations, a security protocol, and multi-language translation.
 **Server Link:** https://discord.gg/6MzrjS2X8k
+**Privacy:** What the bot stores about members and why — [`PRIVACY_POLICY.md`](./PRIVACY_POLICY.md)
 
 ---
 
@@ -31,6 +32,7 @@ Remaining7-Discord-Bot/
 ├── .env.example
 ├── .gitignore
 ├── README.md
+├── PRIVACY_POLICY.md                # Privacy policy (mirrored by /privacy-policy)
 ├── docs/                             # Feature implementation guides
 │   └── logs/                         # SPECS.md & CHANGELOG.md — development history
 ├── database/
@@ -43,8 +45,10 @@ Remaining7-Discord-Bot/
 │   ├── scam_detection.py            # Scam image detection (MD5/pHash/ORB blacklist)
 │   ├── event.py                     # Event channel cleanup & reward payouts
 │   ├── general.py                   # /help, /mod-help, /admin-help, /version, /convert-time
+│   ├── privacy_policy.py            # Policy content, /privacy-policy, startup repost
 │   ├── translation.py               # !t prefix & /translate slash command (54 languages)
 │   ├── counting.py                  # Sequential counting game with /set-count
+│   ├── story.py                     # Collaborative one-word story game (staff-run, moderated)
 │   ├── sticky.py                    # !sticky / !unsticky persistent channel messages
 │   ├── support_tickets.py           # General support tickets (issues, support, apps, partnership)
 │   ├── github_tickets.py           # AI-powered GitHub issue creation from tickets (Gemini)
@@ -65,6 +69,10 @@ Remaining7-Discord-Bot/
 ├── scripts/
 │   └── generate_specs.py            # Generates docs/logs/ SPECS & CHANGELOG from GitHub data
 ├── tests/                            # Pytest unit tests (pure functions & regex helpers)
+├── .claude/                          # Claude Code project config (tracked, see Workflow)
+│   ├── settings.json                # Hook registrations
+│   ├── hooks/                       # format-file, require-tests, stop-checks, check-config-parity, session-setup
+│   └── skills/                      # Repo slash commands (/ship, /pr-desc, /write-tests, ...)
 └── .github/
     ├── ISSUE_TEMPLATE/
     │   ├── bug.md
@@ -74,7 +82,9 @@ Remaining7-Discord-Bot/
         ├── lint.yml                 # Ruff linting CI
         ├── tests.yml                # Pytest CI
         ├── version-check.yml        # Blocks PRs into main without a pyproject.toml version bump
-        └── pr-issue-reference-check.yml  # Verifies issue number matches across branch/title/body
+        ├── pr-issue-reference-check.yml  # Verifies issue number matches across branch/title/body
+        ├── pr-title-format-check.yml     # Enforces PR title shape on PRs into dev (no colon, lowercase verb)
+        └── strip-pr-footer.yml           # Strips the Claude Code footer from PR bodies targeting dev
 ```
 
 ---
@@ -85,7 +95,7 @@ Remaining7-Discord-Bot/
 - **Passive Income:** Users earn 2–5 R7 Tokens per message (20-second cooldown), restricted to the general and booster channels. Server Boosters get a ~10% increase in tokens on average.
 - **Daily Rewards:** `/daily` grants 80–160 tokens (scaled by level). Requires 5 messages sent since last claim and a 24-hour cooldown.
 - **Supply Drop:** `/drop <amount>` (Admin) to force a token drop in general chat.
-- **Balance & Ranking:** `/balance [user]`, `/leaderboard [page]`.
+- **Balance & Ranking:** `/balance [user]`, `/leaderboard token`.
 - **Give & Set:** `/give <user> <token/xp/level> <amount>`, `/set-balance <user> <amount>` (Admin).
 - **Permissions:** `/perm <user> <add/remove>` to grant/revoke command access.
 - **Guide:** `/economy-help` for a full user-facing guide.
@@ -102,7 +112,7 @@ Remaining7-Discord-Bot/
 ### Leveling & XP
 - XP earned passively from messages alongside tokens, restricted to the general and booster channels.
 - `/level [user]` — progress bar and next-level XP goal.
-- `/levels-leaderboard [page]` — server-wide level rankings (paginated).
+- `/leaderboard level` — server-wide level rankings (paginated).
 
 ### Quest System
 Every user always has **4 active quests** — one daily and one weekly per category:
@@ -224,8 +234,13 @@ Every user always has **4 active quests** — one daily and one weekly per categ
 - Auto-detects source language. Google Translate backend.
 
 ### Counting Game
-- Sequential counting game in a designated channel — users must send the next number in sequence.
+- Sequential counting game in a designated channel — users send the next number in sequence, as a plain number or a basic arithmetic expression (`7*10` counts as `70`, evaluated by a safe `ast` parser). Off-sequence, repeat-user, or invalid messages are removed and the count is left unchanged.
 - `/set-count <number>` (Staff) — manually set the current count.
+
+### One-Word Story
+- Collaborative story built one word per message in a designated channel, active only between staff `/story-start` and `/story-end`. Each accepted word gets a ✅; invalid messages (multi-word, emojis, banned words/characters, same user twice in a row) are removed.
+- Configurable, MongoDB-backed banned-word and banned-character lists (the default profanity list is fetched from a public source, not committed to the repo).
+- `/story-see` — view the current story. `/story-start`, `/story-end`, `/story-reset`, `/story-banword`, `/story-banchar` (Staff) — run and moderate stories.
 
 ### Sticky Messages
 - `!sticky <message>` — pin a message that reposts automatically when other messages are sent. Usable by Admins and Event Staff.
@@ -234,6 +249,7 @@ Every user always has **4 active quests** — one daily and one weekly per categ
 ### Utility
 - `/convert-time <date> <time> <timezone>` — convert a date and time to all Discord timestamp formats. Supports 20+ timezone aliases (EST, PT, GMT, etc.) and IANA names.
 - `/version` — view the bot's current version.
+- `/privacy-policy` — view what data the bot collects, why, and how to request deletion. Ephemeral (visible only to you), no permission gate. The same policy is posted publicly in the privacy channel and kept current on every restart, and lives in [`PRIVACY_POLICY.md`](./PRIVACY_POLICY.md).
 
 ### Help Commands
 - `/help` — user command directory.
@@ -341,6 +357,7 @@ Uses MongoDB database `r7_bot_db` with the following collections:
 | Progress dashboard | Every 5 minutes (live) | Semi-final/final bracket announcements |
 | Match refresher | Every 1 minute (live) | Refresh Matcherino scores in active tickets |
 | Budget reset | On interaction | Auto-reset monthly redemption cap on month change |
+| Privacy policy repost | On startup | Delete the bot's old copy in the privacy channel and post the current policy |
 
 ---
 
@@ -363,7 +380,13 @@ Uses MongoDB database `r7_bot_db` with the following collections:
 - Ruff enforced via CI (`.github/workflows/lint.yml`); pytest suite runs on every push/PR (`tests.yml`).
 - Common dev tasks are wrapped in the `Makefile`: `make test`, `make lint`, `make fix`, `make ci`, `make up`, and `make commit m="..."` (stages, commits, and pushes in one step).
 - PRs into `main` are blocked unless `pyproject.toml`'s version was bumped (`version-check.yml`).
-- PRs into `dev` are checked for a consistent issue number across branch name, title, and body (`pr-issue-reference-check.yml`).
+- PRs into `dev` are checked for a consistent issue number across branch name, title, and body (`pr-issue-reference-check.yml`), must follow the `<issue>-<Type> <lowercase verb> …` title convention (`pr-title-format-check.yml`), and have any Claude Code footer stripped from the PR body (`strip-pr-footer.yml`).
+- `.claude/` is tracked in git, so hooks and skills survive a fresh clone. Four hooks run automatically in Claude Code sessions:
+  - **At session start** — the git hooks path is pointed at `.githooks` and the commit author is pinned to `RemainingDelta` so cloud and routine commits are authored correctly (`session-setup.sh`).
+  - **On every Python write** — `ruff format` on that one file, and the bot is flagged for restart. Formatting only; `ruff check --fix` deletes unused imports, which breaks a multi-edit sequence that writes an import before the line using it.
+  - **Before editing `features/` or `database/`** — the edit is blocked unless the ticket branch has touched something under `tests/`. Bypass a session with `SKIP_TEST_GATE=1 claude`.
+  - **At the end of a turn** — `features/config.py` is checked for IDs added to only one of the REAL/TEST branches (a silent break on one server), then `ruff check --fix` runs and the bot is relaunched from `.venv/`. Suppress the restart with `touch /tmp/claude-no-restart`.
+- Machine-specific Claude config (`.claude/settings.local.json`) stays ignored.
 
 ---
 

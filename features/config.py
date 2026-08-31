@@ -65,9 +65,15 @@ if MODE == "PROD":
 
     EVENT_STAFF_ROLE_ID = 811495204346789938
 
+    # Channel the privacy policy is reposted to on every startup (#490). A
+    # falsy value means "not set up on this server yet" — the startup post is
+    # then skipped with a warning instead of failing.
+    PRIVACY_CHANNEL_ID = 1543032738578173982
+
     ECONOMY_COMMANDS_CHANNEL_ID = 1352841132735860746
     BOT_COMMANDS_CHANNEL_ID = 546405233736155151
     COUNTING_CHANNEL_ID = 909853678863790092
+    STORY_CHANNEL_ID = 1057775294720782357
 
     EMOJIS_CURRENCY = {
         "coins": "<:bs_coin:1454305320015888516>",
@@ -252,9 +258,12 @@ else:
 
     EVENT_STAFF_ROLE_ID = 1450350588209533019
 
+    PRIVACY_CHANNEL_ID = 1543033234475188314  # See the PROD branch note (#490)
+
     ECONOMY_COMMANDS_CHANNEL_ID = 1484768262649675776
     BOT_COMMANDS_CHANNEL_ID = 1484768347756167228
     COUNTING_CHANNEL_ID = 1513450829707874354
+    STORY_CHANNEL_ID = 1539504435560980550
 
     EMOJIS_CURRENCY = {
         "coins": "<:bs_coin:1454290949780934678>",
@@ -386,9 +395,12 @@ else:
 PASSIVE_REWARD_EXCLUDED_CHANNEL_IDS = {
     ECONOMY_COMMANDS_CHANNEL_ID,
     BOT_COMMANDS_CHANNEL_ID,
+    STORY_CHANNEL_ID,
 }
 
-ALLOWED_STAFF_ROLES = [
+STORY_MOD_ROLES = {MODERATOR_ROLE_ID, ADMIN_ROLE_ID, FOUNDER_ROLE_ID}
+
+TOURNEY_STAFF_ROLES = [
     TOURNEY_ADMIN_ROLE_ID,
     FOUNDER_ROLE_ID,
     ADMIN_ROLE_ID,
@@ -546,6 +558,13 @@ BRAWLER_UPGRADE_COSTS = {
 }
 
 TOURNEY_TEST_MODE = False
+
+# Hall of Fame prizepool retry (#443). Not environment-specific, so these live
+# outside the PROD/DEV split. When the prizepool can't be read from Matcherino
+# the bot alerts #tourney-admin and retries on this interval, anchored to the
+# original alert, for at most HOF_MAX_ATTEMPTS attempts including the first.
+HOF_RETRY_INTERVAL_SECONDS = 3600
+HOF_MAX_ATTEMPTS = 3
 
 GITHUB_REPO = "RemainingDelta/Remaining7-Discord-Bot"
 TICKET_CREATOR_ID = 408419700729708545
