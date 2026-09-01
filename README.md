@@ -52,6 +52,7 @@ Remaining7-Discord-Bot/
 │   ├── sticky.py                    # !sticky / !unsticky persistent channel messages
 │   ├── support_tickets.py           # General support tickets (issues, support, apps, partnership)
 │   ├── github_tickets.py           # AI-powered GitHub issue creation from tickets (Gemini)
+│   ├── event_tickets.py            # Private event answer-submission tickets
 │   ├── ticket_command_router.py     # Shared routing for tourney & support ticket commands
 │   ├── booster_shoutout.py          # Auto-opened booster shoutout tickets
 │   ├── message_mirror.py            # Moderator message link mirror via webhook
@@ -194,6 +195,14 @@ Every user always has **4 active quests** — one daily and one weekly per categ
 - One open ticket per type per user.
 - Staff can close, reopen, and delete tickets with transcript generation.
 - Transcripts DM'd to the opener and archived in a log channel.
+
+### Event Tickets
+- `/event-ticket-panel` — post the event ticket panel (Event Staff only).
+- Members click **Open Event Ticket** to get a private channel for their event submission.
+- Channels are named after the opener (`「❗」event-username`); **one open ticket per member**.
+- Event Staff can close, reopen, and delete tickets via `!close` / `!reopen` / `!delete`.
+- Closing renames the channel in place (`「❗」` → `「👍」`) and locks the opener to read-only — the channel is not moved.
+- Deleting saves a transcript to the event transcript channel and DMs a copy to the opener.
 
 ### GitHub Ticket Integration
 - AI-powered GitHub issue creation from support tickets using Gemini.

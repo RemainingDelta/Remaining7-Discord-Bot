@@ -94,6 +94,19 @@ async def route_shared_ticket_command(ctx: commands.Context, action: str) -> boo
             await reopen_booster_shoutout_ticket_via_command(ctx)
             return True
 
+    from features import event_tickets
+
+    if event_tickets.is_event_ticket_channel(ctx.channel):
+        if action == "close":
+            await event_tickets.close_event_ticket_via_command(ctx)
+            return True
+        if action == "delete":
+            await event_tickets.delete_event_ticket_via_command(ctx)
+            return True
+        if action == "reopen":
+            await event_tickets.reopen_event_ticket_via_command(ctx)
+            return True
+
     if not is_support_ticket_channel(ctx.channel):
         return False
 

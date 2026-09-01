@@ -904,6 +904,18 @@ class Events(commands.Cog):
         )
         embed.add_field(name="🏆 Reward Distribution", value=reward_text, inline=False)
 
+        # --- Event Tickets ---
+        ticket_text = (
+            "`/event-ticket-panel` - Post the Open Event Ticket panel.\n"
+            "Members open one private channel each (`「❗」event-username`) to submit "
+            "their event answer. **One open ticket per member at a time.**\n\n"
+            "**Managing a ticket (inside the ticket channel):**\n"
+            "`!close` - Lock the ticket and mark it 「👍」 (stays in place).\n"
+            "`!reopen` - Unlock it and mark it 「❗」 again.\n"
+            "`!delete` - Save the transcript, DM it to the opener, log it, then delete."
+        )
+        embed.add_field(name="🎫 Event Tickets", value=ticket_text, inline=False)
+
         # --- Automated Cleanup ---
         cleanup_text = (
             "Every day at **12:00 AM ET**, the bot checks for messages older than **7 days**.\n"
