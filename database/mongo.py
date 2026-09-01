@@ -1020,6 +1020,63 @@ async def get_user_level_rank(user_id: str):
     return count + 1
 
 
+# --- SUPPLY DROP LEADERBOARD HELPERS ---
+
+# Users only appear on the supply-drop board once they have actually claimed a
+# drop. `supply_drops_total` is a denormalized running sum of the two per-type
+# counters, kept in step by increment_supply_drop_count, so the board can page
+# and sort with a plain find().sort() like the token board rather than summing
+# the two fields on every read.
+HAS_SUPPLY_DROPS = {"supply_drops_total": {"$gt": 0}}
+
+
+async def increment_supply_drop_count(user_id: str, is_booster: bool):
+    """Atomically record one claimed supply drop for the leaderboard.
+
+    Bumps the per-type counter (`supply_drops_booster` or `supply_drops_normal`)
+    and the denormalized `supply_drops_total` in a single $inc. Tracking starts
+    from zero: drops claimed before this feature shipped are not backfilled.
+    """
+    if db is None:
+        return
+    field = "supply_drops_booster" if is_booster else "supply_drops_normal"
+    await db.users.update_one(
+        {"_id": str(user_id)},
+        {"$inc": {field: 1, "supply_drops_total": 1}},
+        upsert=True,
+    )
+
+
+async def get_supply_drops_page(offset: int, limit: int):
+    """Get a slice of users sorted by their total supply drops."""
+    if db is None:
+        return []
+    cursor = (
+        db.users.find(HAS_SUPPLY_DROPS)
+        .sort("supply_drops_total", -1)
+        .skip(offset)
+        .limit(limit)
+    )
+    return await cursor.to_list(length=limit)
+
+
+async def get_supply_drops_total():
+    """Counts only users the supply-drop board actually pages over."""
+    if db is None:
+        return 0
+    return await db.users.count_documents(HAS_SUPPLY_DROPS)
+
+
+async def get_user_supply_drop_rank(user_id: str) -> int:
+    """Rank a user by total supply drops (people with strictly more, + 1)."""
+    if db is None:
+        return 0
+    doc = await db.users.find_one({"_id": str(user_id)})
+    total = doc.get("supply_drops_total", 0) if doc else 0
+    higher = await db.users.count_documents({"supply_drops_total": {"$gt": total}})
+    return higher + 1
+
+
 # --- SECURITY / HACKED USER TRACKING ---
 
 
