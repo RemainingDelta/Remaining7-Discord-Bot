@@ -71,6 +71,22 @@ allowed_users = set()
 
 DEFAULT_MONTHLY_BUDGET = 50.0
 
+# Base XP for the leveling curve. Both the /level display and the on_message
+# level-up loop derive "XP required for level N" from _exp_required_for_level,
+# so they can never diverge (see issue #461).
+BASE_EXP = 100
+
+
+def _exp_required_for_level(level: int) -> int:
+    """XP required to advance from `level` to `level + 1`.
+
+    Single source of truth for the leveling curve: a pure exponential with no
+    linear phase, matching exactly what the on_message level-up loop checks
+    against at every level.
+    """
+    return int(BASE_EXP * (1.5 ** (level - 1)))
+
+
 # Dollar impact for rewards that consume the monthly redemption budget.
 REDEMPTION_BUDGET_COSTS = {
     "brawl pass": 9.0,
@@ -1470,13 +1486,12 @@ class Economy(commands.Cog):
 
             # --- PART 2: XP & LEVELING ---
             EXP_PER_MESSAGE = 10
-            BASE_EXP = 100
 
             level, exp = await get_leveling_data(user_id)
             exp += EXP_PER_MESSAGE + booster_xp_bonus
 
             while True:
-                required_exp = int(BASE_EXP * (1.5 ** (level - 1)))
+                required_exp = _exp_required_for_level(level)
                 if exp >= required_exp:
                     exp -= required_exp
                     level += 1
@@ -1968,13 +1983,7 @@ class Economy(commands.Cog):
         user = user or interaction.user
         user_id = str(user.id)
         level, exp = await get_leveling_data(user_id)
-        BASE_EXP = 100
-        EXP_GROWTH_PHASE_CUTOFF = 20
-        if level <= EXP_GROWTH_PHASE_CUTOFF:
-            next_level_exp = int(BASE_EXP * (1.5 ** (level - 1)))
-        else:
-            level_20_exp = int(BASE_EXP * (1.5 ** (EXP_GROWTH_PHASE_CUTOFF - 1)))
-            next_level_exp = level_20_exp + 5000 * (level - EXP_GROWTH_PHASE_CUTOFF)
+        next_level_exp = _exp_required_for_level(level)
 
         progress_percentage = (exp / next_level_exp) * 100 if next_level_exp > 0 else 0
         progress_bar_length = 10
