@@ -58,7 +58,7 @@ Enable these under **Bot → Privileged Gateway Intents**:
 |--------|---------|
 | `Message Content` | Reading message content in `on_message` (passive rewards, counting, sticky, quest tracking) |
 | `Server Members` | Reading member roles (staff checks, booster detection) |
-| `Invites` | Quest invite tracking (currently passive/unused but loaded) |
+| `Invites` | Enabled but currently unused (no active consumer) |
 
 In `main.py`:
 ```python

@@ -90,8 +90,6 @@ def _is_booster(member) -> bool:
 class Quests(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        # Invite cache kept for stability, but unused for quests now
-        self.invite_cache = {}
         self.quest_reward_reconcile_task.start()
 
     def cog_unload(self):
@@ -126,16 +124,6 @@ class Quests(commands.Cog):
         # Initialize default quests in DB on startup
         await init_default_quests(DEFAULT_QUESTS)
         print("✅ Quests System Loaded")
-
-        # Build Invite Cache (Passive tracking only)
-        for guild in self.bot.guilds:
-            try:
-                self.invite_cache[guild.id] = {}
-                invites = await guild.invites()
-                for invite in invites:
-                    self.invite_cache[guild.id][invite.code] = invite.uses
-            except Exception:
-                pass
 
     # --- HELPERS ---
 
@@ -216,30 +204,6 @@ class Quests(commands.Cog):
         await self.process_quest_update(
             str(message.author.id), message.channel, "message", member=message.author
         )
-
-    # Kept to prevent errors if main.py expects them, but they do nothing for quests now
-    @commands.Cog.listener()
-    async def on_invite_create(self, invite: discord.Invite):
-        if invite.guild.id in self.invite_cache:
-            self.invite_cache[invite.guild.id][invite.code] = invite.uses
-
-    @commands.Cog.listener()
-    async def on_member_join(self, member: discord.Member):
-        guild = member.guild
-        if guild.id not in self.invite_cache:
-            return
-
-        try:
-            current_invites = await guild.invites()
-            for invite in current_invites:
-                code = invite.code
-                if code in self.invite_cache[guild.id]:
-                    old_uses = self.invite_cache[guild.id][code]
-                    if invite.uses > old_uses:
-                        self.invite_cache[guild.id][code] = invite.uses
-                        break
-        except Exception:
-            pass
 
     # --- COMMANDS ---
 
