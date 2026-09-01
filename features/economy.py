@@ -1,4 +1,5 @@
 import io
+import json
 import time
 import discord
 from discord import app_commands
@@ -68,6 +69,27 @@ shop_choices = [
 ]
 
 allowed_users = set()
+
+# MongoDB settings key holding the persisted /perm grants. Without persistence
+# the in-memory allowed_users set is silently emptied on every restart (#460).
+PERM_ALLOWED_USERS_KEY = "perm_allowed_users"
+
+
+async def _load_allowed_users():
+    """Rehydrate allowed_users from MongoDB so /perm grants survive a restart."""
+    raw = await get_setting(PERM_ALLOWED_USERS_KEY, "[]")
+    try:
+        ids = json.loads(raw)
+    except (TypeError, ValueError):
+        ids = []
+    allowed_users.clear()
+    allowed_users.update(int(uid) for uid in ids)
+
+
+async def _persist_allowed_users():
+    """Write the current allowed_users set back to MongoDB."""
+    await set_setting(PERM_ALLOWED_USERS_KEY, json.dumps(sorted(allowed_users)))
+
 
 DEFAULT_MONTHLY_BUDGET = 50.0
 
@@ -1079,6 +1101,12 @@ class Economy(commands.Cog):
             await ensure_drop_claims_ttl_index()
         except Exception as e:
             print(f"⚠️ Economy: could not create drop_claims TTL index: {e}")
+        # Rehydrate /perm grants from MongoDB so non-admin access survives a
+        # restart instead of silently resetting to admin-only (#460).
+        try:
+            await _load_allowed_users()
+        except Exception as e:
+            print(f"⚠️ Economy: could not load persisted /perm grants: {e}")
 
     def cog_unload(self):
         self.supply_drop_task.cancel()
@@ -2284,12 +2312,14 @@ class Economy(commands.Cog):
             return
         if action == "add":
             allowed_users.add(member.id)
+            await _persist_allowed_users()
             await interaction.response.send_message(
                 f"✅ **Added:** {member.mention} has been granted bot command permissions."
             )
         else:
             if member.id in allowed_users:
                 allowed_users.remove(member.id)
+                await _persist_allowed_users()
                 await interaction.response.send_message(
                     f"🗑️ **Removed:** {member.mention} has been revoked bot command permissions."
                 )
