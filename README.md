@@ -141,6 +141,7 @@ Every user always has **4 active quests** — one daily and one weekly per categ
 - **Collection:**
   - `/profile [user]` — currencies, collection progress, stats.
   - `/brawlers` — paginated view of owned brawlers with levels.
+  - `/brawler <brawler>` — full details for one brawler: rarity, gadgets, star powers, hypercharge, and your owned/level state.
   - `/buy-brawler` — purchase unowned brawlers by rarity using Credits.
 - **Progression:**
   - `/upgrade <brawler>` — interactive upgrade dashboard (Level 1–11).
@@ -391,5 +392,4 @@ Uses MongoDB database `r7_bot_db` with the following collections:
 ---
 
 ## Future Roadmap
-- [ ] Brawl Stars: View for a specific brawler's details
 - [ ] Giveaway system with extra entries via R7 Tokens
