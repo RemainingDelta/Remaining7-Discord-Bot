@@ -4046,3 +4046,63 @@ Implemented in `<pending — set to the 494-Enhancement doc commit sha once comm
 ✅ Reviewed against the diff: implementation matches the filed spec.
 
 📝 Review note: Self-referential — this is the release-doc pass that wrote this very v1.13.0 SPECS section (and the v1.13.0 CHANGELOG release notes + PR descriptions, which are the separate half of this ticket). The `README`/`pyproject.toml` version bump was handled out-of-band by #490/#493 above, not here. The full README/`docs/`/help-command audit is tracked separately as #495. The commit sha above is a placeholder until this branch is committed and merged.
+
+---
+
+### v1.13.1 — 2026-09-03
+
+#### #503 — Bug: One failing cog aborts the whole startup load and the global sync deletes 20 slash commands (Bug)
+
+> ### Overview
+> `/support-panel` disappeared from Discord entirely, and the existing support panel's dropdown answered **"Remaining 7 Bot didn't respond in time"** while creating **no ticket channel**. The support ticket feature is not the cause.
+>
+> `main.py:44-101` loads all 17 feature cogs inside **one shared `try`**. `features.scam_detection` (position 5, `main.py:59`) raised during load, the shared `except` swallowed it, and the 12 cogs listed after it were never attempted — including `features.support_tickets` at position 9. `SupportTicketPanelView` therefore never reached `add_view` (`features/support_tickets.py:586`), so the old panel's select matched no registered view, discord.py dropped the interaction, and nothing ever ACKed it.
+>
+> `main.py:117` then ran `bot.tree.sync()` in its own `try`, unaffected by the load failure. A global sync publishes the tree as the **authoritative** command list, so Discord **deleted** the 20 commands belonging to the skipped cogs.
+>
+> ### Fixes
+> 1. `main.py` — load each cog in its own `try`, so one failure cannot skip the rest. Treat `ExtensionAlreadyLoaded` as success, not failure, since it is the normal case on every reconnect.
+> 2. `main.py` — log `repr(e)` plus `traceback.print_exc()`. The current `print(f"...{e}")` loses the traceback, which is why the underlying cause of the `scam_detection` failure is still unknown.
+> 3. `main.py` — before syncing, diff the tree against `tree.fetch_commands()` and skip the sync only if it would **delete** a command owned by a failed cog…(truncated)
+
+Implemented in `da08239`. Files: `main.py`, `database/mongo.py`, `features/support_tickets.py`, `tests/test_startup.py`, `tests/test_support_tickets.py`
+
+✅ Reviewed against the diff: all five filed fixes shipped as specified.
+
+📝 Review note: The diff goes slightly beyond the five numbered fixes, in the same direction as their intent — `setup_tourney_commands` failures now feed the same failure list (it registers 19 top-level commands, so its failure must also block a destructive sync), the previously unguarded `repost_privacy_policy` call was wrapped, and a closing summary line reports the failed features. Two acceptance criteria are unverifiable until the release deploys, since production runs `main`: "Boot log shows 72 commands synced with `scam_detection` still failing" and "`/support-panel` is present in the picker". The root cause of the `scam_detection` import failure itself remains unknown and is deliberately out of scope — fix 2 exists precisely to surface it on the next boot. It is the only cog importing `cv2`, so the leading suspects are a numpy/opencv version mismatch (both unpinned `>=` in `requirements.txt`) or a system library missing from the deploy image.
+
+#### #505 — Enhancement: Bump project version to v1.13.1 in pyproject.toml (Enhancement)
+
+> ### Overview
+> Updates the declared project version to `1.13.1` for the v1.13.1 patch release, which ships the startup fix from #503.
+>
+> ### Technical Requirements
+> - [ ] Set `version = "1.13.1"` in `pyproject.toml`
+> - [ ] Update the `**Version:**` line in `README.md` to `v1.13.1`
+>
+> ### Acceptance Criteria
+> - [ ] `pyproject.toml` contains `version = "1.13.1"`
+> - [ ] `README.md` states `v1.13.1`
+> - [ ] `BOT_VERSION` resolves to `v1.13.1` with no edit to `features/config.py` (it is derived, not stored)…(truncated)
+
+Implemented in `8d44ff1`. Files: `pyproject.toml`, `README.md`
+
+✅ Reviewed against the diff: implementation matches the filed spec.
+
+📝 Review note: `.claude/skills/release-notes/references/release-guide.md` still instructs bumping `BOT_VERSION` in `features/config.py`. That guidance is stale and was not followed, correctly — `features/config.py:11` derives the constant from `pyproject.toml` by regex, so an edit there would have no effect. The guide itself was left uncorrected in this release.
+
+#### #506 — Enhancement: Update documentation for v1.13.1 release (Enhancement)
+
+> ### Overview
+> Adds the v1.13.1 sections to the two persistent history files so the patch release is recorded before the `dev → main` release PR opens.
+>
+> ### Technical Requirements
+> - [ ] Add a `### v1.13.1` section to `docs/logs/SPECS.md`, with the as-implemented entry for #503 and a reviewed verdict against the diff
+> - [ ] Add a `## v1.13.1 — <date>` section to `docs/logs/CHANGELOG.md`, containing the release notes body and the `### PR Descriptions` block for PR #504
+> - [ ] Follow the release notes format in `.claude/skills/release-notes/references/release-guide.md`, dropping sections with nothing to report…(truncated)
+
+Implemented in `<pending — set to the 506-Enhancement doc commit sha once committed>`. Files: `docs/logs/SPECS.md`, `docs/logs/CHANGELOG.md`
+
+✅ Reviewed against the diff: implementation matches the filed spec.
+
+📝 Review note: Self-referential — this is the release-doc pass that wrote this very v1.13.1 SPECS section, along with the v1.13.1 CHANGELOG release notes and PR descriptions. The ticket scoped SPECS to "#503" only; entries for #505 and #506 were added as well, matching the v1.13.0 precedent of documenting every issue in the release rather than only the code changes. The version bump was handled separately by #505 above, per the split used for v1.11.1 (#381/#382) and v1.12.0 (#435/#436). The commit sha above is a placeholder until this branch is committed and merged.
