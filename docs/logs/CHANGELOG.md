@@ -1429,3 +1429,64 @@ Closes #435
 Closes #494
 
 ---
+
+## v1.13.1 — 2026-09-03
+
+# 🚀 Release Notes v1.13.1
+
+## 🐛 Bug Fixes & Improvements
+- **20 of 72 slash commands disappeared from Discord and support tickets stopped working:** one feature (scam detection) failed to load at startup, and because all 17 features were loaded inside a single shared error handler, the 12 listed after it were skipped — support tickets among them. The bot then published its shortened command list to Discord, which treats that list as authoritative and deleted every command belonging to a skipped feature. Each feature now loads on its own, so one failure can no longer take out the others
+- **The support panel dropdown answered "didn't respond in time" and created no ticket:** the code handling the panel was one of the features that never loaded, so nothing was listening when a category was picked. Fixed by the change above
+- **A partial startup can no longer delete commands:** before publishing, the bot now compares its command list against what Discord already has and skips the update if it would remove anything, naming what it would have deleted. An update that only adds commands still goes through, so commands come back on the next restart even while a feature stays broken
+- **Startup failures were effectively invisible:** a failing feature logged only its error message, with no exception type and no traceback, which is why this went undiagnosed. Failures now log the exception type and a full traceback
+- **Opening a support ticket could crash on a database error:** the ticket counter returned nothing instead of a number, which broke ticket creation before the channel was made. It now falls back to `1`
+- **Support tickets acknowledge the click immediately** rather than risking Discord's 3-second timeout while the channel is being created, and the channel's topic is now set as the channel is created — closing a gap where a ticket could end up without its opener recorded, making it invisible to the duplicate check and unusable for close, reopen, and transcripts
+
+## 📝 Documentation
+- Added the `v1.13.1` section to `docs/logs/SPECS.md` and `docs/logs/CHANGELOG.md`
+
+## 🔄 Future Enhancements
+- Why `features/scam_detection.py` fails to import is still unknown, so automatic scam-image detection and the `!scam-*` commands remain offline. It is the only feature using `cv2`, and the traceback added in this release should identify it on the next restart
+
+**Full Changelog**: https://github.com/RemainingDelta/Remaining7-Discord-Bot/compare/v1.13.0...v1.13.1
+
+
+### PR Descriptions
+
+#### PR #504 — 503-Bug isolate cog loading and guard the global command sync
+
+### Changes
+* Load each cog in its own `try` in `main.py` (`load_features()`), so one failing cog no longer skips the rest — `features.scam_detection` was aborting the load before `features.support_tickets`
+* Treat `ExtensionAlreadyLoaded` as success, and log failures with `repr(e)` plus `traceback.print_exc()` instead of a bare `{e}`
+* Guard the global sync (`sync_commands()`) — skip it only when it would delete a command, so a partial load can no longer wipe Discord's command list; the tourney setup and the privacy policy repost feed the same guard
+* Fixed `get_next_support_ticket_number` falling through as `None` on a DB error, which raised `TypeError` before a ticket channel was created
+* Defer in `SupportTicketSelect.callback` before its first network call, and set the topic in `create_text_channel` instead of a follow-up edit
+* Added `tests/test_startup.py` and extended `tests/test_support_tickets.py` (19 cases)
+
+### Notes
+* `scam_detection` registers no slash commands, so all 72 sync even while it stays broken — only automatic scam-image detection and the `!scam-*` commands stay offline
+* Why it fails is still unknown; it is the only cog importing `cv2`, and the traceback added here will show it on the next boot. Tracked as a follow-up
+
+Closes #503
+
+#### PR #507 — 505-Enhancement update version to v1.13.1
+
+### Changes
+* Bumped `pyproject.toml` to `version = "1.13.1"` for the v1.13.1 patch release
+* Updated the `**Version:**` line in `README.md` to match
+
+### Notes
+* `features/config.py` derives `BOT_VERSION` from `pyproject.toml`, so `/version` and the help embeds follow with no edit there — verified it resolves to `v1.13.1`
+* Has to land on `dev` before the release PR opens, since `version-check.yml` fails any PR into `main` whose version equals `main`'s
+
+Closes #505
+
+#### PR #508 — 506-Enhancement update documentation for v1.13.1 release (pending)
+
+### Changes
+* Added the `v1.13.1` section to `docs/logs/SPECS.md`, documenting every issue in the release (#503, #505, #506)
+* Added the `v1.13.1` release notes and these PR descriptions to `docs/logs/CHANGELOG.md`
+
+Closes #506
+
+---
