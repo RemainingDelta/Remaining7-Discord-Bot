@@ -414,6 +414,11 @@ class SupportTicketSelect(discord.ui.Select):
                         )
                         return
 
+        # Everything above is answered from cache and replies instantly. From
+        # here on we hit the database and the Discord API, which can outrun the
+        # 3s interaction deadline, so ACK before the first round-trip.
+        await interaction.response.defer(ephemeral=True)
+
         ticket_number = await get_next_support_ticket_number(cfg["counter_key"])
         channel_name = f"「❗」ticket-{ticket_number:03d}"
 
@@ -440,18 +445,19 @@ class SupportTicketSelect(discord.ui.Select):
                     use_application_commands=True,
                 )
 
+        # Set the topic in the create call rather than a follow-up edit. A
+        # separate edit can fail and leave a channel with no support-opener
+        # marker, which hides it from the duplicate check above and breaks
+        # close/reopen/transcript for its opener.
         channel = await guild.create_text_channel(
             name=channel_name,
             category=category,
             overwrites=overwrites,
+            topic=f"support-opener:{interaction.user.id}|type:{selected}",
             reason=f"Support ticket ({selected}) from {interaction.user}",
         )
-        await channel.edit(
-            topic=f"support-opener:{interaction.user.id}|type:{selected}",
-            reason="Store support opener",
-        )
 
-        await interaction.response.send_message(
+        await interaction.followup.send(
             f"Your ticket has been created: {channel.mention}",
             ephemeral=True,
         )
