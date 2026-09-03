@@ -41,7 +41,6 @@ Key fields:
 | `coins` | int | Brawl coins |
 | `power_points` | int | Brawl power points |
 | `credits` | int | Brawl credits |
-| `gems` | int | Brawl gems |
 | `inventory` | list | Shop items purchased |
 | `queue_refunds_done` | list | Entry-id receipts guarding redemption-queue refund idempotency — an id is added atomically with the refund `$inc` (`apply_queue_refund`), so a reconcile replay after a crash is a no-op. Append-only (not pruned). |
 | `pending_redemptions` | list | Crash-safety markers written by the crash-safe `/redeem` flow. Each entry has `id`, `item`, `budget_usd`, `channel_id` (null until the ticket is created), and `created_at`. Exists so a crash between removing the item token and creating the redemption ticket is reconcilable on boot. |
@@ -140,7 +139,6 @@ Key entries:
 | `budget_month_key` | `"YYYY-MM"` for current month |
 | `monthly_budget` | Budget cap as float string |
 | `manual_total_spent` | Cumulative USD spent this month |
-| `brawlpass_redeemed_count` | Legacy per-item counter |
 | `booster_drop_message_id` | Message ID of the live booster-channel drop; cleared on claim/expiry |
 | `last_message_{user_id}` | Epoch-seconds of the user's last passive token award (20s cooldown) |
 | `pending_winner_announcement` | JSON marker (`matcherino_id`, `updates_channel_id`, `expires_at`) driving the crash-safe `!endtourney` winner retry |
