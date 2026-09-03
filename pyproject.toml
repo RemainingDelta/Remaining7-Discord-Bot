@@ -1,6 +1,6 @@
 [project]
 name = "remaining7-discord-bot"
-version = "1.13.0"
+version = "1.13.1"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
