@@ -707,3 +707,22 @@ async def test_runtime_error_is_sent_as_an_embed(monkeypatch, _clean_error_state
     assert kwargs.get("content") in (None, "")
     assert len(kwargs["embeds"]) == 1
     assert kwargs["file"].filename == "error.txt"
+
+
+@pytest.mark.asyncio
+async def test_task_attachment_survives_an_awkward_cog():
+    """It walks real cog attributes, so a descriptor that raises must not abort."""
+
+    class AwkwardCog:
+        @property
+        def explodes(self):
+            raise RuntimeError("do not touch me")
+
+        @tasks.loop(seconds=60)
+        async def my_task(self):
+            pass
+
+    cog = AwkwardCog()
+    main.attach_task_error_reporting([cog])
+
+    assert cog.my_task._error.__name__ == "handler"

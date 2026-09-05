@@ -513,8 +513,14 @@ async def on_ready():
     # 5. SYNC COMMANDS (Do this LAST)
     synced = await sync_commands(failed)
 
-    # 6. Route background task failures to the log channel too
-    attach_task_error_reporting()
+    # 6. Route background task failures to the log channel too. Guarded like
+    #    every other step: this walks real cog attributes, and losing task
+    #    reporting must not cost the startup report that follows it.
+    try:
+        attach_task_error_reporting()
+    except Exception as e:
+        print(f"⚠️ Could not attach task error reporting: {e!r}")
+        traceback.print_exc()
 
     # 7. Report the boot to Discord, where the host's logs cannot swallow it
     await report_startup_to_discord(loaded, synced)
