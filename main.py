@@ -8,6 +8,9 @@ import time
 import traceback
 from collections import deque
 from typing import NamedTuple
+
+import aiohttp
+from pymongo.errors import PyMongoError
 from dotenv import load_dotenv
 
 # Import Tourney Logic (Legacy/Features folder)
@@ -61,11 +64,15 @@ FEATURE_EXTENSIONS = [
 
 
 class StartupFailure(NamedTuple):
-    """Something that raised during startup, kept for the Discord report."""
+    """Something that raised during startup, kept for the Discord report.
+
+    The exception itself is kept, not its repr: the report classifies severity
+    and explains the error from its type, which a string cannot support.
+    """
 
     label: str
     source: str
-    error: str
+    exception: BaseException
     traceback: str
 
 
@@ -80,9 +87,7 @@ _STARTUP_REPORTED = False
 
 def record_failure(label: str, source: str, exc: Exception) -> None:
     """Capture a startup failure for the Discord report."""
-    STARTUP_FAILURES.append(
-        StartupFailure(label, source, repr(exc), traceback.format_exc())
-    )
+    STARTUP_FAILURES.append(StartupFailure(label, source, exc, traceback.format_exc()))
 
 
 async def load_features() -> list[str]:
@@ -160,19 +165,37 @@ async def report_startup_to_discord(loaded: int, synced: int | None) -> None:
         return
 
     total = len(FEATURE_EXTENSIONS)
-    lines = [
-        f"✅ **Bot online** — {BOT_VERSION}",
-        f"Features: {loaded}/{total} loaded",
-        f"Commands: {synced if synced is not None else 'not synced'}",
-    ]
+    severity = CRITICAL if STARTUP_FAILURES else INFO
+    summary = discord.Embed(
+        title=f"{severity.emoji} Bot online — {BOT_VERSION}",
+        colour=severity.colour,
+        timestamp=discord.utils.utcnow(),
+    )
+    summary.add_field(name="Features", value=f"{loaded}/{total} loaded", inline=True)
+    summary.add_field(
+        name="Commands",
+        value=str(synced) if synced is not None else "not synced",
+        inline=True,
+    )
+    summary.set_footer(text="Remaining 7 Bot")
 
+    embeds = [summary]
     file = None
     if STARTUP_FAILURES:
-        lines.append("")
-        lines.append(f"⚠️ **{len(STARTUP_FAILURES)} failure(s) during startup**")
-        for failure in STARTUP_FAILURES:
-            lines.append(f"• **{failure.label}** (`{failure.source}`)")
-            lines.append(f"```{failure.error}```")
+        # Discord allows 10 embeds per message, so the summary plus nine failures.
+        shown = STARTUP_FAILURES[:9]
+        if len(STARTUP_FAILURES) > len(shown):
+            summary.add_field(
+                name="Note",
+                value=f"{len(STARTUP_FAILURES) - len(shown)} further failure(s) in the attachment.",
+                inline=False,
+            )
+        for failure in shown:
+            embeds.append(
+                build_error_embed(
+                    f"{failure.label} ({failure.source})", failure.exception
+                )
+            )
         detail = "\n\n".join(
             f"=== {f.label} ({f.source}) ===\n{f.traceback}" for f in STARTUP_FAILURES
         )
@@ -181,12 +204,131 @@ async def report_startup_to_discord(loaded: int, synced: int | None) -> None:
         )
 
     try:
-        await channel.send(content="\n".join(lines), file=file)
+        await channel.send(embeds=embeds, file=file)
         _STARTUP_REPORTED = True
     except Exception as e:
         # Reporting must never be the thing that breaks startup. The flag stays
         # unset so a later reconnect retries a send that never succeeded.
         print(f"⚠️ Could not report startup to Discord: {e!r}")
+
+
+# --- SEVERITY AND EXPLANATIONS ---
+
+
+class Severity(NamedTuple):
+    """How bad a report is, and how it renders."""
+
+    label: str
+    emoji: str
+    colour: discord.Colour
+
+
+# Critical means something is no longer running at all - a feature that failed to
+# load, or a background task that stopped. Error means one interaction failed and
+# the bot is otherwise healthy. Warning separates a permission or configuration
+# problem from a code bug, because they are different jobs to fix.
+CRITICAL = Severity("Critical", "🔴", discord.Color.dark_red())
+ERROR = Severity("Error", "🟠", discord.Color.red())
+WARNING = Severity("Warning", "🟡", discord.Color.orange())
+INFO = Severity("Info", "🟢", discord.Color.green())
+
+# Ordered most specific first: Forbidden and NotFound both subclass HTTPException,
+# so the generic entry has to come last or it would swallow them.
+_EXPLANATIONS: tuple[tuple[type[BaseException], str], ...] = (
+    (
+        ModuleNotFoundError,
+        "A Python package the bot needs is not installed on the server.",
+    ),
+    (
+        ImportError,
+        "A library failed to load — usually a missing or broken package on the server.",
+    ),
+    (
+        discord.Forbidden,
+        "Discord refused the action — the bot is missing a permission in that channel or server.",
+    ),
+    (
+        discord.NotFound,
+        "The channel, message or user no longer exists.",
+    ),
+    (
+        discord.HTTPException,
+        "Discord rejected the request.",
+    ),
+    (
+        PyMongoError,
+        "The database was unreachable or rejected the query.",
+    ),
+    (
+        aiohttp.ClientError,
+        "A request to an external service failed.",
+    ),
+    (
+        TimeoutError,
+        "Something took too long to respond and gave up.",
+    ),
+    (
+        ZeroDivisionError,
+        "A calculation divided by zero — a bug in the bot's code.",
+    ),
+    (
+        KeyError,
+        "The bot expected a value that was not there — a bug in the bot's code.",
+    ),
+    (
+        AttributeError,
+        "The bot used something that does not exist — a bug in the bot's code.",
+    ),
+    (
+        TypeError,
+        "The bot passed the wrong kind of value — a bug in the bot's code.",
+    ),
+    (
+        ValueError,
+        "The bot was given a value it could not use — a bug in the bot's code.",
+    ),
+)
+
+_UNEXPLAINED = "Unexpected error — see the attached traceback."
+
+
+def explain_error(error: BaseException) -> str:
+    """Say what an exception means in plain English, for someone not reading code."""
+    for error_type, explanation in _EXPLANATIONS:
+        if isinstance(error, error_type):
+            return explanation
+    return _UNEXPLAINED
+
+
+def classify_severity(source: str, error: BaseException) -> Severity:
+    """Pick a severity from what failed and why.
+
+    Derived rather than passed in, so every call site classifies the same way.
+    """
+    if isinstance(error, (discord.Forbidden, discord.NotFound)):
+        return WARNING
+    if source.startswith("command ") or source.startswith("event "):
+        return ERROR
+    return CRITICAL
+
+
+def build_error_embed(source: str, error: BaseException) -> discord.Embed:
+    """One embed shape for startup failures and runtime errors alike."""
+    severity = classify_severity(source, error)
+    embed = discord.Embed(
+        title=f"{severity.emoji} {severity.label}",
+        colour=severity.colour,
+        timestamp=discord.utils.utcnow(),
+    )
+    embed.add_field(name="Source", value=f"`{source}`", inline=False)
+    embed.add_field(name="What happened", value=explain_error(error), inline=False)
+    embed.add_field(
+        name="Error",
+        value=f"```{type(error).__name__}: {error}```"[:1024],
+        inline=False,
+    )
+    embed.set_footer(text="Remaining 7 Bot")
+    return embed
 
 
 # --- RUNTIME ERROR REPORTING ---
@@ -259,7 +401,7 @@ async def report_error(source: str, error: BaseException) -> None:
     _REPORTING_ERROR = True
     try:
         await channel.send(
-            content=f"❌ **Runtime error** — `{source}`\n```{type(error).__name__}: {error}```",
+            embeds=[build_error_embed(source, error)],
             file=discord.File(io.BytesIO(detail.encode("utf-8")), filename="error.txt"),
         )
     except Exception as e:

@@ -220,7 +220,7 @@ async def test_cog_failure_detail_is_captured(monkeypatch):
     failure = main.STARTUP_FAILURES[0]
     assert failure.label == "Scam Detection"
     assert failure.source == "features.scam_detection"
-    assert "libxcb" in failure.error
+    assert "libxcb" in str(failure.exception)
     assert "ImportError" in failure.traceback
 
 
@@ -264,7 +264,7 @@ def test_record_failure_captures_label_source_and_traceback():
     failure = main.STARTUP_FAILURES[0]
     assert failure.label == "Tournaments"
     assert failure.source == "features.tourney.tourney_commands"
-    assert "nope" in failure.error
+    assert "nope" in str(failure.exception)
     assert "ValueError" in failure.traceback
 
 
@@ -314,8 +314,10 @@ async def test_healthy_boot_posts_a_summary_with_no_attachment(monkeypatch):
     await main.report_startup_to_discord(loaded=17, synced=72)
 
     kwargs = channel.send.await_args.kwargs
-    assert "17/17" in kwargs["content"]
-    assert "72" in kwargs["content"]
+    summary = kwargs["embeds"][0]
+    rendered = " ".join(f"{f.name} {f.value}" for f in summary.fields)
+    assert "17/17" in rendered
+    assert "72" in rendered
     assert kwargs["file"] is None
 
 
@@ -327,7 +329,7 @@ async def test_failure_is_named_and_traceback_attached(monkeypatch):
         main.StartupFailure(
             "Scam Detection",
             "features.scam_detection",
-            "ImportError('libxcb.so.1')",
+            ImportError("libxcb.so.1"),
             "LINE " * 800,
         )
     ]
@@ -335,8 +337,12 @@ async def test_failure_is_named_and_traceback_attached(monkeypatch):
     await main.report_startup_to_discord(loaded=16, synced=72)
 
     kwargs = channel.send.await_args.kwargs
-    assert "Scam Detection" in kwargs["content"]
-    assert "libxcb.so.1" in kwargs["content"]
+    rendered = " ".join(
+        f"{e.title} " + " ".join(f"{f.name} {f.value}" for f in e.fields)
+        for e in kwargs["embeds"]
+    )
+    assert "Scam Detection" in rendered
+    assert "libxcb.so.1" in rendered
     assert kwargs["file"].filename == "startup_failures.txt"
     assert b"LINE" in kwargs["file"].fp.getvalue()
 
@@ -403,7 +409,8 @@ async def test_a_skipped_sync_is_reported_as_not_synced(monkeypatch):
 
     await main.report_startup_to_discord(loaded=16, synced=None)
 
-    assert "not synced" in channel.send.await_args.kwargs["content"]
+    summary = channel.send.await_args.kwargs["embeds"][0]
+    assert "not synced" in " ".join(f.value for f in summary.fields)
 
 
 # --- runtime error reporting (issue #514) ---
@@ -436,8 +443,9 @@ async def test_runtime_error_is_posted_with_traceback_attached(
     await main.report_error("command /daily", _boom("kaboom"))
 
     kwargs = channel.send.await_args.kwargs
-    assert "command /daily" in kwargs["content"]
-    assert "kaboom" in kwargs["content"]
+    rendered = " ".join(f"{f.name} {f.value}" for f in kwargs["embeds"][0].fields)
+    assert "command /daily" in rendered
+    assert "kaboom" in rendered
     assert kwargs["file"].filename == "error.txt"
 
 
@@ -484,8 +492,12 @@ async def test_command_errors_report_the_original_not_the_wrapper(
 
     await main.report_error("command !thing", wrapper)
 
-    assert "the real problem" in channel.send.await_args.kwargs["content"]
-    assert "ValueError" in channel.send.await_args.kwargs["content"]
+    rendered = " ".join(
+        f"{f.name} {f.value}"
+        for f in channel.send.await_args.kwargs["embeds"][0].fields
+    )
+    assert "the real problem" in rendered
+    assert "ValueError" in rendered
 
 
 @pytest.mark.asyncio
@@ -565,3 +577,133 @@ async def test_a_task_error_handler_reports_the_exception(monkeypatch):
     await handler(object(), boom)
 
     assert reported == [("task FakeCog.my_task", boom)]
+
+
+# --- severity, explanations and embeds (issue #514) ---
+#
+# Written before the implementation, from the severity table and explanation
+# list agreed in the plan. The mapping is a judgement call, so these assertions
+# come from that table rather than from whatever the code ends up doing.
+
+
+@pytest.mark.parametrize(
+    "source, error, expected",
+    [
+        ("Scam Detection", ImportError("libxcb"), main.CRITICAL),
+        ("task QueueDashboard.refresh", RuntimeError("died"), main.CRITICAL),
+        ("command /daily", RuntimeError("boom"), main.ERROR),
+        ("event on_message", RuntimeError("boom"), main.ERROR),
+    ],
+)
+def test_severity_is_derived_from_the_source(source, error, expected):
+    """Something no longer running is Critical; one failed interaction is not."""
+    assert main.classify_severity(source, error) is expected
+
+
+def test_permission_problems_are_a_warning_not_a_bug(monkeypatch):
+    """A missing permission is a config problem, and must read differently."""
+    forbidden = discord.Forbidden.__new__(discord.Forbidden)
+    Exception.__init__(forbidden, "Missing Permissions")
+
+    assert main.classify_severity("command /daily", forbidden) is main.WARNING
+    assert main.classify_severity("task Something.loop", forbidden) is main.WARNING
+
+
+def test_each_severity_has_its_own_colour():
+    colours = {
+        main.CRITICAL.colour,
+        main.ERROR.colour,
+        main.WARNING.colour,
+        main.INFO.colour,
+    }
+    assert len(colours) == 4
+    assert main.CRITICAL.colour == discord.Color.dark_red()
+    assert main.ERROR.colour == discord.Color.red()
+    assert main.WARNING.colour == discord.Color.orange()
+    assert main.INFO.colour == discord.Color.green()
+
+
+def test_a_known_error_gets_a_plain_english_explanation():
+    explanation = main.explain_error(ModuleNotFoundError("no module named cv2"))
+    assert "package" in explanation.lower()
+    assert "cv2" not in explanation, "the explanation is generic, not the raw error"
+
+
+def test_forbidden_is_explained_as_permissions_not_as_a_generic_http_error():
+    """discord.Forbidden subclasses HTTPException, so ordering decides this."""
+    forbidden = discord.Forbidden.__new__(discord.Forbidden)
+    Exception.__init__(forbidden, "Missing Permissions")
+
+    assert "permission" in main.explain_error(forbidden).lower()
+
+
+def test_an_unknown_error_gets_an_honest_fallback():
+    class SomethingNobodyPlannedFor(Exception):
+        pass
+
+    explanation = main.explain_error(SomethingNobodyPlannedFor("?"))
+
+    assert "traceback" in explanation.lower() or "unexpected" in explanation.lower()
+
+
+def test_error_embed_carries_source_explanation_and_original_error():
+    embed = main.build_error_embed(
+        "task QueueDashboard.refresh", ZeroDivisionError("dashboard blew up")
+    )
+    rendered = f"{embed.title} {embed.description or ''} " + " ".join(
+        f"{f.name} {f.value}" for f in embed.fields
+    )
+
+    assert "QueueDashboard.refresh" in rendered
+    assert "ZeroDivisionError" in rendered
+    assert "dashboard blew up" in rendered, "the original error must survive"
+    assert "bug" in rendered.lower(), "and be explained in plain English"
+    assert embed.color == main.CRITICAL.colour
+
+
+@pytest.mark.asyncio
+async def test_healthy_boot_sends_one_info_embed_and_no_attachment(monkeypatch):
+    channel = _text_channel()
+    _bot_logs(monkeypatch, channel)
+    main.STARTUP_FAILURES.clear()
+
+    await main.report_startup_to_discord(loaded=17, synced=72)
+
+    kwargs = channel.send.await_args.kwargs
+    assert len(kwargs["embeds"]) == 1
+    assert kwargs["embeds"][0].color == main.INFO.colour
+    assert kwargs["file"] is None
+
+
+@pytest.mark.asyncio
+async def test_boot_with_failures_sends_a_summary_plus_one_embed_each(monkeypatch):
+    channel = _text_channel()
+    _bot_logs(monkeypatch, channel)
+    main.STARTUP_FAILURES[:] = [
+        main.StartupFailure(
+            "Scam Detection", "features.scam_detection", "ImportError('x')", "tb"
+        ),
+        main.StartupFailure(
+            "Tournaments", "features.tourney", "RuntimeError('y')", "tb"
+        ),
+    ]
+
+    await main.report_startup_to_discord(loaded=15, synced=72)
+
+    kwargs = channel.send.await_args.kwargs
+    assert len(kwargs["embeds"]) == 3, "summary + one per failure"
+    assert kwargs["file"].filename == "startup_failures.txt"
+
+
+@pytest.mark.asyncio
+async def test_runtime_error_is_sent_as_an_embed(monkeypatch, _clean_error_state):
+    channel = _text_channel()
+    monkeypatch.setattr(main, "BOT_LOGS_CHANNEL_ID", 12345)
+    monkeypatch.setattr(main.bot, "get_channel", lambda _id: channel)
+
+    await main.report_error("command /daily", _boom("kaboom"))
+
+    kwargs = channel.send.await_args.kwargs
+    assert kwargs.get("content") in (None, "")
+    assert len(kwargs["embeds"]) == 1
+    assert kwargs["file"].filename == "error.txt"
