@@ -3,9 +3,9 @@ import hashlib
 import io
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta, timezone
+from importlib import import_module
 
 import aiohttp
-import cv2
 import discord
 import numpy as np
 from discord.ext import commands, tasks
@@ -24,6 +24,15 @@ from database.mongo import (
     rename_scam_image,
 )
 from features.config import MODERATOR_LOGS_CHANNEL_ID
+
+# OpenCV is imported by name rather than with a literal `import cv2` (#513).
+# The host's dependency scanner maps `import cv2` to the desktop opencv-python
+# package and re-adds it on every deploy, even when it is deleted from the
+# package list. That build links against X11 (libxcb.so.1), which a headless
+# container does not have, and it installs over the headless build's files, so
+# the import fails and this whole cog never loads. requirements.txt pins
+# opencv-python-headless, which is what actually provides cv2 here.
+cv2 = import_module("cv2")
 
 # pHash: max Hamming distance (out of 64 bits) to count as a match.
 # 0 = identical, <=5 = same image different compression, <=10 = minor resize/edit.
