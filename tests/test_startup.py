@@ -9,7 +9,8 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import discord
-from discord.ext import commands
+import time
+from discord.ext import commands, tasks
 
 import main
 
@@ -403,3 +404,164 @@ async def test_a_skipped_sync_is_reported_as_not_synced(monkeypatch):
     await main.report_startup_to_discord(loaded=16, synced=None)
 
     assert "not synced" in channel.send.await_args.kwargs["content"]
+
+
+# --- runtime error reporting (issue #514) ---
+
+
+@pytest.fixture(autouse=False)
+def _clean_error_state():
+    main._error_last_sent.clear()
+    main._error_recent_sends.clear()
+    yield
+    main._error_last_sent.clear()
+    main._error_recent_sends.clear()
+
+
+def _boom(message="boom", exc_type=RuntimeError):
+    try:
+        raise exc_type(message)
+    except exc_type as e:
+        return e
+
+
+@pytest.mark.asyncio
+async def test_runtime_error_is_posted_with_traceback_attached(
+    monkeypatch, _clean_error_state
+):
+    channel = _text_channel()
+    monkeypatch.setattr(main, "BOT_LOGS_CHANNEL_ID", 12345)
+    monkeypatch.setattr(main.bot, "get_channel", lambda _id: channel)
+
+    await main.report_error("command /daily", _boom("kaboom"))
+
+    kwargs = channel.send.await_args.kwargs
+    assert "command /daily" in kwargs["content"]
+    assert "kaboom" in kwargs["content"]
+    assert kwargs["file"].filename == "error.txt"
+
+
+@pytest.mark.asyncio
+async def test_the_same_error_is_not_reposted_within_the_dedup_window(
+    monkeypatch, _clean_error_state
+):
+    """A task failing every minute must not post 1,440 messages a day."""
+    channel = _text_channel()
+    monkeypatch.setattr(main, "BOT_LOGS_CHANNEL_ID", 12345)
+    monkeypatch.setattr(main.bot, "get_channel", lambda _id: channel)
+
+    for _ in range(4):
+        await main.report_error("task Quests.reconcile", _boom("same"))
+
+    assert channel.send.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_distinct_errors_are_reported_up_to_the_burst_limit(
+    monkeypatch, _clean_error_state
+):
+    channel = _text_channel()
+    monkeypatch.setattr(main, "BOT_LOGS_CHANNEL_ID", 12345)
+    monkeypatch.setattr(main.bot, "get_channel", lambda _id: channel)
+
+    for i in range(10):
+        await main.report_error(f"command /cmd{i}", _boom(f"error {i}"))
+
+    assert channel.send.await_count == main._ERROR_BURST_LIMIT
+
+
+@pytest.mark.asyncio
+async def test_command_errors_report_the_original_not_the_wrapper(
+    monkeypatch, _clean_error_state
+):
+    """CommandInvokeError wraps the real exception; the wrapper is not useful."""
+    channel = _text_channel()
+    monkeypatch.setattr(main, "BOT_LOGS_CHANNEL_ID", 12345)
+    monkeypatch.setattr(main.bot, "get_channel", lambda _id: channel)
+
+    original = _boom("the real problem", ValueError)
+    wrapper = commands.CommandInvokeError(original)
+
+    await main.report_error("command !thing", wrapper)
+
+    assert "the real problem" in channel.send.await_args.kwargs["content"]
+    assert "ValueError" in channel.send.await_args.kwargs["content"]
+
+
+@pytest.mark.asyncio
+async def test_a_failing_send_does_not_propagate(monkeypatch, _clean_error_state):
+    channel = _text_channel()
+    channel.send = AsyncMock(side_effect=RuntimeError("Missing Permissions"))
+    monkeypatch.setattr(main, "BOT_LOGS_CHANNEL_ID", 12345)
+    monkeypatch.setattr(main.bot, "get_channel", lambda _id: channel)
+
+    await main.report_error("command /daily", _boom())  # must not raise
+
+    assert main._REPORTING_ERROR is False
+
+
+@pytest.mark.asyncio
+async def test_reporting_is_not_reentrant(monkeypatch, _clean_error_state):
+    channel = _text_channel()
+    monkeypatch.setattr(main, "BOT_LOGS_CHANNEL_ID", 12345)
+    monkeypatch.setattr(main.bot, "get_channel", lambda _id: channel)
+    monkeypatch.setattr(main, "_REPORTING_ERROR", True)
+
+    await main.report_error("command /daily", _boom())
+
+    channel.send.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_report_error_no_ops_when_channel_unconfigured(
+    monkeypatch, _clean_error_state
+):
+    channel = _text_channel()
+    monkeypatch.setattr(main, "BOT_LOGS_CHANNEL_ID", 0)
+    monkeypatch.setattr(main.bot, "get_channel", lambda _id: channel)
+
+    await main.report_error("command /daily", _boom())
+
+    channel.send.assert_not_awaited()
+
+
+def test_dedup_entries_are_pruned_so_the_map_cannot_grow_forever(_clean_error_state):
+    now = time.time()
+    main._error_last_sent["stale"] = now - main._ERROR_DEDUP_SECONDS - 1
+
+    main._should_report_error("fresh", now)
+
+    assert "stale" not in main._error_last_sent
+
+
+def test_every_background_task_gets_an_error_handler():
+    """A tasks.Loop that raises stops looping and only logs — 19 of them exist."""
+
+    class FakeCog:
+        @tasks.loop(seconds=60)
+        async def my_task(self):
+            pass
+
+    cog = FakeCog()
+    default_handler = cog.my_task._error
+
+    main.attach_task_error_reporting([cog])
+
+    assert cog.my_task._error is not default_handler
+
+
+@pytest.mark.asyncio
+async def test_a_task_error_handler_reports_the_exception(monkeypatch):
+    """discord.py passes (cog, exception) for a bound loop."""
+    reported = []
+
+    async def fake_report(source, error):
+        reported.append((source, error))
+
+    monkeypatch.setattr(main, "report_error", fake_report)
+    handler = main._task_error_handler("task FakeCog.my_task")
+
+    boom = RuntimeError("task died")
+    await handler(object(), boom)
+
+    assert reported == [("task FakeCog.my_task", boom)]

@@ -1,8 +1,12 @@
 import discord
-from discord.ext import commands
+from discord import app_commands
+from discord.ext import commands, tasks
 import io
 import os
+import sys
+import time
 import traceback
+from collections import deque
 from typing import NamedTuple
 from dotenv import load_dotenv
 
@@ -185,7 +189,147 @@ async def report_startup_to_discord(loaded: int, synced: int | None) -> None:
         print(f"⚠️ Could not report startup to Discord: {e!r}")
 
 
+# --- RUNTIME ERROR REPORTING ---
+
+# Rate limited on two axes: the same error is not reposted within the dedup
+# window (a background task failing every minute would otherwise post 1,440
+# messages a day), and no more than a short burst is posted per window.
+_ERROR_DEDUP_SECONDS = 300
+_ERROR_BURST_LIMIT = 5
+_ERROR_BURST_WINDOW = 60
+
+_error_last_sent: dict[str, float] = {}
+_error_recent_sends: deque[float] = deque()
+
+# A failure inside reporting must not trigger another report.
+_REPORTING_ERROR = False
+
+
+def _should_report_error(fingerprint: str, now: float) -> bool:
+    """Whether this error is new enough and rare enough to be worth posting."""
+    for key, sent in list(_error_last_sent.items()):
+        if now - sent > _ERROR_DEDUP_SECONDS:
+            del _error_last_sent[key]
+
+    last = _error_last_sent.get(fingerprint)
+    if last is not None and now - last < _ERROR_DEDUP_SECONDS:
+        return False
+
+    while _error_recent_sends and now - _error_recent_sends[0] > _ERROR_BURST_WINDOW:
+        _error_recent_sends.popleft()
+    if len(_error_recent_sends) >= _ERROR_BURST_LIMIT:
+        return False
+
+    _error_last_sent[fingerprint] = now
+    _error_recent_sends.append(now)
+    return True
+
+
+def _unwrap(error: BaseException) -> BaseException:
+    """Command errors wrap the real exception; the wrapper is not the useful bit."""
+    return getattr(error, "original", None) or error
+
+
+async def report_error(source: str, error: BaseException) -> None:
+    """Post a runtime error to the bot logs channel, rate limited.
+
+    Startup failures go through report_startup_to_discord. This covers
+    everything after: commands, listeners and background tasks, none of which
+    had any handler at all before, and whose console output the host drops.
+    """
+    global _REPORTING_ERROR
+    if _REPORTING_ERROR:
+        return
+    if not isinstance(BOT_LOGS_CHANNEL_ID, int) or BOT_LOGS_CHANNEL_ID <= 0:
+        return
+
+    error = _unwrap(error)
+    fingerprint = f"{source}|{type(error).__name__}|{error}"[:200]
+    if not _should_report_error(fingerprint, time.time()):
+        return
+
+    channel = bot.get_channel(BOT_LOGS_CHANNEL_ID)
+    if not isinstance(channel, discord.TextChannel):
+        return
+
+    detail = "".join(
+        traceback.format_exception(type(error), error, error.__traceback__)
+    )
+
+    _REPORTING_ERROR = True
+    try:
+        await channel.send(
+            content=f"❌ **Runtime error** — `{source}`\n```{type(error).__name__}: {error}```",
+            file=discord.File(io.BytesIO(detail.encode("utf-8")), filename="error.txt"),
+        )
+    except Exception as e:
+        print(f"⚠️ Could not report runtime error to Discord: {e!r}")
+    finally:
+        _REPORTING_ERROR = False
+
+
+def attach_task_error_reporting(cogs=None) -> None:
+    """Route every cog background task's unhandled exception to the log channel.
+
+    A tasks.Loop that raises stops looping and only logs, so a dead scheduler
+    is silent. Attaching programmatically covers every loop without editing
+    each cog, and re-attaching on reconnect simply replaces the handler.
+    """
+    for cog in bot.cogs.values() if cogs is None else cogs:
+        for name in dir(type(cog)):
+            if isinstance(getattr(type(cog), name, None), tasks.Loop):
+                loop = getattr(cog, name)
+                loop.error(_task_error_handler(f"task {type(cog).__name__}.{name}"))
+
+
+def _task_error_handler(label: str):
+    async def handler(*args) -> None:
+        # discord.py passes (cog, exception) for a bound loop, (exception,) otherwise.
+        await report_error(label, args[-1])
+
+    return handler
+
+
 # --- EVENTS ---
+
+
+@bot.event
+async def on_error(event_method: str, /, *args, **kwargs) -> None:
+    """Unhandled exception inside a listener. discord.py only logs these."""
+    traceback.print_exc()
+    error = sys.exc_info()[1]
+    if error is not None:
+        await report_error(f"event {event_method}", error)
+
+
+@bot.event
+async def on_command_error(ctx: commands.Context, error: Exception) -> None:
+    """Unhandled prefix command error.
+
+    User mistakes are not bugs and are left alone: an unknown command, a failed
+    permission check, or bad arguments should not page anyone.
+    """
+    if isinstance(
+        error,
+        (commands.CommandNotFound, commands.CheckFailure, commands.UserInputError),
+    ):
+        return
+    print(f"❌ Command error in !{ctx.command}: {error!r}")
+    traceback.print_exception(type(error), error, error.__traceback__)
+    await report_error(f"command !{ctx.command}", error)
+
+
+@bot.tree.error
+async def on_app_command_error(
+    interaction: discord.Interaction, error: app_commands.AppCommandError
+) -> None:
+    """Unhandled slash command error, replacing discord.py's log-only default."""
+    if isinstance(error, app_commands.CheckFailure):
+        return
+    name = interaction.command.name if interaction.command else "unknown"
+    print(f"❌ Command error in /{name}: {error!r}")
+    traceback.print_exception(type(error), error, error.__traceback__)
+    await report_error(f"command /{name}", error)
 
 
 @bot.event
@@ -227,7 +371,10 @@ async def on_ready():
     # 5. SYNC COMMANDS (Do this LAST)
     synced = await sync_commands(failed)
 
-    # 6. Report the boot to Discord, where the host's logs cannot swallow it
+    # 6. Route background task failures to the log channel too
+    attach_task_error_reporting()
+
+    # 7. Report the boot to Discord, where the host's logs cannot swallow it
     await report_startup_to_discord(loaded, synced)
 
     if failed:
