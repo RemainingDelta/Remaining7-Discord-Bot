@@ -8,6 +8,7 @@ import pytest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
+import discord
 from discord.ext import commands
 
 import main
@@ -199,3 +200,206 @@ async def test_sync_skipped_when_remote_commands_cannot_be_read(monkeypatch):
     await main.sync_commands(["Scam Detection"])
 
     tree.sync.assert_not_awaited()
+
+
+# --- startup failure capture (issue #514) ---
+
+
+@pytest.mark.asyncio
+async def test_cog_failure_detail_is_captured(monkeypatch):
+    async def fake_load(module):
+        if module == "features.scam_detection":
+            raise ImportError("libxcb.so.1: cannot open shared object file")
+
+    monkeypatch.setattr(main.bot, "load_extension", fake_load)
+
+    await main.load_features()
+
+    assert len(main.STARTUP_FAILURES) == 1
+    failure = main.STARTUP_FAILURES[0]
+    assert failure.label == "Scam Detection"
+    assert failure.source == "features.scam_detection"
+    assert "libxcb" in failure.error
+    assert "ImportError" in failure.traceback
+
+
+@pytest.mark.asyncio
+async def test_capture_is_cleared_between_runs(monkeypatch):
+    async def failing(module):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(main.bot, "load_extension", failing)
+    await main.load_features()
+    assert main.STARTUP_FAILURES
+
+    async def clean(module):
+        return None
+
+    monkeypatch.setattr(main.bot, "load_extension", clean)
+    await main.load_features()
+    assert main.STARTUP_FAILURES == []
+
+
+@pytest.mark.asyncio
+async def test_already_loaded_is_not_captured(monkeypatch):
+    async def already(module):
+        raise commands.ExtensionAlreadyLoaded(module)
+
+    monkeypatch.setattr(main.bot, "load_extension", already)
+
+    await main.load_features()
+
+    assert main.STARTUP_FAILURES == []
+
+
+def test_record_failure_captures_label_source_and_traceback():
+    """Tourney setup and the privacy repost are not cogs but must still report."""
+    main.STARTUP_FAILURES.clear()
+    try:
+        raise ValueError("nope")
+    except ValueError as e:
+        main.record_failure("Tournaments", "features.tourney.tourney_commands", e)
+
+    failure = main.STARTUP_FAILURES[0]
+    assert failure.label == "Tournaments"
+    assert failure.source == "features.tourney.tourney_commands"
+    assert "nope" in failure.error
+    assert "ValueError" in failure.traceback
+
+
+# --- sync_commands return value ---
+
+
+@pytest.mark.asyncio
+async def test_sync_returns_the_number_of_commands_synced(monkeypatch):
+    monkeypatch.setattr(main.bot.tree, "sync", AsyncMock(return_value=[1, 2, 3]))
+
+    assert await main.sync_commands([]) == 3
+
+
+@pytest.mark.asyncio
+async def test_sync_returns_none_when_skipped(monkeypatch):
+    monkeypatch.setattr(
+        main.bot.tree,
+        "fetch_commands",
+        AsyncMock(return_value=[SimpleNamespace(name="gone")]),
+    )
+    monkeypatch.setattr(main.bot.tree, "get_commands", lambda: [])
+
+    assert await main.sync_commands(["Scam Detection"]) is None
+
+
+# --- report_startup_to_discord ---
+
+
+def _bot_logs(monkeypatch, channel):
+    monkeypatch.setattr(main, "BOT_LOGS_CHANNEL_ID", 12345)
+    monkeypatch.setattr(main.bot, "get_channel", lambda _id: channel)
+    monkeypatch.setattr(main, "_STARTUP_REPORTED", False)
+
+
+def _text_channel():
+    channel = MagicMock(spec=discord.TextChannel)
+    channel.send = AsyncMock()
+    return channel
+
+
+@pytest.mark.asyncio
+async def test_healthy_boot_posts_a_summary_with_no_attachment(monkeypatch):
+    channel = _text_channel()
+    _bot_logs(monkeypatch, channel)
+    main.STARTUP_FAILURES.clear()
+
+    await main.report_startup_to_discord(loaded=17, synced=72)
+
+    kwargs = channel.send.await_args.kwargs
+    assert "17/17" in kwargs["content"]
+    assert "72" in kwargs["content"]
+    assert kwargs["file"] is None
+
+
+@pytest.mark.asyncio
+async def test_failure_is_named_and_traceback_attached(monkeypatch):
+    channel = _text_channel()
+    _bot_logs(monkeypatch, channel)
+    main.STARTUP_FAILURES[:] = [
+        main.StartupFailure(
+            "Scam Detection",
+            "features.scam_detection",
+            "ImportError('libxcb.so.1')",
+            "LINE " * 800,
+        )
+    ]
+
+    await main.report_startup_to_discord(loaded=16, synced=72)
+
+    kwargs = channel.send.await_args.kwargs
+    assert "Scam Detection" in kwargs["content"]
+    assert "libxcb.so.1" in kwargs["content"]
+    assert kwargs["file"].filename == "startup_failures.txt"
+    assert b"LINE" in kwargs["file"].fp.getvalue()
+
+
+@pytest.mark.asyncio
+async def test_summary_is_posted_once_per_process_not_per_reconnect(monkeypatch):
+    """on_ready re-fires on every gateway reconnect."""
+    channel = _text_channel()
+    _bot_logs(monkeypatch, channel)
+    main.STARTUP_FAILURES.clear()
+
+    await main.report_startup_to_discord(loaded=17, synced=72)
+    await main.report_startup_to_discord(loaded=17, synced=72)
+    await main.report_startup_to_discord(loaded=17, synced=72)
+
+    assert channel.send.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_report_no_ops_when_channel_is_missing(monkeypatch):
+    _bot_logs(monkeypatch, None)
+    main.STARTUP_FAILURES.clear()
+
+    await main.report_startup_to_discord(loaded=17, synced=72)  # must not raise
+
+
+@pytest.mark.asyncio
+async def test_report_no_ops_when_channel_is_not_a_text_channel(monkeypatch):
+    _bot_logs(monkeypatch, MagicMock(spec=discord.VoiceChannel))
+    main.STARTUP_FAILURES.clear()
+
+    await main.report_startup_to_discord(loaded=17, synced=72)  # must not raise
+
+
+@pytest.mark.asyncio
+async def test_report_no_ops_when_channel_id_is_unconfigured(monkeypatch):
+    channel = _text_channel()
+    monkeypatch.setattr(main, "BOT_LOGS_CHANNEL_ID", 0)
+    monkeypatch.setattr(main.bot, "get_channel", lambda _id: channel)
+    monkeypatch.setattr(main, "_STARTUP_REPORTED", False)
+
+    await main.report_startup_to_discord(loaded=17, synced=72)
+
+    channel.send.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_a_failing_send_does_not_break_startup(monkeypatch):
+    channel = _text_channel()
+    channel.send = AsyncMock(side_effect=RuntimeError("Missing Permissions"))
+    _bot_logs(monkeypatch, channel)
+    main.STARTUP_FAILURES.clear()
+
+    await main.report_startup_to_discord(loaded=17, synced=72)  # must swallow
+
+    assert main._STARTUP_REPORTED is False
+
+
+@pytest.mark.asyncio
+async def test_a_skipped_sync_is_reported_as_not_synced(monkeypatch):
+    channel = _text_channel()
+    _bot_logs(monkeypatch, channel)
+    main.STARTUP_FAILURES.clear()
+
+    await main.report_startup_to_discord(loaded=16, synced=None)
+
+    assert "not synced" in channel.send.await_args.kwargs["content"]

@@ -1,7 +1,9 @@
 import discord
 from discord.ext import commands
+import io
 import os
 import traceback
+from typing import NamedTuple
 from dotenv import load_dotenv
 
 # Import Tourney Logic (Legacy/Features folder)
@@ -15,6 +17,9 @@ from features.privacy_policy import repost_privacy_policy
 
 # Import Database connection check
 from database.mongo import db
+
+# Startup reporting posts here, where an admin will actually see it
+from features.config import BOT_LOGS_CHANNEL_ID, BOT_VERSION
 
 
 load_dotenv()
@@ -51,9 +56,35 @@ FEATURE_EXTENSIONS = [
 ]
 
 
+class StartupFailure(NamedTuple):
+    """Something that raised during startup, kept for the Discord report."""
+
+    label: str
+    source: str
+    error: str
+    traceback: str
+
+
+# Detail for the current startup. Kept separate from the failed-label list
+# that sync_commands() consumes, so that contract stays unchanged.
+STARTUP_FAILURES: list[StartupFailure] = []
+
+# on_ready re-fires on every gateway reconnect, so the report is guarded to
+# once per process. Without this a flaky connection reposts it repeatedly.
+_STARTUP_REPORTED = False
+
+
+def record_failure(label: str, source: str, exc: Exception) -> None:
+    """Capture a startup failure for the Discord report."""
+    STARTUP_FAILURES.append(
+        StartupFailure(label, source, repr(exc), traceback.format_exc())
+    )
+
+
 async def load_features() -> list[str]:
     """Load every feature cog independently; return the labels that failed."""
     failed: list[str] = []
+    STARTUP_FAILURES.clear()
     for module, label in FEATURE_EXTENSIONS:
         try:
             await bot.load_extension(module)
@@ -64,25 +95,27 @@ async def load_features() -> list[str]:
             pass
         except Exception as e:
             failed.append(label)
+            record_failure(label, module, e)
             print(f"❌ Failed to load {label} ({module}): {e!r}")
             traceback.print_exc()
     return failed
 
 
-async def sync_commands(failed: list[str]) -> None:
+async def sync_commands(failed: list[str]) -> int | None:
     """Publish the command tree, but never let a partial load delete commands.
 
     tree.sync() is authoritative: it replaces Discord's command list with
     whatever the tree currently holds, so syncing after a cog failed to load
     silently deletes that cog's commands. When anything failed, only sync if
-    the result would be purely additive.
+    the result would be purely additive. Returns the number of commands
+    synced, or None if the sync was skipped or failed.
     """
     if failed:
         try:
             remote = {c.name for c in await bot.tree.fetch_commands()}
         except Exception as e:
             print(f"⚠️ Skipping command sync: cannot read current commands ({e!r}).")
-            return
+            return None
 
         local = {c.name for c in bot.tree.get_commands()}
         would_delete = remote - local
@@ -92,13 +125,64 @@ async def sync_commands(failed: list[str]) -> None:
                 f"{sorted(would_delete)} because these features failed to load: "
                 f"{', '.join(failed)}. Fix them and restart."
             )
-            return
+            return None
 
     try:
         synced = await bot.tree.sync()
         print(f"✅ Slash Commands Synced: {len(synced)} commands available")
+        return len(synced)
     except Exception as e:
         print(f"⚠️ Command Sync Error: {e!r}")
+        return None
+
+
+async def report_startup_to_discord(loaded: int, synced: int | None) -> None:
+    """Post one startup report per process to the bot logs channel.
+
+    The host's logs silently drop lines beginning with a warning or cross emoji,
+    so a failing feature is invisible there - that is why #503 and #513 both went
+    undiagnosed for days. Discord is the surface an admin can actually read, so
+    the boot summary and any failure go here, with tracebacks attached rather
+    than inlined so Discord's 2000-character limit cannot truncate them.
+    """
+    global _STARTUP_REPORTED
+    if _STARTUP_REPORTED:
+        return
+    if not isinstance(BOT_LOGS_CHANNEL_ID, int) or BOT_LOGS_CHANNEL_ID <= 0:
+        return
+
+    channel = bot.get_channel(BOT_LOGS_CHANNEL_ID)
+    if not isinstance(channel, discord.TextChannel):
+        return
+
+    total = len(FEATURE_EXTENSIONS)
+    lines = [
+        f"✅ **Bot online** — {BOT_VERSION}",
+        f"Features: {loaded}/{total} loaded",
+        f"Commands: {synced if synced is not None else 'not synced'}",
+    ]
+
+    file = None
+    if STARTUP_FAILURES:
+        lines.append("")
+        lines.append(f"⚠️ **{len(STARTUP_FAILURES)} failure(s) during startup**")
+        for failure in STARTUP_FAILURES:
+            lines.append(f"• **{failure.label}** (`{failure.source}`)")
+            lines.append(f"```{failure.error}```")
+        detail = "\n\n".join(
+            f"=== {f.label} ({f.source}) ===\n{f.traceback}" for f in STARTUP_FAILURES
+        )
+        file = discord.File(
+            io.BytesIO(detail.encode("utf-8")), filename="startup_failures.txt"
+        )
+
+    try:
+        await channel.send(content="\n".join(lines), file=file)
+        _STARTUP_REPORTED = True
+    except Exception as e:
+        # Reporting must never be the thing that breaks startup. The flag stays
+        # unset so a later reconnect retries a send that never succeeded.
+        print(f"⚠️ Could not report startup to Discord: {e!r}")
 
 
 # --- EVENTS ---
@@ -116,6 +200,7 @@ async def on_ready():
 
     # 2. Load Features (Cogs)
     failed = await load_features()
+    loaded = len(FEATURE_EXTENSIONS) - len(failed)
 
     # 3. Load Tourney System. Registers its own top-level commands, so a failure
     #    here also has to block a destructive sync.
@@ -125,6 +210,7 @@ async def on_ready():
         await restore_tourney_panels(bot)
     except Exception as e:
         failed.append("Tournaments")
+        record_failure("Tournaments", "features.tourney.tourney_commands", e)
         print(f"⚠️ Tourney Error: {e!r}")
         traceback.print_exc()
 
@@ -132,11 +218,17 @@ async def on_ready():
     try:
         await repost_privacy_policy(bot)
     except Exception as e:
+        # Reported but not added to `failed`: the repost registers no
+        # commands, so it must not block the sync.
+        record_failure("Privacy Policy Repost", "features.privacy_policy", e)
         print(f"⚠️ Privacy Policy Repost Error: {e!r}")
         traceback.print_exc()
 
     # 5. SYNC COMMANDS (Do this LAST)
-    await sync_commands(failed)
+    synced = await sync_commands(failed)
+
+    # 6. Report the boot to Discord, where the host's logs cannot swallow it
+    await report_startup_to_discord(loaded, synced)
 
     if failed:
         print(
