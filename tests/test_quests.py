@@ -3,7 +3,6 @@ reward payout (rewarded flag, retry gate, and startup reconcile)."""
 
 from unittest.mock import AsyncMock, MagicMock
 
-import discord
 import pytest
 
 import database.mongo as mongo
@@ -218,22 +217,6 @@ async def test_reconcile_noop_when_nothing_pending(monkeypatch):
 # --- on_message DM handling (#517) ---
 
 
-def _make_guild_message(channel_id, category_id):
-    message = MagicMock(spec=discord.Message)
-    message.author = MagicMock(spec=discord.Member)
-    message.author.bot = False
-    message.author.id = 987654321
-    message.guild = MagicMock(spec=discord.Guild)
-    message.channel = MagicMock(spec=discord.TextChannel)
-    message.channel.id = channel_id
-    if category_id is None:
-        message.channel.category = None
-    else:
-        message.channel.category = MagicMock(spec=discord.CategoryChannel)
-        message.channel.category.id = category_id
-    return message
-
-
 async def test_on_message_ignores_dm(mock_dm_message):
     # #517: DMChannel has no `category`, so reading it raised AttributeError
     # and killed the listener on every DM. Quests gates independently of
@@ -246,21 +229,21 @@ async def test_on_message_ignores_dm(mock_dm_message):
     cog.process_quest_update.assert_not_awaited()
 
 
-async def test_on_message_still_skips_bots_category():
+async def test_on_message_still_skips_bots_category(guild_message):
     # The DM guard must not replace the BOTS-category skip.
     cog = _make_quests_cog()
     cog.process_quest_update = AsyncMock()
 
-    await cog.on_message(_make_guild_message(GENERAL_CHANNEL_ID, BOTS_CATEGORY_ID))
+    await cog.on_message(guild_message(GENERAL_CHANNEL_ID, BOTS_CATEGORY_ID))
 
     cog.process_quest_update.assert_not_awaited()
 
 
-async def test_on_message_still_updates_in_general():
+async def test_on_message_still_updates_in_general(guild_message):
     # Guild messages are unaffected by the DM guard.
     cog = _make_quests_cog()
     cog.process_quest_update = AsyncMock()
-    message = _make_guild_message(GENERAL_CHANNEL_ID, None)
+    message = guild_message(GENERAL_CHANNEL_ID)
 
     await cog.on_message(message)
 

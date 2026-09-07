@@ -62,3 +62,33 @@ def mock_dm_message():
     message.channel = MagicMock(spec=discord.DMChannel)
     message.channel.id = 555555555
     return message
+
+
+@pytest.fixture
+def guild_message():
+    """Factory for a member's message in a guild text channel.
+
+    `category_id=None` puts the channel outside any category. Paired with
+    `mock_dm_message` so both sides of the guild/DM boundary come from one
+    place.
+    """
+
+    def _make(channel_id, category_id=None):
+        message = MagicMock(spec=discord.Message)
+        message.author = MagicMock(spec=discord.Member)
+        message.author.bot = False
+        message.author.id = 987654321
+        message.content = "hello"
+        message.guild = MagicMock(spec=discord.Guild)
+        message.guild.get_role = MagicMock(return_value=None)
+        message.channel = MagicMock(spec=discord.TextChannel)
+        message.channel.id = channel_id
+        message.channel.send = AsyncMock()
+        if category_id is None:
+            message.channel.category = None
+        else:
+            message.channel.category = MagicMock(spec=discord.CategoryChannel)
+            message.channel.category.id = category_id
+        return message
+
+    return _make

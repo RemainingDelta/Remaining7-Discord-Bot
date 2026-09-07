@@ -1089,12 +1089,6 @@ async def test_claim_drop_records_claimer_via_setoninsert(monkeypatch):
 # --- on_message DM handling (#517) ---
 
 
-def _make_bare_economy_cog():
-    cog = Economy.__new__(Economy)  # skip __init__ so task loops don't start
-    cog.bot = MagicMock()
-    return cog
-
-
 def _patch_reward_path(monkeypatch):
     """Patch every DB call the passive-reward path makes.
 
@@ -1117,29 +1111,10 @@ def _patch_reward_path(monkeypatch):
     return increment
 
 
-def _make_guild_message(channel_id, category_id):
-    message = MagicMock(spec=discord.Message)
-    message.author = MagicMock(spec=discord.Member)
-    message.author.bot = False
-    message.author.id = 987654321
-    message.content = "hello"
-    message.guild = MagicMock(spec=discord.Guild)
-    message.guild.get_role = MagicMock(return_value=None)
-    message.channel = MagicMock(spec=discord.TextChannel)
-    message.channel.id = channel_id
-    message.channel.send = AsyncMock()
-    if category_id is None:
-        message.channel.category = None
-    else:
-        message.channel.category = MagicMock(spec=discord.CategoryChannel)
-        message.channel.category.id = category_id
-    return message
-
-
 async def test_on_message_ignores_dm(mock_dm_message, monkeypatch):
     # #517: DMChannel has no `category`, so reading it raised AttributeError
     # and killed the listener on every DM.
-    cog = _make_bare_economy_cog()
+    cog, _ = _make_economy_cog(None)
     increment = _patch_reward_path(monkeypatch)
 
     await cog.on_message(mock_dm_message)
@@ -1147,22 +1122,22 @@ async def test_on_message_ignores_dm(mock_dm_message, monkeypatch):
     increment.assert_not_awaited()
 
 
-async def test_on_message_still_skips_bots_category(monkeypatch):
+async def test_on_message_still_skips_bots_category(guild_message, monkeypatch):
     # The DM guard must not replace the BOTS-category skip.
-    cog = _make_bare_economy_cog()
+    cog, _ = _make_economy_cog(None)
     increment = _patch_reward_path(monkeypatch)
-    message = _make_guild_message(GENERAL_CHANNEL_ID, BOTS_CATEGORY_ID)
+    message = guild_message(GENERAL_CHANNEL_ID, BOTS_CATEGORY_ID)
 
     await cog.on_message(message)
 
     increment.assert_not_awaited()
 
 
-async def test_on_message_still_rewards_general_channel(monkeypatch):
+async def test_on_message_still_rewards_general_channel(guild_message, monkeypatch):
     # Guild messages are unaffected by the DM guard.
-    cog = _make_bare_economy_cog()
+    cog, _ = _make_economy_cog(None)
     increment = _patch_reward_path(monkeypatch)
-    message = _make_guild_message(GENERAL_CHANNEL_ID, None)
+    message = guild_message(GENERAL_CHANNEL_ID)
 
     await cog.on_message(message)
 
