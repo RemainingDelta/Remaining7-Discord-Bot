@@ -7,6 +7,8 @@ import discord
 import pytest
 
 from features.config import (
+    BOTS_CATEGORY_ID,
+    GENERAL_CHANNEL_ID,
     REDEMPTION_TICKET_CATEGORY_ID,
     REDEMPTION_TRANSCRIPT_CHANNEL_ID,
 )
@@ -1082,3 +1084,86 @@ async def test_claim_drop_records_claimer_via_setoninsert(monkeypatch):
     kwargs = fake_db.drop_claims.find_one_and_update.call_args.kwargs
     assert update["$setOnInsert"]["claimed_by"] == "u1"
     assert kwargs["upsert"] is True
+
+
+# --- on_message DM handling (#517) ---
+
+
+def _make_bare_economy_cog():
+    cog = Economy.__new__(Economy)  # skip __init__ so task loops don't start
+    cog.bot = MagicMock()
+    return cog
+
+
+def _patch_reward_path(monkeypatch):
+    """Patch every DB call the passive-reward path makes.
+
+    get_setting is called with and without a default, so echo the default
+    back: that yields "0:0" for the daily counter and None for the token
+    cooldown (i.e. no cooldown recorded -> tokens are due).
+    """
+    increment = AsyncMock()
+    monkeypatch.setattr("features.economy.get_user_data", AsyncMock(return_value={}))
+    monkeypatch.setattr(
+        "features.economy.get_setting",
+        AsyncMock(side_effect=lambda key, default=None: default),
+    )
+    monkeypatch.setattr("features.economy.set_setting", AsyncMock())
+    monkeypatch.setattr("features.economy.increment_user_balance", increment)
+    monkeypatch.setattr(
+        "features.economy.get_leveling_data", AsyncMock(return_value=(1, 0))
+    )
+    monkeypatch.setattr("features.economy.update_leveling_data", AsyncMock())
+    return increment
+
+
+def _make_guild_message(channel_id, category_id):
+    message = MagicMock(spec=discord.Message)
+    message.author = MagicMock(spec=discord.Member)
+    message.author.bot = False
+    message.author.id = 987654321
+    message.content = "hello"
+    message.guild = MagicMock(spec=discord.Guild)
+    message.guild.get_role = MagicMock(return_value=None)
+    message.channel = MagicMock(spec=discord.TextChannel)
+    message.channel.id = channel_id
+    message.channel.send = AsyncMock()
+    if category_id is None:
+        message.channel.category = None
+    else:
+        message.channel.category = MagicMock(spec=discord.CategoryChannel)
+        message.channel.category.id = category_id
+    return message
+
+
+async def test_on_message_ignores_dm(mock_dm_message, monkeypatch):
+    # #517: DMChannel has no `category`, so reading it raised AttributeError
+    # and killed the listener on every DM.
+    cog = _make_bare_economy_cog()
+    increment = _patch_reward_path(monkeypatch)
+
+    await cog.on_message(mock_dm_message)
+
+    increment.assert_not_awaited()
+
+
+async def test_on_message_still_skips_bots_category(monkeypatch):
+    # The DM guard must not replace the BOTS-category skip.
+    cog = _make_bare_economy_cog()
+    increment = _patch_reward_path(monkeypatch)
+    message = _make_guild_message(GENERAL_CHANNEL_ID, BOTS_CATEGORY_ID)
+
+    await cog.on_message(message)
+
+    increment.assert_not_awaited()
+
+
+async def test_on_message_still_rewards_general_channel(monkeypatch):
+    # Guild messages are unaffected by the DM guard.
+    cog = _make_bare_economy_cog()
+    increment = _patch_reward_path(monkeypatch)
+    message = _make_guild_message(GENERAL_CHANNEL_ID, None)
+
+    await cog.on_message(message)
+
+    increment.assert_awaited_once()
