@@ -19,7 +19,7 @@ What gets pulled in:
 |---|---|
 | `content` | Quoted as context for Gemini to classify from |
 | Embeds (title, description, each field) | Same — an embed-only bot post has empty `content`, so this is where an error report actually lives |
-| `.txt` / `.log` attachments under 100 KB | Inlined **verbatim** in a collapsible `<details>` block, bug tickets only |
+| `.txt` / `.log` attachments under 20 KB (40 KB across all of them) | Inlined **verbatim** in a collapsible `<details>` block, bug tickets only |
 | Image attachments | Filename only |
 | — | A permanent `jump_url` link back to the Discord message |
 

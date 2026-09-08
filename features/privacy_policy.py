@@ -20,7 +20,7 @@ from discord.ext import commands
 from features.config import OTHER_TICKET_CHANNEL_ID, PRIVACY_CHANNEL_ID
 
 POLICY_TITLE = "Remaining 7 Bot Privacy Policy"
-LAST_UPDATED = "August 28, 2026"
+LAST_UPDATED = "September 8, 2026"
 
 # The same policy, hosted on the web. Linked at the foot of the last embed for
 # anyone who wants to read or share it outside Discord. This is the one external
@@ -101,7 +101,13 @@ POLICY_PARTS: tuple[PolicyPart, ...] = (
                     "message in a channel using the bot\n"
                     "- Booster status markers, a simple monthly marker used to "
                     "track whether you've used a booster perk (such as a shop "
-                    "discount) in the current month"
+                    "discount) in the current month\n"
+                    "- Error logs, when something in the bot fails. These are "
+                    "posted to a staff-only channel and contain the technical "
+                    "details of the failure, which can include your user ID and "
+                    "the values you passed to a command. They are not stored in "
+                    "our database, and they may be attached to a public issue as "
+                    'described in "When information leaves Discord" below'
                 ),
             ),
         ),
@@ -165,12 +171,19 @@ POLICY_PARTS: tuple[PolicyPart, ...] = (
                     "in a staff-only log channel.\n"
                     "- GitHub issue creation. A single authorized staff member "
                     "can @mention the bot to convert a bug report or feature "
-                    "request into a GitHub issue. When this happens, that "
-                    "staff member's message is sent to Google's Gemini API for "
-                    "classification and to GitHub, where the resulting issue "
-                    "is created and publicly visible in our project "
-                    "repository. This feature is restricted to one authorized "
-                    "user and is not available to general members."
+                    "request into a GitHub issue. That staff member's message "
+                    "is sent to Google's Gemini API for classification and to "
+                    "GitHub, where the resulting issue is created and publicly "
+                    "visible in our project repository.\n"
+                    "  If they send it as a reply to another message, that "
+                    "message is included too: its text, the contents of any "
+                    "embed on it, the filenames of anything attached to it, and "
+                    "a link back to it in Discord. Attached log files are copied "
+                    "into the issue in full. So if a staff member files an issue "
+                    "by replying to something you wrote, your words and any "
+                    "files you attached can end up on a public page.\n"
+                    "  This feature is restricted to one authorized user and is "
+                    "not available to general members."
                 ),
             ),
         ),
