@@ -131,11 +131,18 @@ USER DESCRIPTION:
 
 # --- CONTEXT FROM A REPLIED-TO MESSAGE (#522) ---
 
-# A log longer than this is not worth pasting into an issue body; GitHub renders
-# it badly and the point is a readable ticket, not an archive.
-MAX_INLINE_LOG_BYTES = 100_000
+# GitHub rejects an issue body over this length, and the body is written in a
+# second call after the issue already exists — so overshooting leaves the issue
+# created with its branch placeholder unrenamed and its log missing.
+GITHUB_BODY_LIMIT = 65_536
+
+# Budgeted well under that to leave room for the template itself. The total is
+# what matters: several logs that each pass a per-file check still overflow.
+MAX_INLINE_LOG_BYTES = 20_000
+MAX_TOTAL_LOG_BYTES = 40_000
 
 TEXT_ATTACHMENT_SUFFIXES = (".txt", ".log")
+LOG_SECTION_HEADING = "### Screenshots/Logs"
 
 
 class ReferencedContext(NamedTuple):
@@ -143,7 +150,7 @@ class ReferencedContext(NamedTuple):
 
     text: str
     logs: tuple[str, ...]
-    image_names: tuple[str, ...]
+    attachment_names: tuple[str, ...]
     jump_url: str
 
 
@@ -158,12 +165,15 @@ def embed_to_text(embed: discord.Embed) -> str:
     return "\n".join(part for part in parts if part)
 
 
-async def _read_log_attachment(attachment: discord.Attachment) -> str | None:
-    """Return an attachment's text, or None if it is not an inlinable log."""
+def _is_inlinable_log(attachment: discord.Attachment) -> bool:
+    """Whether this attachment is a log small enough to paste into an issue."""
     if not attachment.filename.lower().endswith(TEXT_ATTACHMENT_SUFFIXES):
-        return None
-    if attachment.size > MAX_INLINE_LOG_BYTES:
-        return None
+        return False
+    return attachment.size <= MAX_INLINE_LOG_BYTES
+
+
+async def _read_log_attachment(attachment: discord.Attachment) -> str | None:
+    """Return an attachment's text, or None if it could not be read."""
     try:
         raw = await attachment.read()
     except (discord.HTTPException, discord.NotFound):
@@ -190,25 +200,31 @@ async def collect_referenced_context(
             return None
         try:
             referenced = await message.channel.fetch_message(reference.message_id)
-        except (discord.HTTPException, discord.NotFound, AttributeError):
+        except discord.HTTPException:
+            # NotFound and Forbidden both subclass this. AttributeError is
+            # deliberately not caught: it would mean a bug here, not a deleted
+            # message, and swallowing it is how #517 stayed invisible.
             return None
 
     parts = [referenced.content] if referenced.content else []
     parts += [embed_to_text(embed) for embed in referenced.embeds]
 
     logs: list[str] = []
-    image_names: list[str] = []
+    attachment_names: list[str] = []
+    budget = MAX_TOTAL_LOG_BYTES
     for attachment in referenced.attachments:
-        log = await _read_log_attachment(attachment)
-        if log is not None:
-            logs.append(log)
-        else:
-            image_names.append(attachment.filename)
+        if _is_inlinable_log(attachment) and attachment.size <= budget:
+            log = await _read_log_attachment(attachment)
+            if log is not None:
+                logs.append(log)
+                budget -= attachment.size
+                continue
+        attachment_names.append(attachment.filename)
 
     return ReferencedContext(
         text="\n".join(part for part in parts if part),
         logs=tuple(logs),
-        image_names=tuple(image_names),
+        attachment_names=tuple(attachment_names),
         jump_url=referenced.jump_url,
     )
 
@@ -223,29 +239,44 @@ def build_description(notes: str, context: ReferencedContext | None) -> str:
     return f"{notes}\n\nContext from the message being replied to:\n{quoted}"
 
 
-def append_context(body: str, context: ReferencedContext | None, kind: str) -> str:
-    """Attach the real artifacts to a Gemini-authored body.
-
-    Appended rather than passed through ``call_gemini`` on purpose: Gemini
-    authors the whole body, so a traceback routed through it comes back
-    paraphrased instead of verbatim. Sections with nothing in them are left out
-    entirely rather than filled with a placeholder.
-    """
+def _render_artifacts(context: ReferencedContext | None, kind: str) -> str | None:
+    """The Screenshots/Logs body for this ticket, or None if there is nothing."""
     if context is None:
-        return body
+        return None
 
-    sections: list[str] = []
+    parts: list[str] = []
     if kind == "bug":
         for log in context.logs:
-            sections.append(
+            parts.append(
                 "<details>\n<summary>Attached log</summary>\n\n"
                 f"```\n{log}\n```\n\n</details>"
             )
-    if context.image_names:
-        sections.append("Images attached in Discord: " + ", ".join(context.image_names))
-    sections.append(f"[Original Discord message]({context.jump_url})")
+    if context.attachment_names:
+        parts.append("Attached in Discord: " + ", ".join(context.attachment_names))
+    parts.append(f"[Original Discord message]({context.jump_url})")
+    return "\n\n".join(parts)
 
-    return f"{body.rstrip()}\n\n" + "\n\n".join(sections) + "\n"
+
+def append_context(body: str, context: ReferencedContext | None, kind: str) -> str:
+    """Put the real artifacts in the Screenshots/Logs section of a Gemini body.
+
+    Written in after ``call_gemini`` rather than passed through it: Gemini
+    authors the whole body, so a traceback routed through it comes back
+    paraphrased instead of verbatim. The section is replaced rather than
+    appended to, so its placeholder prose cannot survive alongside the real
+    thing, and it is removed outright when there is nothing to put there.
+    """
+    artifacts = _render_artifacts(context, kind)
+    section = re.compile(
+        rf"^{re.escape(LOG_SECTION_HEADING)}[^\n]*\n.*?(?=^### |\Z)",
+        re.MULTILINE | re.DOTALL,
+    )
+    if artifacts is None:
+        return section.sub("", body, count=1).rstrip() + "\n"
+    replacement = f"{LOG_SECTION_HEADING}\n{artifacts}\n\n"
+    if section.search(body):
+        return section.sub(lambda _: replacement, body, count=1)
+    return f"{body.rstrip()}\n\n{replacement}"
 
 
 async def call_gemini(raw_text: str) -> dict:

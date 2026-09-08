@@ -398,7 +398,7 @@ async def test_context_from_embed_only_error_post():
 
     assert "event on_message" in ctx.text
     assert ctx.logs == ("Traceback...\nBoom",)
-    assert ctx.image_names == ()
+    assert ctx.attachment_names == ()
     assert ctx.jump_url == "https://discord.com/channels/1/2/3"
 
 
@@ -419,7 +419,7 @@ async def test_images_are_recorded_by_name_only():
     referenced = _referenced(content="see attached", attachments=[_image_attachment()])
     ctx = await collect_referenced_context(_reply_to(referenced))
 
-    assert ctx.image_names == ("screenshot.png",)
+    assert ctx.attachment_names == ("screenshot.png",)
     assert ctx.logs == ()
 
 
@@ -474,7 +474,7 @@ def test_logs_are_inlined_verbatim_in_a_collapsible_block():
     from features.github_tickets import ReferencedContext, append_context
 
     ctx = ReferencedContext(
-        text="x", logs=("line one\nline two",), image_names=(), jump_url="J"
+        text="x", logs=("line one\nline two",), attachment_names=(), jump_url="J"
     )
     body = append_context("### Screenshots/Logs\nAttach artifacts.\n", ctx, "bug")
 
@@ -485,7 +485,9 @@ def test_logs_are_inlined_verbatim_in_a_collapsible_block():
 def test_logs_are_omitted_for_a_non_bug_ticket():
     from features.github_tickets import ReferencedContext, append_context
 
-    ctx = ReferencedContext(text="x", logs=("stack",), image_names=(), jump_url="J")
+    ctx = ReferencedContext(
+        text="x", logs=("stack",), attachment_names=(), jump_url="J"
+    )
     body = append_context("### Overview\nA nicer button.\n", ctx, "enhancement")
 
     assert "stack" not in body
@@ -496,7 +498,7 @@ def test_empty_sections_are_omitted():
     """No 'Screenshots/Logs: none', no empty image list."""
     from features.github_tickets import ReferencedContext, append_context
 
-    ctx = ReferencedContext(text="x", logs=(), image_names=(), jump_url="J")
+    ctx = ReferencedContext(text="x", logs=(), attachment_names=(), jump_url="J")
     body = append_context("### Overview\nfoo\n", ctx, "bug")
 
     assert "<details>" not in body
@@ -508,7 +510,7 @@ def test_jump_url_is_included_as_a_permanent_pointer():
     from features.github_tickets import ReferencedContext, append_context
 
     ctx = ReferencedContext(
-        text="x", logs=(), image_names=("a.png",), jump_url="https://d/1/2/3"
+        text="x", logs=(), attachment_names=("a.png",), jump_url="https://d/1/2/3"
     )
     body = append_context("### Overview\nfoo\n", ctx, "bug")
 
@@ -564,3 +566,98 @@ async def test_on_message_reply_with_no_notes_still_works(mock_bot):
 
     assert "view" in message.reply.call_args[1]
     assert message.reply.call_args[1]["view"].raw_text == "it broke"
+
+
+# --- composed body, derived from the ticket criteria not the helpers (#522) ---
+
+
+def _gemini_body(
+    logs_section="Attach screenshots, error logs, or any relevant artifacts.",
+):
+    """A body shaped like what Gemini actually returns from BUG_TEMPLATE."""
+    from features.github_tickets import BUG_TEMPLATE
+
+    return BUG_TEMPLATE.replace(
+        "Attach screenshots, error logs, or any relevant artifacts.", logs_section
+    )
+
+
+def test_artifacts_land_under_screenshots_logs_not_after_the_branch_block():
+    from features.github_tickets import ReferencedContext, append_context
+
+    ctx = ReferencedContext(
+        text="x", logs=("stack trace here",), attachment_names=(), jump_url="J"
+    )
+    body = append_context(_gemini_body(), ctx, "bug")
+
+    assert body.index("stack trace here") < body.index("### Branch"), (
+        "artifacts must sit in the Screenshots/Logs section, not below the branch"
+    )
+
+
+def test_an_empty_logs_section_is_removed_entirely():
+    """AC: no 'Screenshots/Logs: None' left in the created ticket."""
+    from features.github_tickets import append_context
+
+    body = append_context(_gemini_body(logs_section="None"), None, "bug")
+
+    assert "### Screenshots/Logs" not in body
+    assert "None" not in body
+    assert "### Branch" in body  # the rest of the template survives
+
+
+def test_a_non_bug_ticket_drops_the_logs_section_too():
+    from features.github_tickets import ReferencedContext, append_context
+
+    ctx = ReferencedContext(
+        text="x", logs=("stack",), attachment_names=(), jump_url="J"
+    )
+    body = append_context(_gemini_body(), ctx, "enhancement")
+
+    assert "stack" not in body
+    assert "J" in body  # the jump link still points at the source
+
+
+def test_total_log_budget_is_under_the_github_body_limit():
+    from features.github_tickets import GITHUB_BODY_LIMIT, MAX_TOTAL_LOG_BYTES
+
+    assert MAX_TOTAL_LOG_BYTES < GITHUB_BODY_LIMIT, (
+        "a log that passes the cap would make the issue update fail with a 422"
+    )
+
+
+@pytest.mark.asyncio
+async def test_logs_stop_being_inlined_once_the_total_budget_is_spent():
+    from features.github_tickets import (
+        MAX_INLINE_LOG_BYTES,
+        MAX_TOTAL_LOG_BYTES,
+        collect_referenced_context,
+    )
+
+    # Each file is inside the per-file cap; together they exceed the total, so
+    # the third must be left out rather than inlined.
+    body = b"x" * (MAX_INLINE_LOG_BYTES - 5_000)
+    assert len(body) * 3 > MAX_TOTAL_LOG_BYTES
+    referenced = _referenced(
+        attachments=[
+            _text_attachment("a.log", body),
+            _text_attachment("b.log", body),
+            _text_attachment("c.log", body),
+        ]
+    )
+    ctx = await collect_referenced_context(_reply_to(referenced))
+
+    assert len(ctx.logs) == 2, "the budget is across attachments, not per attachment"
+    assert ctx.attachment_names == ("c.log",), "the skipped log is still named"
+
+
+@pytest.mark.asyncio
+async def test_a_pdf_is_not_reported_as_an_image():
+    from features.github_tickets import collect_referenced_context
+
+    pdf = _image_attachment("report.pdf")
+    pdf.content_type = "application/pdf"
+    ctx = await collect_referenced_context(_reply_to(_referenced(attachments=[pdf])))
+
+    assert ctx.attachment_names == ("report.pdf",)
+    assert ctx.logs == ()
