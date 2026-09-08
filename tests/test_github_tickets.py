@@ -3,6 +3,7 @@
 import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import discord
 import pytest
 
 from features.config import TICKET_CREATOR_ID
@@ -290,6 +291,7 @@ async def test_on_message_usage_hint_on_empty_mention(mock_bot):
     message.author.id = TICKET_CREATOR_ID
     message.content = f"<@{mock_bot.user.id}>"
     message.reply = AsyncMock()
+    message.reference = None  # not a reply
 
     await cog.on_message(message)
     message.reply.assert_called_once()
@@ -309,9 +311,256 @@ async def test_on_message_sends_confirm_view_on_valid_mention(mock_bot):
     message.author.id = TICKET_CREATOR_ID
     message.content = f"<@{mock_bot.user.id}> the leaderboard is broken"
     message.reply = AsyncMock()
+    message.reference = None  # not a reply
 
     await cog.on_message(message)
     message.reply.assert_called_once()
     call_kwargs = message.reply.call_args[1]
     assert "view" in call_kwargs
     assert call_kwargs["mention_author"] is True
+
+
+# --- Replied-to message context (#522) ---
+
+
+def _text_attachment(filename="error.txt", body=b"Traceback...\nBoom", size=None):
+    att = MagicMock(spec=discord.Attachment)
+    att.filename = filename
+    att.size = len(body) if size is None else size
+    att.content_type = "text/plain"
+    att.read = AsyncMock(return_value=body)
+    return att
+
+
+def _image_attachment(filename="screenshot.png"):
+    att = MagicMock(spec=discord.Attachment)
+    att.filename = filename
+    att.size = 2048
+    att.content_type = "image/png"
+    att.read = AsyncMock(return_value=b"\x89PNG")
+    return att
+
+
+def _referenced(content="", embeds=(), attachments=()):
+    ref = MagicMock(spec=discord.Message)
+    ref.content = content
+    ref.embeds = list(embeds)
+    ref.attachments = list(attachments)
+    ref.jump_url = "https://discord.com/channels/1/2/3"
+    return ref
+
+
+def _reply_to(referenced, notes="the bot keeps dying"):
+    message = MagicMock(spec=discord.Message)
+    message.content = notes
+    message.reference = MagicMock(spec=discord.MessageReference)
+    message.reference.resolved = referenced
+    message.reference.message_id = 3
+    message.channel = MagicMock(spec=discord.TextChannel)
+    message.channel.fetch_message = AsyncMock(return_value=referenced)
+    return message
+
+
+def _error_embed():
+    embed = discord.Embed(title="🟠 Error")
+    embed.add_field(name="Source", value="`event on_message`", inline=False)
+    embed.add_field(
+        name="What happened",
+        value="The bot used something that does not exist.",
+        inline=False,
+    )
+    embed.add_field(name="Error", value="```AttributeError: boom```", inline=False)
+    return embed
+
+
+# --- embed flattening ---
+
+
+def test_embed_only_message_yields_its_field_text():
+    """An embed-only bot post has empty content, so the embed is the whole payload."""
+    from features.github_tickets import embed_to_text
+
+    text = embed_to_text(_error_embed())
+    assert "event on_message" in text
+    assert "does not exist" in text
+    assert "AttributeError: boom" in text
+
+
+# --- context collection ---
+
+
+@pytest.mark.asyncio
+async def test_context_from_embed_only_error_post():
+    from features.github_tickets import collect_referenced_context
+
+    referenced = _referenced(embeds=[_error_embed()], attachments=[_text_attachment()])
+    ctx = await collect_referenced_context(_reply_to(referenced))
+
+    assert "event on_message" in ctx.text
+    assert ctx.logs == ("Traceback...\nBoom",)
+    assert ctx.image_names == ()
+    assert ctx.jump_url == "https://discord.com/channels/1/2/3"
+
+
+@pytest.mark.asyncio
+async def test_context_from_a_plain_user_message():
+    from features.github_tickets import collect_referenced_context
+
+    ctx = await collect_referenced_context(_reply_to(_referenced(content="it broke")))
+    assert ctx.text == "it broke"
+    assert ctx.logs == ()
+
+
+@pytest.mark.asyncio
+async def test_images_are_recorded_by_name_only():
+    """Discord CDN urls expire, so the filename is all that is worth keeping."""
+    from features.github_tickets import collect_referenced_context
+
+    referenced = _referenced(content="see attached", attachments=[_image_attachment()])
+    ctx = await collect_referenced_context(_reply_to(referenced))
+
+    assert ctx.image_names == ("screenshot.png",)
+    assert ctx.logs == ()
+
+
+@pytest.mark.asyncio
+async def test_no_reference_yields_no_context():
+    from features.github_tickets import collect_referenced_context
+
+    message = MagicMock(spec=discord.Message)
+    message.reference = None
+    assert await collect_referenced_context(message) is None
+
+
+@pytest.mark.asyncio
+async def test_unresolved_reference_falls_back_to_fetch():
+    from features.github_tickets import collect_referenced_context
+
+    referenced = _referenced(content="fetched")
+    message = _reply_to(referenced)
+    message.reference.resolved = None
+
+    ctx = await collect_referenced_context(message)
+    assert ctx.text == "fetched"
+    message.channel.fetch_message.assert_awaited_once_with(3)
+
+
+@pytest.mark.asyncio
+async def test_a_deleted_referenced_message_is_not_fatal():
+    from features.github_tickets import collect_referenced_context
+
+    message = _reply_to(_referenced())
+    message.reference.resolved = None
+    message.channel.fetch_message = AsyncMock(
+        side_effect=discord.NotFound(MagicMock(status=404), "gone")
+    )
+    assert await collect_referenced_context(message) is None
+
+
+@pytest.mark.asyncio
+async def test_an_oversized_log_is_not_inlined():
+    from features.github_tickets import MAX_INLINE_LOG_BYTES, collect_referenced_context
+
+    huge = _text_attachment(size=MAX_INLINE_LOG_BYTES + 1)
+    ctx = await collect_referenced_context(_reply_to(_referenced(attachments=[huge])))
+    assert ctx.logs == ()
+
+
+# --- body composition ---
+
+
+def test_logs_are_inlined_verbatim_in_a_collapsible_block():
+    """Gemini paraphrases anything routed through it, so the log is appended after."""
+    from features.github_tickets import ReferencedContext, append_context
+
+    ctx = ReferencedContext(
+        text="x", logs=("line one\nline two",), image_names=(), jump_url="J"
+    )
+    body = append_context("### Screenshots/Logs\nAttach artifacts.\n", ctx, "bug")
+
+    assert "<details>" in body
+    assert "line one\nline two" in body
+
+
+def test_logs_are_omitted_for_a_non_bug_ticket():
+    from features.github_tickets import ReferencedContext, append_context
+
+    ctx = ReferencedContext(text="x", logs=("stack",), image_names=(), jump_url="J")
+    body = append_context("### Overview\nA nicer button.\n", ctx, "enhancement")
+
+    assert "stack" not in body
+    assert "<details>" not in body
+
+
+def test_empty_sections_are_omitted():
+    """No 'Screenshots/Logs: none', no empty image list."""
+    from features.github_tickets import ReferencedContext, append_context
+
+    ctx = ReferencedContext(text="x", logs=(), image_names=(), jump_url="J")
+    body = append_context("### Overview\nfoo\n", ctx, "bug")
+
+    assert "<details>" not in body
+    assert "Images" not in body
+    assert "J" in body  # the jump link always points at a real message
+
+
+def test_jump_url_is_included_as_a_permanent_pointer():
+    from features.github_tickets import ReferencedContext, append_context
+
+    ctx = ReferencedContext(
+        text="x", logs=(), image_names=("a.png",), jump_url="https://d/1/2/3"
+    )
+    body = append_context("### Overview\nfoo\n", ctx, "bug")
+
+    assert "https://d/1/2/3" in body
+    assert "a.png" in body
+
+
+# --- template cleanup ---
+
+
+def test_bug_template_has_no_if_applicable_marker():
+    """The marker is guidance about filling the section in, not part of the heading."""
+    from features.github_tickets import BUG_TEMPLATE
+
+    assert "### Screenshots/Logs" in BUG_TEMPLATE
+    assert "if applicable" not in BUG_TEMPLATE.lower()
+
+
+@pytest.mark.asyncio
+async def test_on_message_reply_passes_context_to_the_confirm_view(mock_bot):
+    """Replying to an error post pulls its embed and log into the ticket."""
+    from features.github_tickets import GitHubTickets
+
+    cog = GitHubTickets(mock_bot)
+    referenced = _referenced(embeds=[_error_embed()], attachments=[_text_attachment()])
+    message = _reply_to(referenced, notes=f"<@{mock_bot.user.id}> happens in DMs")
+    message.author = MagicMock(spec=discord.Member)
+    message.author.bot = False
+    message.author.id = TICKET_CREATOR_ID
+    message.reply = AsyncMock()
+
+    await cog.on_message(message)
+
+    view = message.reply.call_args[1]["view"]
+    assert view.context.logs == ("Traceback...\nBoom",)
+    assert "event on_message" in view.raw_text
+    assert "happens in DMs" in view.raw_text
+
+
+@pytest.mark.asyncio
+async def test_on_message_reply_with_no_notes_still_works(mock_bot):
+    """A bare mention on a reply is enough; the referenced message is the content."""
+    from features.github_tickets import GitHubTickets
+
+    cog = GitHubTickets(mock_bot)
+    message = _reply_to(_referenced(content="it broke"), notes=f"<@{mock_bot.user.id}>")
+    message.author = MagicMock(spec=discord.Member)
+    message.author.bot = False
+    message.author.id = TICKET_CREATOR_ID
+    message.reply = AsyncMock()
+
+    await cog.on_message(message)
+
+    assert "view" in message.reply.call_args[1]
+    assert message.reply.call_args[1]["view"].raw_text == "it broke"
