@@ -348,7 +348,13 @@ _REPORTING_ERROR = False
 
 
 def _should_report_error(fingerprint: str, now: float) -> bool:
-    """Whether this error is new enough and rare enough to be worth posting."""
+    """Whether this error is new enough and rare enough to be worth posting.
+
+    Read-only apart from pruning expired entries. Recording is deliberately
+    separate: claiming the dedup slot here would mark an error as reported
+    before anything was sent, so an undeliverable post would lose the error
+    and silence its repeats for the whole window.
+    """
     for key, sent in list(_error_last_sent.items()):
         if now - sent > _ERROR_DEDUP_SECONDS:
             del _error_last_sent[key]
@@ -359,12 +365,21 @@ def _should_report_error(fingerprint: str, now: float) -> bool:
 
     while _error_recent_sends and now - _error_recent_sends[0] > _ERROR_BURST_WINDOW:
         _error_recent_sends.popleft()
-    if len(_error_recent_sends) >= _ERROR_BURST_LIMIT:
-        return False
+    return len(_error_recent_sends) < _ERROR_BURST_LIMIT
 
-    _error_last_sent[fingerprint] = now
+
+def _record_attempt(now: float) -> None:
+    """Spend burst budget on a post we are about to try.
+
+    Counted per attempt, not per delivery, so an outage cannot turn every
+    incoming error into another call to a failing endpoint.
+    """
     _error_recent_sends.append(now)
-    return True
+
+
+def _record_delivery(fingerprint: str, now: float) -> None:
+    """Start this error's dedup window, now that a report has actually landed."""
+    _error_last_sent[fingerprint] = now
 
 
 def _unwrap(error: BaseException) -> BaseException:
@@ -386,12 +401,16 @@ async def report_error(source: str, error: BaseException) -> None:
         return
 
     error = _unwrap(error)
-    fingerprint = f"{source}|{type(error).__name__}|{error}"[:200]
-    if not _should_report_error(fingerprint, time.time()):
-        return
 
+    # Resolve the channel before consulting the rate limiter, so a cold cache or
+    # a misconfigured channel cannot spend this error's one slot (#514).
     channel = bot.get_channel(BOT_LOGS_CHANNEL_ID)
     if not isinstance(channel, discord.TextChannel):
+        return
+
+    fingerprint = f"{source}|{type(error).__name__}|{error}"[:200]
+    now = time.time()
+    if not _should_report_error(fingerprint, now):
         return
 
     detail = "".join(
@@ -399,6 +418,7 @@ async def report_error(source: str, error: BaseException) -> None:
     )
 
     _REPORTING_ERROR = True
+    _record_attempt(now)
     try:
         await channel.send(
             embeds=[build_error_embed(source, error)],
@@ -406,6 +426,8 @@ async def report_error(source: str, error: BaseException) -> None:
         )
     except Exception as e:
         print(f"⚠️ Could not report runtime error to Discord: {e!r}")
+    else:
+        _record_delivery(fingerprint, now)
     finally:
         _REPORTING_ERROR = False
 

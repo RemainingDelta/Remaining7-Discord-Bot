@@ -726,3 +726,64 @@ async def test_task_attachment_survives_an_awkward_cog():
     main.attach_task_error_reporting([cog])
 
     assert cog.my_task._error.__name__ == "handler"
+
+
+@pytest.mark.asyncio
+async def test_an_undeliverable_report_does_not_burn_the_dedup_window(
+    monkeypatch, _clean_error_state
+):
+    """A report that never posted must not count as already reported.
+
+    The log channel can be missing from cache or misconfigured to a non-text
+    channel. If that attempt claimed the dedup slot, the error would be lost
+    and every repeat silenced for the whole window.
+    """
+    monkeypatch.setattr(main, "BOT_LOGS_CHANNEL_ID", 12345)
+    monkeypatch.setattr(main.bot, "get_channel", lambda _id: None)
+
+    await main.report_error("event on_message", _boom("cold cache"))
+
+    channel = _text_channel()
+    monkeypatch.setattr(main.bot, "get_channel", lambda _id: channel)
+    await main.report_error("event on_message", _boom("cold cache"))
+
+    assert channel.send.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_a_transient_send_failure_does_not_burn_the_dedup_window(
+    monkeypatch, _clean_error_state
+):
+    """Discord rejecting one post must not silence the error for the window."""
+    channel = _text_channel()
+    channel.send = AsyncMock(side_effect=RuntimeError("503 Service Unavailable"))
+    monkeypatch.setattr(main, "BOT_LOGS_CHANNEL_ID", 12345)
+    monkeypatch.setattr(main.bot, "get_channel", lambda _id: channel)
+
+    await main.report_error("event on_message", _boom("flaky"))
+
+    channel.send = AsyncMock()
+    await main.report_error("event on_message", _boom("flaky"))
+
+    assert channel.send.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_failed_attempts_still_spend_the_burst_budget(
+    monkeypatch, _clean_error_state
+):
+    """Not recording a failed post must not turn an outage into a retry storm.
+
+    Dedup is about not repeating a delivered report; the burst cap is about not
+    hammering Discord. A failing send spends the burst budget even though it
+    never claims a dedup slot.
+    """
+    channel = _text_channel()
+    channel.send = AsyncMock(side_effect=RuntimeError("503 Service Unavailable"))
+    monkeypatch.setattr(main, "BOT_LOGS_CHANNEL_ID", 12345)
+    monkeypatch.setattr(main.bot, "get_channel", lambda _id: channel)
+
+    for i in range(10):
+        await main.report_error(f"event distinct_{i}", _boom(f"e{i}"))
+
+    assert channel.send.await_count == main._ERROR_BURST_LIMIT
