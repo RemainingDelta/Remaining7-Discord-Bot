@@ -7,7 +7,29 @@ The GitHub Tickets feature lets staff generate a structured GitHub issue directl
 
 ## Trigger
 
-A staff member runs a command (slash or prefix) inside an active ticket channel. The bot reads the full channel message history, formats it as a conversation log, and sends it to Gemini for classification and summarization.
+The ticket creator (`TICKET_CREATOR_ID`) @-mentions the bot with a description of a bug, enhancement, or feature. The bot replies with a confirm/cancel prompt; on confirm the description goes to Gemini for classification and templating.
+
+### Replying to a message
+
+If the mention is a **reply**, the bot also reads the message being replied to and folds its contents into the ticket. This exists so a runtime error posted in `#bot-logs` can become an issue in one step, but it works on any message — reply to a bug report in `#general` and the ticket carries the reporter's own words.
+
+What gets pulled in:
+
+| From the replied-to message | Into the issue |
+|---|---|
+| `content` | Quoted as context for Gemini to classify from |
+| Embeds (title, description, each field) | Same — an embed-only bot post has empty `content`, so this is where an error report actually lives |
+| `.txt` / `.log` attachments under 20 KB (40 KB across all of them) | Inlined **verbatim** in a collapsible `<details>` block, bug tickets only |
+| Image attachments | Filename only |
+| — | A permanent `jump_url` link back to the Discord message |
+
+Notes on why it works this way:
+
+- **Logs are inlined, not linked.** Discord attachment URLs are signed and expire within about a day, so a linked log is dead by the time anyone reads the issue.
+- **The traceback is appended after Gemini returns**, not passed through it. `call_gemini` authors the entire body, so anything routed through it comes back paraphrased rather than verbatim.
+- **The branch placeholder is renamed before artifacts are appended**, so a log containing something like `-Bug` cannot be rewritten by the substitution.
+- **Empty sections are omitted** rather than filled with a placeholder. This is also why the `Screenshots/Logs` heading no longer carries an `[if applicable]` marker — the section is simply absent when there is nothing to attach.
+- A bare mention on a reply is enough; the replied-to message supplies the description.
 
 ---
 
@@ -76,6 +98,8 @@ On success, the bot replies in the ticket with the URL to the created issue.
 - The bot must have permission to create issues on the target repository
 - The `GITHUB_TOKEN` needs `repo` scope (not just `public_repo`) if the repo is private
 - If Gemini classification fails or the issue type is ambiguous, the bot falls back to a generic template
+- Reply context is collected by `collect_referenced_context()`; artifacts are attached by `append_context()`
+- A deleted or unfetchable replied-to message is not fatal — the ticket is created from the typed notes alone
 - Logic lives in `features/github_tickets.py`
 - Tested in `tests/test_github_tickets.py`
 

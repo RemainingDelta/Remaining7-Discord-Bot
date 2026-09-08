@@ -1385,6 +1385,11 @@ class Economy(commands.Cog):
     async def on_message(self, message: discord.Message):
         if message.author.bot:
             return
+        # DMs earn nothing (the reward path is gated on guild channel IDs) and a
+        # DMChannel has no `category`, so reading it below raised AttributeError
+        # on every DM (#517).
+        if message.guild is None:
+            return
         if message.content.startswith("!"):
             return
 

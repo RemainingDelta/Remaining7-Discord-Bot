@@ -4106,3 +4106,184 @@ Implemented in `<pending — set to the 506-Enhancement doc commit sha once comm
 ✅ Reviewed against the diff: implementation matches the filed spec.
 
 📝 Review note: Self-referential — this is the release-doc pass that wrote this very v1.13.1 SPECS section, along with the v1.13.1 CHANGELOG release notes and PR descriptions. The ticket scoped SPECS to "#503" only; entries for #505 and #506 were added as well, matching the v1.13.0 precedent of documenting every issue in the release rather than only the code changes. The version bump was handled separately by #505 above, per the split used for v1.11.1 (#381/#382) and v1.12.0 (#435/#436). The commit sha above is a placeholder until this branch is committed and merged.
+
+### v1.13.2 — 2026-09-08
+
+#### #513 — Bug: Scam detection fails to load because the host installs desktop OpenCV alongside the headless build (Bug)
+
+> ### Overview
+>
+> `features.scam_detection` fails to load. `import cv2` at `features/scam_detection.py:8` dies inside OpenCV's own bootstrap:
+>
+> ```
+> ImportError: libxcb.so.1: cannot open shared object file: No such file or directory
+> ```
+>
+> **Two OpenCV packages are installed at once.** Both install into the same `site-packages/cv2/` directory, so they overwrite each other and the result is a mixture. The **desktop** build wins, and it links against X11 (`libxcb.so.1`), which a headless container does not have.
+>
+> `opencv-python` has never appeared in `requirements.txt`. It comes from the host's dependency panel. **Deleting it there does not stick:** the host's dependency scanner reads the literal `import cv2` in the source, maps it to the desktop `opencv-python` package, and re-adds it on the next deploy.
+>
+> ### Acceptance Criteria
+>
+> - [ ] No literal `import cv2` or `from cv2 import` remains anywhere in the tree
+> - [ ] `features/scam_detection.py` still exposes `cv2` as a module-level name, with all 11 call sites unchanged
+> - [ ] The cog loads on the host without `opencv-python` being re-added to the dependency panel
+> - [ ] `✅ Loaded Feature: Scam Detection` appears on startup
+> - [ ] A regression test prevents a literal `import cv2` being reintroduced…(truncated)
+
+Implemented in `c5d5c57`. Files: `features/scam_detection.py`, `tests/test_scam_detection.py`
+
+✅ Reviewed against the diff: implementation matches the filed spec.
+
+📝 Review note: The regression test walks the whole tree with `ast`, not just `features/`, so a literal `import cv2` reintroduced anywhere fails CI. Verified in production on 2026-09-05: all 17 features loaded and 72 commands synced. The ticket closes by noting that "making startup failures reliably visible is tracked separately" and that the host silently dropped the `❌` line carrying this exception, so the traceback was only retrievable via a Discord report. That separate work is #514, in this same release, which means the diagnostic gap that made this bug take four days to find is closed by its sibling ticket.
+
+#### #514 — Enhancement: Report startup failures, runtime errors and a boot summary to a dedicated bot logs channel (Enhancement)
+
+> ### Overview
+>
+> Make it impossible for the bot to fail without someone noticing, at startup or at runtime. #513 took four days to diagnose purely because the failure was invisible, and the same gap exists across every error path in the bot.
+>
+> ### Current Behavior
+>
+> **At runtime, there is no error handling at all.** No `on_command_error`, no `tree.on_error`, no `on_error` override anywhere in the codebase. On top of that, 19 `@tasks.loop` background tasks will stop looping and only log if they raise, and 54 `except` blocks across the features print a `⚠️`/`❌` line and continue.
+>
+> None of it reaches Discord. And **the host's logs silently drop every line beginning with `⚠️` or `❌`.**
+>
+> ### Technical Requirements
+>
+> - [ ] Post cog load failures: feature name, module, exception, full traceback attached as a `.txt` file
+> - [ ] Post a boot summary: version, features loaded, command count
+> - [ ] Guard the summary to first boot only
+> - [ ] Add `on_error`, `on_command_error` and a command tree error handler
+> - [ ] Attach an error handler to every cog `tasks.Loop` programmatically, rather than editing all 19 cogs
+> - [ ] Do not report user mistakes
+> - [ ] Rate limit on two axes: no repeat of the same error within a dedup window, and a cap on posts per minute
+> - [ ] Prune the dedup map so it cannot grow without bound
+> - [ ] A failure inside reporting must not trigger another report
+> - [ ] Add `BOT_LOGS_CHANNEL_ID` to **both** branches of `features/config.py`…(truncated)
+
+Implemented in `637981b`, `309ab26`, `c38e670`, `f69aebe`, `d79e787`. Files: `main.py`, `features/config.py`, `docs/CONFIG_SYSTEM.md`, `docs/SETUP.md`, `docs/HOSTING.md`, `tests/test_startup.py`
+
+✅ Reviewed against the diff: every filed requirement shipped, including both rate-limit axes, dedup pruning, the reentrancy guard, and `BOT_LOGS_CHANNEL_ID` in both config branches. The two explicit out-of-scope items, periodic heartbeats and rerouting the 54 existing prints, were correctly left alone.
+
+📝 Review note: `d79e787` fixes a defect found by review after the PR was opened and before merge. `_should_report_error` claimed the dedup slot and spent burst budget before anything was sent, so any bail-out after it marked the error as already reported. Two paths hit this: an unresolvable log channel, and `channel.send` raising into the `except` clause that swallows it. Either way the report never posted and every repeat was suppressed for the full 300 second window, which is a reporter whose failure mode is an empty channel. Recording is now split by what each limit is for: burst budget is spent per attempt, so an outage cannot turn every incoming error into another call to a failing endpoint, while the dedup window opens only once a report has landed. Three regression tests were added, two of which were confirmed to fail against the previous `main.py`.
+
+📝 Review note: The work grew `main.py` from 157 to 544 lines by placing an entire subsystem in the entrypoint, which is the only subsystem in the project not living under `features/`. This now collides directly with the pending #470, which shrinks `main.py` to 108 lines by extracting startup wiring into `features/startup.py`. Whichever merges second needs rewriting rather than conflict resolution, and both also rewrite `tests/test_startup.py`. Extracting `features/error_reporting.py` would settle the structure and clear the collision in one change. No `docs/` guide was written either; #526 in this release supplies it.
+
+📝 Review note: The acceptance criteria that depend on a report actually appearing in the channel are unverifiable until this release deploys, since production runs `main`. `report_error` returns silently when `BOT_LOGS_CHANNEL_ID` does not resolve to a text channel, so a wrong or missing id produces no reports and nothing saying why.
+
+#### #517 — Bug: Bot crashes in DM due to missing 'category' attribute (Bug)
+
+> ### Overview
+> The bot encountered an AttributeError: 'DMChannel' object has no attribute 'category' when processing an `on_message` event in a direct message, causing it to crash or become unresponsive.
+>
+> ### Acceptance Criteria
+> - [ ] The bot handles messages in DM channels without attempting to access the 'category' attribute.
+> - [ ] The bot responds to messages in DM channels as expected, without crashing.
+>
+> ### Steps to Reproduce Bug
+> - [ ] Send a direct message (DM) to the bot.
+> - [ ] Observe the bot's console or logs for the AttributeError.…(truncated)
+
+Implemented in `b46ee68`, `ecba53a`. Files: `features/economy.py`, `features/quests.py`, `features/tourney/tourney_commands.py`, `features/tourney/tourney_utils.py`, `tests/conftest.py`, `tests/test_economy.py`, `tests/test_quests.py`, `tests/test_tourney_utils.py`
+
+⚠️ as-implemented goes beyond #517: the ticket scopes the fix to `on_message`, and the two listeners named in it were fixed as filed. The diff also guards two DM-reachable prefix command paths that share the identical bug, `!reopen` in `features/tourney/tourney_commands.py` and `delete_ticket_via_command` in `features/tourney/tourney_utils.py`. The widening was raised and approved before implementation. `delete_ticket_via_command` had been surviving DMs only because its staff check ran before the channel read, which is ordering rather than a guard.
+
+📝 Review note: The crash fired twice per DM, once per cog listener, because the passive-reward gate is duplicated verbatim between `features/economy.py` and `features/quests.py`. `BOTS_CATEGORY_ID` and `PASSIVE_REWARD_EXCLUDED_CHANNEL_IDS` each have exactly two consumers, one per cog. The fix patched both copies rather than collapsing them into one predicate, so the duplication that produced two errors from one defect is still there. Those two lines are also the only `.category.id` reads in the codebase against 33 uses of `category_id`, and `GuildChannel.category` is a cache lookup, so on a cache miss the BOTS skip fails open and pays out. Both are deliberately unaddressed here.
+
+📝 Review note: The `!reopen` guard has no test. It is a closure inside `setup_tourney_commands`, which calls `bot.add_view` at setup time and has no test coverage anywhere, so there is no reachable seam without mocking until nothing real runs. Covered by inspection instead, and stated as such rather than papered over.
+
+📝 Review note: The suite could not have caught this bug. Existing `on_message` tests build the message as a specless `MagicMock`, where `message.channel.category` auto-creates a truthy child mock and the buggy guard silently passes. The new tests use `MagicMock(spec=discord.DMChannel)`, which raises exactly as production does. The same specless-mock pattern recurred in #522 in this release, where two tests were exercising a reply path by accident, so this is a live problem in the suite rather than a one-off.
+
+#### #522 — Enhancement: pull context from a replied-to message when creating a ticket (Enhancement)
+
+> ### Overview
+> Extend the @-mention ticket flow in `features/github_tickets.py` so that replying to a Discord message and @-mentioning the bot pulls that message's content into the issue, alongside the notes typed with the mention.
+>
+> ### Technical Requirements
+> - [ ] Resolve `message.reference` in `GitHubTickets.on_message` and fetch the referenced message
+> - [ ] Flatten the referenced message's embeds into text. An embed-only bot post has an empty `message.content`
+> - [ ] Inline text attachments verbatim instead of linking them. Discord CDN URLs carry signed expiry params
+> - [ ] Append the raw traceback to the issue body **after** `call_gemini` returns, not by passing it through
+> - [ ] Wrap inlined logs in a collapsible `<details><summary>` block
+> - [ ] Include `message.jump_url` of the referenced message as a permanent pointer
+> - [ ] Record image attachments by filename only
+> - [ ] Add a `is_bot_error_post(message)`-style predicate alongside the existing channel predicates in `features/ticket_command_router.py`
+> - [ ] Drop the `[if applicable]` marker from the `### Screenshots/Logs` heading…(truncated)
+
+Implemented in `2fe58c4`, `778b41d`. Files: `features/github_tickets.py`, `.github/ISSUE_TEMPLATE/bug.md`, `docs/GITHUB_TICKETS.md`, `tests/test_github_tickets.py`
+
+⚠️ as-implemented differs from #522: the filed requirement to add an `is_bot_error_post(message)` predicate to `features/ticket_command_router.py` was deliberately dropped. The implementation is fully generic, so nothing in the flow needs to know whether a message is a bot error post: an error post is simply a message carrying an embed and a `.txt` attachment, handled by the same path as any other. Adding the predicate would have produced a function with no callers. Every other filed requirement shipped as specified.
+
+📝 Review note: The first commit shipped two defects, both found by review and fixed in `778b41d` before merge. `append_context` appended to the end of the body, which placed artifacts below the `### Branch` code block and left Gemini's own `Screenshots/Logs` section above them holding placeholder prose, so the "no empty sections" criterion was not actually met. The section is now replaced, or removed outright when empty. Separately, `MAX_INLINE_LOG_BYTES` was 100,000, above GitHub's 65,536 character issue body limit. Because the body is written by a second call after the issue already exists, overshooting would have left the issue created with its branch placeholder unrenamed and its log missing, while telling the user it had failed. Caps are now 20 KB per file against a 40 KB total, since several files that each pass a per-file check still overflow together.
+
+📝 Review note: The first round of tests was derived from the implementation's own helpers rather than from the acceptance criteria, which is why they passed while the composed issue body was wrong in two ways. The replacement tests build a realistically Gemini-filled `BUG_TEMPLATE` and assert on the result. The stale 100 KB figure also reached `docs/GITHUB_TICKETS.md`, where it survived the fix commit and was corrected by #525 in this release.
+
+#### #524 — Enhancement: Bump project version to v1.13.2 in pyproject.toml (Enhancement)
+
+> ### Technical Requirements
+> - [ ] Set `version = "1.13.2"` in `pyproject.toml`
+> - [ ] Update the `**Version:**` line in `README.md` to `v1.13.2`
+> - [ ] Correct `.claude/skills/release-notes/references/release-guide.md`, which still instructs bumping `BOT_VERSION` in `features/config.py` and closes with a warning not to tag a release without doing so…(truncated)
+
+Implemented in `0b3daaa`. Files: `pyproject.toml`, `README.md`, `.claude/skills/release-notes/references/release-guide.md`
+
+✅ Reviewed against the diff: implementation matches the filed spec.
+
+📝 Review note: Not a bump-only entry. It also corrects the release guide, closing a loop opened one release earlier. #505's spec record in v1.13.1 identified that guidance as stale, recorded that it was correctly not followed, and explicitly noted "the guide itself was left uncorrected in this release." It has now been corrected to point at `pyproject.toml` and `README.md`, and to say that `features/config.py` derives `BOT_VERSION` by regex so editing it there has no effect. `BOT_VERSION` was verified to resolve to `v1.13.2` with no edit to `features/config.py`.
+
+#### #525 — Enhancement: Correct the privacy policy for the data flows added in v1.13.2 (Enhancement)
+
+> ### Overview
+> Two changes shipping in v1.13.2 made the privacy policy factually wrong about what data leaves Discord. #522 broadened the Gemini/GitHub path to include a third party's message content and attached logs, and #514 introduced error logs that the policy does not mention at all.
+>
+> ### Technical Requirements
+> - [ ] Set `LAST_UPDATED = "September 8, 2026"` in `features/privacy_policy.py:22`
+> - [ ] Update the `Last updated:` line in `PRIVACY_POLICY.md:3` to match
+> - [ ] Update the pinned date in `tests/test_privacy_policy.py:156`
+> - [ ] Rewrite the GitHub-issue bullet in the "When information leaves Discord" section
+> - [ ] Add error logs to the "What information we collect" section
+> - [ ] Update `docs/PRIVACY_SYSTEM.md:21-25` and `tests/test_privacy_policy.py:36-47` only if section headings change
+> - [ ] Correct `docs/GITHUB_TICKETS.md:22`, which says ".txt / .log attachments under 100 KB"…(truncated)
+
+Implemented in `8b73f3d`, `7719649`. Files: `features/privacy_policy.py`, `PRIVACY_POLICY.md`, `tests/test_privacy_policy.py`, `docs/GITHUB_TICKETS.md`
+
+✅ Reviewed against the diff: implementation matches the filed spec. The two conditional requirements were correctly not actioned, since no section headings changed, so `docs/PRIVACY_SYSTEM.md` and the `POLICY_HEADINGS` list needed no edit.
+
+📝 Review note: The error-log wording was narrowed in `7719649` after the first implementation. The original phrasing, "can include your user ID and the values you passed to a command", overstated the exposure: Python tracebacks do not capture local variables, so the only data-bearing part is the exception message itself. Rendering real failures confirmed what actually reaches the channel, for example `KeyError: 'daily_msg_count_987654321'` carrying a user ID because the code builds database keys from user IDs, and `ValueError: invalid literal for int() with base 10: 'abc'` carrying typed text. The text now says the logs do not contain a copy of your data, but the error message can include your user ID or the single value that caused the failure.
+
+📝 Review note: `features/privacy_policy.py` is the source and `PRIVACY_POLICY.md` is a copy, so both were changed and the rendered embed text was compared against the markdown programmatically rather than by eye. A fourth copy of the policy is hosted at `remaining7.netlify.app/privacy`, referenced from `features/privacy_policy.py:29`. It is outside this repository, no pull request here can reach it, and it now disagrees with the bot until someone updates the site by hand.
+
+#### #526 — Enhancement: Audit docs and help commands for v1.13.2 (Enhancement)
+
+> ### Overview
+> Brings `README.md`, the `docs/` guides and the in-bot help embeds in line with what v1.13.2 actually ships, following the same audit done for v1.13.0 in #495.
+>
+> ### Technical Requirements
+> - [ ] Add `docs/ERROR_REPORTING.md` covering the startup report, runtime error reporting, the severity levels and explanation table, both rate-limit axes and why each exists, task-handler attachment, and what deliberately is not reported
+> - [ ] Add a `### ` section to `README.md` `## Core Features` for error reporting, and link the new guide
+> - [ ] Update `README.md:198` `### GitHub Ticket Integration` to describe the reply-to-message behavior from #522
+> - [ ] Check `README.md`'s project-structure tree still matches
+> - [ ] Audit the in-bot help embeds in `features/general.py:86-92`…(truncated)
+
+Implemented in `34e5cbe`. Files: `docs/ERROR_REPORTING.md`, `README.md`, `docs/CONFIG_SYSTEM.md`, `docs/SETUP.md`
+
+✅ Reviewed against the diff: implementation matches the filed spec. The help embeds were audited and needed no change, as the ticket predicted: #514 and #522 add no commands, and the ticket flow is restricted to `TICKET_CREATOR_ID` so it is deliberately absent from `/help`. The project-structure tree needed no change either, since no files were added under `features/` and `docs/` is a single tree entry.
+
+📝 Review note: Two additions beyond the filed list. The `BOT_LOGS_CHANNEL_ID` descriptions in `docs/CONFIG_SYSTEM.md` and `docs/SETUP.md` said "startup summary and feature-load failures", which was accurate when #514 wrote them and stopped being accurate within the same release once runtime reporting landed in a later commit on that branch. Both now mention runtime errors. Separately, the README's `### GitHub Ticket Integration` section claimed issues are generated "from ticket conversations" by reading a ticket's message history, which the code has never done at any point; it has always been @-mention driven. That was a pre-existing error rather than drift from this release, and the same false description was found and corrected in `docs/GITHUB_TICKETS.md` during #522.
+
+📝 Review note: This ticket supplies the `docs/` guide that #514 never wrote. Every other subsystem in the project has one, and #514 documented a roughly 1000 line subsystem only in fragments across three unrelated files.
+
+#### #527 — Enhancement: Update documentation for v1.13.2 release (Enhancement)
+
+> ### Technical Requirements
+> - [ ] Add a `### v1.13.2 — 2026-09-08` section to `docs/logs/SPECS.md`, with the as-implemented entry and a reviewed verdict against the diff for #513, #514, #517, #522, #524, #525 and #526
+> - [ ] Add a `## v1.13.2 — 2026-09-08` section to `docs/logs/CHANGELOG.md`, containing the release notes body and the `### PR Descriptions` block
+> - [ ] Follow the release notes format in `.claude/skills/release-notes/references/release-guide.md`, dropping sections with nothing to report
+> - [ ] End the release notes with the Full Changelog link comparing `v1.13.1...v1.13.2`…(truncated)
+
+Implemented in `78aa092`. Files: `docs/logs/SPECS.md`, `docs/logs/CHANGELOG.md`
+
+✅ Reviewed against the diff: implementation matches the filed spec.
+
+📝 Review note: Self-referential. This is the release-doc pass that wrote this v1.13.2 SPECS section, along with the v1.13.2 CHANGELOG release notes and PR descriptions. The release notes drop `📊 Data Model`, `⚡ Integrations`, `🎨 Embeds & UI` and `🤖 GitHub Actions`, none of which this release touches, and also drop `🔄 Future Enhancements` at the maintainer's request, so the three open structural items recorded above (the duplicated passive-reward gate from #517, the `main.py` growth and #470 collision from #514, and the missing retention section plus the out-of-repo policy copy from #525) live only in this file. The sha above is the commit that wrote this section; this sentence was filled in by the commit after it, since a commit cannot contain its own hash.

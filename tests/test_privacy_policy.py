@@ -153,7 +153,7 @@ def test_last_embed_carries_the_last_updated_date():
 
 
 def test_last_updated_matches_the_filed_date():
-    assert LAST_UPDATED == "August 28, 2026"
+    assert LAST_UPDATED == "September 8, 2026"
 
 
 def test_last_embed_mentions_the_tickets_channel():

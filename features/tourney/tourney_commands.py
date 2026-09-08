@@ -1880,8 +1880,10 @@ def setup_tourney_commands(bot: commands.Bot):
         if await route_shared_ticket_command(ctx, "reopen"):
             return
 
-        # Check if we are inside a CLOSED ticket category
-        if ctx.channel.category_id in (
+        # Check if we are inside a CLOSED ticket category. The isinstance guard
+        # keeps a DM'd `!reopen` from reading `category_id` off a DMChannel (#517);
+        # the else branch's warning is the right reply there.
+        if isinstance(ctx.channel, discord.TextChannel) and ctx.channel.category_id in (
             TOURNEY_CLOSED_CATEGORY_ID,
             PRE_TOURNEY_CLOSED_CATEGORY_ID,
         ):
