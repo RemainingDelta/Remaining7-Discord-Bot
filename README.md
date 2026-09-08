@@ -196,9 +196,16 @@ Every user always has **4 active quests** — one daily and one weekly per categ
 - Transcripts DM'd to the opener and archived in a log channel.
 
 ### GitHub Ticket Integration
-- AI-powered GitHub issue creation from support tickets using Gemini.
-- Automatically generates structured bug reports, feature requests, and enhancement issues from ticket conversations.
-- Requires `GEMINI_TOKEN` and `GITHUB_TOKEN` environment variables.
+- AI-powered GitHub issue creation. One authorized staff member @mentions the bot with a description; Gemini classifies it as a bug, enhancement, or feature and fills in the matching template.
+- **Reply for context:** @mention the bot as a reply to another message and that message is folded in — its text, embed contents, attached `.txt`/`.log` files (copied in verbatim), attachment filenames, and a permanent link back to it. Turns an error post in the bot logs channel into a filed issue in one step.
+- Requires `GEMINI_TOKEN` and `GITHUB_TOKEN` environment variables. See [`docs/GITHUB_TICKETS.md`](docs/GITHUB_TICKETS.md).
+
+### Error Reporting
+- Reports the bot's own failures to a dedicated logs channel, because the host drops console output — a failing feature or a dead background task was previously invisible.
+- **On startup:** version, features loaded, commands synced, and any failure with its traceback attached as a file.
+- **At runtime:** unhandled errors in listeners, prefix commands, slash commands, and all 19 background tasks, each with a plain-English explanation and a severity colour.
+- User mistakes are not reported — unknown commands, failed permission checks, and bad arguments are not bugs.
+- Rate limited so a repeating failure cannot flood the channel. See [`docs/ERROR_REPORTING.md`](docs/ERROR_REPORTING.md).
 
 ### Event Management
 - **Automated Monitoring:** Daily background task at 12:00 AM ET scans event channels.
