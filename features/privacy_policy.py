@@ -103,11 +103,14 @@ POLICY_PARTS: tuple[PolicyPart, ...] = (
                     "track whether you've used a booster perk (such as a shop "
                     "discount) in the current month\n"
                     "- Error logs, when something in the bot fails. These are "
-                    "posted to a staff-only channel and contain the technical "
-                    "details of the failure, which can include your user ID and "
-                    "the values you passed to a command. They are not stored in "
-                    "our database, and they may be attached to a public issue as "
-                    'described in "When information leaves Discord" below'
+                    "posted to a staff-only channel and describe the failure "
+                    "technically. They do not contain a copy of your data, but "
+                    "the error message itself can include your user ID, or the "
+                    "single value that caused the failure \u2014 for example "
+                    "the text you typed when a command expected a number. They "
+                    "are not stored in our database, and they may be attached "
+                    'to a public issue as described in "When information leaves '
+                    'Discord" below'
                 ),
             ),
         ),
