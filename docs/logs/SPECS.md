@@ -4282,8 +4282,8 @@ Implemented in `34e5cbe`. Files: `docs/ERROR_REPORTING.md`, `README.md`, `docs/C
 > - [ ] Follow the release notes format in `.claude/skills/release-notes/references/release-guide.md`, dropping sections with nothing to report
 > - [ ] End the release notes with the Full Changelog link comparing `v1.13.1...v1.13.2`…(truncated)
 
-Implemented in `<pending — set to the 527-Enhancement doc commit sha once committed>`. Files: `docs/logs/SPECS.md`, `docs/logs/CHANGELOG.md`
+Implemented in `78aa092`. Files: `docs/logs/SPECS.md`, `docs/logs/CHANGELOG.md`
 
 ✅ Reviewed against the diff: implementation matches the filed spec.
 
-📝 Review note: Self-referential. This is the release-doc pass that wrote this v1.13.2 SPECS section, along with the v1.13.2 CHANGELOG release notes and PR descriptions. The release notes drop `📊 Data Model`, `⚡ Integrations`, `🎨 Embeds & UI` and `🤖 GitHub Actions`, none of which this release touches, and also drop `🔄 Future Enhancements` at the maintainer's request, so the three open structural items recorded above (the duplicated passive-reward gate from #517, the `main.py` growth and #470 collision from #514, and the missing retention section plus the out-of-repo policy copy from #525) live only in this file. The commit sha above is a placeholder until this branch is committed.
+📝 Review note: Self-referential. This is the release-doc pass that wrote this v1.13.2 SPECS section, along with the v1.13.2 CHANGELOG release notes and PR descriptions. The release notes drop `📊 Data Model`, `⚡ Integrations`, `🎨 Embeds & UI` and `🤖 GitHub Actions`, none of which this release touches, and also drop `🔄 Future Enhancements` at the maintainer's request, so the three open structural items recorded above (the duplicated passive-reward gate from #517, the `main.py` growth and #470 collision from #514, and the missing retention section plus the out-of-repo policy copy from #525) live only in this file. The sha above is the commit that wrote this section; this sentence was filled in by the commit after it, since a commit cannot contain its own hash.
