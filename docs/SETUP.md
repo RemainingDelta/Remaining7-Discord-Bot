@@ -157,6 +157,7 @@ TOURNEY_UPDATES_CHANNEL_ID       # Where stage announcements are posted
 TOURNEY_SCHEDULE_CHANNEL_ID      # Scanned for Matcherino ID auto-detection
 TOURNEY_REPORT_CHANNEL_ID        # End-of-tourney stat embeds archive
 LOG_CHANNEL_ID                   # Ticket transcript log
+BOT_LOGS_CHANNEL_ID              # Startup summary and load failures
 OTHER_TICKET_CHANNEL_ID          # General support channel (locked during tourney)
 SPANISH_CHANNEL_ID               # Spanish channel (only needed for SA region mode)
 GENERAL_CHANNEL_ID               # Gets 60s slowmode during live tourney

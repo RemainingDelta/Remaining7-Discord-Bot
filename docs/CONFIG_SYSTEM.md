@@ -51,6 +51,7 @@ Key IDs defined in config:
 | `TOURNEY_SCHEDULE_CHANNEL_ID` | Scanned for Matcherino ID auto-detection |
 | `TOURNEY_REPORT_CHANNEL_ID` | Where end-of-tourney stat embeds are archived |
 | `LOG_CHANNEL_ID` | Transcript log channel |
+| `BOT_LOGS_CHANNEL_ID` | Startup summary and feature-load failures |
 | `REDEMPTION_TICKET_CATEGORY_ID` | Redemption ticket category |
 | `BOOSTER_SHOUTOUT_CATEGORY_ID` | Booster shoutout ticket category |
 | `REDEMPTION_TRANSCRIPT_CHANNEL_ID` | Redemption transcript archive |
