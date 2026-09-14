@@ -6,7 +6,9 @@ from unittest.mock import AsyncMock, MagicMock
 import discord
 import pytest
 
+import features.economy as economy
 from features.config import (
+    ADMIN_ROLE_ID,
     BOTS_CATEGORY_ID,
     GENERAL_CHANNEL_ID,
     REDEMPTION_TICKET_CATEGORY_ID,
@@ -1142,3 +1144,59 @@ async def test_on_message_still_rewards_general_channel(guild_message, monkeypat
     await cog.on_message(message)
 
     increment.assert_awaited_once()
+
+
+# --- has_permission and the removed /perm command ---
+
+
+def _member_with_roles(*role_ids):
+    """A Member-spec'd mock whose get_role only matches the given role IDs.
+
+    Spec'd on discord.Member so it satisfies the isinstance guard in
+    has_permission; _FakeMember above is a plain class and would not.
+    """
+    member = MagicMock(spec=discord.Member)
+    member.id = 4242
+    member.get_role = lambda role_id: MagicMock() if role_id in role_ids else None
+    return member
+
+
+def _permission_interaction(user):
+    interaction = MagicMock(spec=discord.Interaction)
+    interaction.user = user
+    return interaction
+
+
+def test_perm_command_is_gone():
+    cog = Economy.__new__(Economy)
+    names = {command.name for command in cog.get_app_commands()}
+    assert "perm" not in names
+
+
+def test_allowed_users_allow_list_is_gone():
+    # The in-memory set /perm wrote to. Its only reader was has_permission,
+    # which is now a plain role check.
+    assert not hasattr(economy, "allowed_users")
+
+
+async def test_has_permission_allows_admin_role():
+    cog = Economy.__new__(Economy)
+    interaction = _permission_interaction(_member_with_roles(ADMIN_ROLE_ID))
+
+    assert await cog.has_permission(interaction) is True
+
+
+async def test_has_permission_denies_member_without_admin_role():
+    cog = Economy.__new__(Economy)
+    interaction = _permission_interaction(_member_with_roles())
+
+    assert await cog.has_permission(interaction) is False
+
+
+async def test_has_permission_denies_plain_user():
+    # A discord.User (DM context) has no roles at all. The gate must return
+    # False rather than raising AttributeError.
+    cog = Economy.__new__(Economy)
+    interaction = _permission_interaction(MagicMock(spec=discord.User))
+
+    assert await cog.has_permission(interaction) is False

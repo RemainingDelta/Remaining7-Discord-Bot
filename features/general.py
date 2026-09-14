@@ -117,8 +117,6 @@ class General(commands.Cog):
 
         # Economy Oversight
         economy_text = (
-            "`/give <user> <type> <amount>` - Manually grant Tokens, XP, or Levels.\n"
-            "`/set-balance <user> <amount>` - Directly set a user's token balance.\n"
             "`/redemption-queue-list` - View queued redemptions awaiting budget.\n"
             "`/redemption-queue-remove <entry_id>` - Remove a queued redemption."
         )
@@ -188,8 +186,7 @@ class General(commands.Cog):
             "`/drop <amount>` - Manual supply drop in general.\n"
             "`/give <user> <tokens/xp> <amount>` - Grant resources.\n"
             "`/set-balance <user> <amount>` - Hard reset of a user's tokens.\n"
-            "`/set-budget <amount>` - Override the monthly reward budget.\n"
-            "`/perm <user> <add/remove>` - Manage bot command access."
+            "`/set-budget <amount>` - Override the monthly reward budget."
         )
         embed.add_field(name="💰 Economy Management", value=economy_text, inline=False)
 

@@ -97,7 +97,6 @@ Remaining7-Discord-Bot/
 - **Supply Drop:** `/drop <amount>` (Admin) to force a token drop in general chat.
 - **Balance & Ranking:** `/balance [user]`, `/leaderboard token`.
 - **Give & Set:** `/give <user> <token/xp/level> <amount>`, `/set-balance <user> <amount>` (Admin).
-- **Permissions:** `/perm <user> <add/remove>` to grant/revoke command access.
 - **Guide:** `/economy-help` for a full user-facing guide.
 
 ### Shop & Budget System
@@ -373,7 +372,7 @@ Uses MongoDB database `r7_bot_db` with the following collections:
 | Role | Access |
 |---|---|
 | Admin | Full access to all commands |
-| Moderator | Economy oversight, security protocol |
+| Moderator | Redemption queue oversight, security protocol |
 | Tourney Admin | Tournament commands, ticket management |
 | Event Staff | Event channel cleanup, reward distribution, sticky messages |
 | Member | Economy, quests, brawl, translation, help |
