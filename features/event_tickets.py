@@ -234,15 +234,15 @@ async def create_event_ticket_channel(interaction: discord.Interaction) -> None:
                 use_application_commands=True,
             )
 
+    # The topic is set in the create call, not a follow-up edit: it is how
+    # _find_existing_ticket identifies the opener, so a channel that exists
+    # without one is a window in which a second click opens a duplicate ticket.
     channel = await guild.create_text_channel(
         name=channel_name,
         category=category,
         overwrites=overwrites,
-        reason=f"Event ticket from {interaction.user}",
-    )
-    await channel.edit(
         topic=f"event-opener:{interaction.user.id}",
-        reason="Store event ticket opener",
+        reason=f"Event ticket from {interaction.user}",
     )
 
     await interaction.followup.send(
