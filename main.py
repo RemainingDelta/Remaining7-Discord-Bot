@@ -20,6 +20,7 @@ from features.tourney.tourney_commands import (
 )
 
 # Import the privacy policy repost (keeps the privacy channel current on restart)
+from features.event_tickets import repost_event_ticket_panel
 from features.privacy_policy import repost_privacy_policy
 
 # Import Database connection check
@@ -533,10 +534,20 @@ async def on_ready():
         print(f"⚠️ Privacy Policy Repost Error: {e!r}")
         traceback.print_exc()
 
-    # 5. SYNC COMMANDS (Do this LAST)
+    # 5. Repost the event ticket panel so the channel reflects the current panel
+    try:
+        await repost_event_ticket_panel(bot)
+    except Exception as e:
+        # Reported but not added to `failed`, for the same reason as the privacy
+        # repost: it registers no commands, so it must not block the sync.
+        record_failure("Event Panel Repost", "features.event_tickets", e)
+        print(f"⚠️ Event Panel Repost Error: {e!r}")
+        traceback.print_exc()
+
+    # 6. SYNC COMMANDS (Do this LAST)
     synced = await sync_commands(failed)
 
-    # 6. Route background task failures to the log channel too. Guarded like
+    # 7. Route background task failures to the log channel too. Guarded like
     #    every other step: this walks real cog attributes, and losing task
     #    reporting must not cost the startup report that follows it.
     try:
@@ -545,7 +556,7 @@ async def on_ready():
         print(f"⚠️ Could not attach task error reporting: {e!r}")
         traceback.print_exc()
 
-    # 7. Report the boot to Discord, where the host's logs cannot swallow it
+    # 8. Report the boot to Discord, where the host's logs cannot swallow it
     await report_startup_to_discord(loaded, synced)
 
     if failed:

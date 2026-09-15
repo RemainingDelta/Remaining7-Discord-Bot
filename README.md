@@ -196,10 +196,11 @@ Every user always has **4 active quests** — one daily and one weekly per categ
 - Transcripts DM'd to the opener and archived in a log channel.
 
 ### Event Tickets
-- `/event-ticket-panel` — post the event ticket panel (Event Staff only).
+- `/event-ticket-panel` — post the event ticket panel (Event Staff or Admin).
+- The panel channel is cleared and reposted automatically on bot restart, so the panel always reflects the current wording.
 - Members click **Open Event Ticket** to get a private channel for their event submission.
 - Channels are named after the opener (`「❗」event-username`); **one open ticket per member**.
-- Event Staff can close, reopen, and delete tickets via `!close` / `!reopen` / `!delete`.
+- Event Staff and Admins can close, reopen, and delete tickets via `!close` / `!reopen` / `!delete`.
 - Closing renames the channel in place (`「❗」` → `「👍」`) and locks the opener to read-only — the channel is not moved.
 - Deleting saves a transcript to the event transcript channel and DMs a copy to the opener.
 

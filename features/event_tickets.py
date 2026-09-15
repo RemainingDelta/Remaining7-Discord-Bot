@@ -19,6 +19,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from features.config import (
+    ADMIN_ROLE_ID,
     EVENT_STAFF_ROLE_ID,
     EVENT_TICKET_CATEGORY_ID,
     EVENT_TICKET_PANEL_CHANNEL_ID,
@@ -31,7 +32,16 @@ _MAX_USERNAME_LEN = 90
 
 
 def _event_staff_role_ids() -> set[int]:
-    return {rid for rid in (EVENT_STAFF_ROLE_ID,) if isinstance(rid, int) and rid > 0}
+    """Roles that may manage event tickets: event staff and admins.
+
+    Every gate in this module reads this one set, so adding a role here grants
+    it the panel command, access to every ticket channel, and close/reopen/delete.
+    """
+    return {
+        rid
+        for rid in (EVENT_STAFF_ROLE_ID, ADMIN_ROLE_ID)
+        if isinstance(rid, int) and rid > 0
+    }
 
 
 def _is_event_staff(member: discord.abc.User | discord.Member) -> bool:
@@ -113,6 +123,26 @@ def _set_remaining7_footer(
 ) -> None:
     icon_url = bot_user.display_avatar.url if bot_user is not None else None
     embed.set_footer(text="Remaining 7 Bot", icon_url=icon_url)
+
+
+def build_event_panel_embed(bot_user: discord.abc.User | None) -> discord.Embed:
+    """The panel embed, rebuilt from source on every post.
+
+    Shared by /event-ticket-panel and the restart repost so an edit here reaches
+    the channel on the next boot, rather than the channel keeping a stale copy.
+    """
+    embed = discord.Embed(
+        title="Event Tickets",
+        description=(
+            "Click the button below to open a private ticket for your event "
+            "submission.\n\n"
+            "You can only have **one open event ticket** at a time. Event staff "
+            "will review your submission inside the ticket."
+        ),
+        color=discord.Color.green(),
+    )
+    _set_remaining7_footer(embed, bot_user)
+    return embed
 
 
 async def _try_rename_channel(
@@ -568,6 +598,69 @@ class EventClosedTicketView(discord.ui.View):
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# Startup repost
+# ---------------------------------------------------------------------------
+
+# on_ready re-fires on every gateway reconnect, so the repost is guarded to once
+# per process. A reconnect is not a restart, and wiping the channel on each one
+# would churn it and break links to the panel message.
+_PANEL_REPOSTED = False
+
+
+async def _clear_panel_channel(channel: discord.TextChannel) -> None:
+    """Remove every message, whoever posted it.
+
+    Bulk purge is one request per 100 messages but Discord refuses it for
+    anything older than 14 days, so fall back to individual deletes.
+    """
+    try:
+        await channel.purge(limit=None)
+    except discord.HTTPException:
+        async for message in channel.history(limit=None):
+            try:
+                await message.delete()
+            except discord.HTTPException:
+                pass
+
+
+async def repost_event_ticket_panel(bot: commands.Bot) -> None:
+    """Wipe the panel channel and post a fresh panel, once per process."""
+    global _PANEL_REPOSTED
+
+    if not EVENT_TICKET_PANEL_CHANNEL_ID:
+        print("⚠️ EVENT_TICKET_PANEL_CHANNEL_ID is not set — skipping the panel post")
+        return
+    if _PANEL_REPOSTED:
+        return
+
+    channel = bot.get_channel(EVENT_TICKET_PANEL_CHANNEL_ID)
+    if not isinstance(channel, discord.TextChannel):
+        print(
+            f"⚠️ Event panel channel {EVENT_TICKET_PANEL_CHANNEL_ID} not found "
+            "— panel not posted"
+        )
+        return
+
+    if not channel.permissions_for(channel.guild.me).manage_messages:
+        # Posting without being able to clear the channel would stack another
+        # panel on every restart, so do nothing and leave this line as the signal.
+        print(
+            f"⚠️ Missing Manage Messages in #{channel.name} — event panel not reposted"
+        )
+        return
+
+    try:
+        await _clear_panel_channel(channel)
+        await channel.send(
+            embed=build_event_panel_embed(bot.user), view=EventTicketPanelView()
+        )
+        _PANEL_REPOSTED = True
+        print(f"✅ Reposted the event ticket panel in #{channel.name}")
+    except Exception as e:
+        print(f"⚠️ Could not repost the event ticket panel: {e}")
+
+
 class EventTickets(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -611,17 +704,7 @@ class EventTickets(commands.Cog):
             )
             return
 
-        embed = discord.Embed(
-            title="Event Tickets",
-            description=(
-                "Click the button below to open a private ticket for your event "
-                "submission.\n\n"
-                "You can only have **one open event ticket** at a time. Event staff "
-                "will review your submission inside the ticket."
-            ),
-            color=discord.Color.green(),
-        )
-        _set_remaining7_footer(embed, interaction.client.user)
+        embed = build_event_panel_embed(interaction.client.user)
 
         await interaction.response.send_message(
             embed=embed, view=EventTicketPanelView()

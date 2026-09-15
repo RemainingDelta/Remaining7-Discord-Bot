@@ -8,6 +8,7 @@ import discord
 import pytest
 from discord.ext import commands
 
+from features.config import ADMIN_ROLE_ID
 from features import event_tickets
 
 
@@ -152,12 +153,20 @@ class TestFindExistingTicket:
 
 
 class TestEventStaffRoleIds:
-    def test_includes_configured_role(self, monkeypatch):
+    def test_includes_both_configured_roles(self, monkeypatch):
         monkeypatch.setattr(event_tickets, "EVENT_STAFF_ROLE_ID", 12345)
-        assert event_tickets._event_staff_role_ids() == {12345}
+        monkeypatch.setattr(event_tickets, "ADMIN_ROLE_ID", 54321)
+        assert event_tickets._event_staff_role_ids() == {12345, 54321}
+
+    def test_keeps_the_admin_role_when_event_staff_is_unset(self, monkeypatch):
+        # A missing event-staff role must not lock admins out of the feature.
+        monkeypatch.setattr(event_tickets, "EVENT_STAFF_ROLE_ID", 0)
+        monkeypatch.setattr(event_tickets, "ADMIN_ROLE_ID", 54321)
+        assert event_tickets._event_staff_role_ids() == {54321}
 
     def test_excludes_zero(self, monkeypatch):
         monkeypatch.setattr(event_tickets, "EVENT_STAFF_ROLE_ID", 0)
+        monkeypatch.setattr(event_tickets, "ADMIN_ROLE_ID", 0)
         assert event_tickets._event_staff_role_ids() == set()
 
 
@@ -480,7 +489,7 @@ async def test_delete_saves_the_transcript_before_deleting_the_channel(configure
 # --- creation: the opener topic must exist the moment the channel does ---
 
 
-def _create_interaction(existing_channels=()):
+def _create_interaction(existing_channels=(), resolvable_roles=()):
     channel = MagicMock(spec=discord.TextChannel)
     channel.name = "「❗」event-alice"
     channel.mention = "#event-alice"
@@ -490,9 +499,15 @@ def _create_interaction(existing_channels=()):
     category = MagicMock(spec=discord.CategoryChannel)
     category.channels = list(existing_channels)
 
+    roles = {}
+    for role_id in resolvable_roles:
+        role = MagicMock(spec=discord.Role)
+        role.id = role_id
+        roles[role_id] = role
+
     guild = MagicMock(spec=discord.Guild)
     guild.get_channel = MagicMock(return_value=category)
-    guild.get_role = MagicMock(return_value=None)
+    guild.get_role = MagicMock(side_effect=lambda role_id: roles.get(role_id))
     guild.default_role = MagicMock()
     guild.create_text_channel = AsyncMock(return_value=channel)
 
@@ -559,3 +574,219 @@ def test_prod_config_has_every_event_ticket_id():
     finally:
         os.environ["BOT_MODE"] = "TEST"
         importlib.reload(features.config)
+
+
+# ---------------------------------------------------------------------------
+# Admin access: every gate runs through _event_staff_role_ids(), so admins
+# must be accepted there rather than at each call site.
+# ---------------------------------------------------------------------------
+
+
+def test_admin_role_counts_as_event_staff(configured):
+    assert event_tickets._is_event_staff(_member(1, ADMIN_ROLE_ID)) is True
+
+
+def test_event_staff_role_still_counts(configured):
+    assert event_tickets._is_event_staff(_member(1, STAFF_ROLE)) is True
+
+
+def test_member_with_neither_role_is_not_staff(configured):
+    assert event_tickets._is_event_staff(_member(1)) is False
+
+
+def test_plain_user_is_not_staff(configured):
+    # A discord.User has no roles at all; the gate must not raise.
+    assert event_tickets._is_event_staff(MagicMock(spec=discord.User)) is False
+
+
+async def test_new_ticket_grants_access_to_the_admin_role(configured):
+    interaction, guild, _ = _create_interaction(
+        resolvable_roles=(STAFF_ROLE, ADMIN_ROLE_ID)
+    )
+
+    await event_tickets.create_event_ticket_channel(interaction)
+
+    looked_up = {call.args[0] for call in guild.get_role.call_args_list}
+    assert ADMIN_ROLE_ID in looked_up
+    # @everyone, the opener, and both staff roles.
+    assert len(guild.create_text_channel.await_args.kwargs["overwrites"]) == 4
+
+
+async def test_admin_can_close_reopen_and_delete(configured):
+    admin = _member(1, ADMIN_ROLE_ID)
+
+    closed = _ticket_channel()
+    closed.guild.get_member.return_value = _member(OPENER_ID)
+    assert await event_tickets.close_event_ticket_channel(closed, admin) is True
+
+    reopened = _ticket_channel(name="「👍」event-alice")
+    reopened.guild.get_member.return_value = _member(OPENER_ID)
+    assert await event_tickets.reopen_event_ticket_channel(reopened, admin) is True
+
+    deleted = _ticket_channel(messages=[_history_message("submission")])
+    result = await event_tickets.delete_event_ticket_channel(
+        deleted, admin, _bot_with_opener()
+    )
+    assert result is True
+
+
+# ---------------------------------------------------------------------------
+# Panel repost on restart
+# ---------------------------------------------------------------------------
+
+PANEL_CHANNEL = 888
+
+
+@pytest.fixture
+def panel_configured(monkeypatch, configured):
+    monkeypatch.setattr(event_tickets, "EVENT_TICKET_PANEL_CHANNEL_ID", PANEL_CHANNEL)
+    monkeypatch.setattr(event_tickets, "_PANEL_REPOSTED", False, raising=False)
+
+
+def _panel_channel(messages=()):
+    channel = MagicMock(spec=discord.TextChannel)
+    channel.name = "event-tickets"
+    channel.purge = AsyncMock()
+    channel.send = AsyncMock()
+    channel.history = MagicMock(return_value=_AsyncIter(messages))
+
+    guild = MagicMock(spec=discord.Guild)
+    guild.me = MagicMock(spec=discord.Member)
+    channel.guild = guild
+
+    permissions = MagicMock()
+    permissions.manage_messages = True
+    channel.permissions_for = MagicMock(return_value=permissions)
+    return channel
+
+
+def _panel_bot(channel):
+    bot = MagicMock(spec=commands.Bot)
+    bot.user = MagicMock(spec=discord.ClientUser)
+    bot.user.display_avatar.url = "https://example.invalid/a.png"
+    bot.get_channel = MagicMock(return_value=channel)
+    return bot
+
+
+def _stale_panel_message():
+    message = MagicMock(spec=discord.Message)
+    message.delete = AsyncMock()
+    return message
+
+
+async def test_repost_deletes_messages_from_every_author(panel_configured):
+    # Unlike repost_privacy_policy, this channel is panel-only: everything goes,
+    # so the purge must not be filtered by author.
+    channel = _panel_channel()
+
+    await event_tickets.repost_event_ticket_panel(_panel_bot(channel))
+
+    channel.purge.assert_awaited_once()
+    assert "check" not in channel.purge.await_args.kwargs
+
+
+async def test_repost_posts_a_fresh_panel_with_its_view(panel_configured):
+    channel = _panel_channel()
+
+    await event_tickets.repost_event_ticket_panel(_panel_bot(channel))
+
+    kwargs = channel.send.await_args.kwargs
+    assert isinstance(kwargs["view"], event_tickets.EventTicketPanelView)
+    assert kwargs["embed"].title == "Event Tickets"
+
+
+async def test_repost_rebuilds_the_embed_instead_of_reusing_the_old_one(
+    panel_configured,
+):
+    # restore_tourney_panels re-sends the embed it found, so edits to the panel
+    # text never propagate. This must build from source every time.
+    channel = _panel_channel(messages=[_stale_panel_message()])
+    bot = _panel_bot(channel)
+
+    await event_tickets.repost_event_ticket_panel(bot)
+
+    expected = event_tickets.build_event_panel_embed(bot.user)
+    sent = channel.send.await_args.kwargs["embed"]
+    assert sent.title == expected.title
+    assert sent.description == expected.description
+
+
+async def test_repost_purges_before_posting(panel_configured):
+    order = []
+    channel = _panel_channel()
+    channel.purge = AsyncMock(side_effect=lambda *a, **k: order.append("purge"))
+    channel.send = AsyncMock(side_effect=lambda *a, **k: order.append("send"))
+
+    await event_tickets.repost_event_ticket_panel(_panel_bot(channel))
+
+    assert order == ["purge", "send"]
+
+
+async def test_repost_falls_back_to_single_deletes_when_bulk_purge_fails(
+    panel_configured,
+):
+    # Discord refuses to bulk-delete anything older than 14 days.
+    stale = [_stale_panel_message(), _stale_panel_message()]
+    channel = _panel_channel(messages=stale)
+    channel.purge = AsyncMock(
+        side_effect=discord.HTTPException(MagicMock(), "too old for bulk delete")
+    )
+
+    await event_tickets.repost_event_ticket_panel(_panel_bot(channel))
+
+    for message in stale:
+        message.delete.assert_awaited_once()
+    channel.send.assert_awaited_once()
+
+
+async def test_repost_skips_when_the_channel_id_is_unset(panel_configured, monkeypatch):
+    monkeypatch.setattr(event_tickets, "EVENT_TICKET_PANEL_CHANNEL_ID", 0)
+    bot = _panel_bot(_panel_channel())
+
+    await event_tickets.repost_event_ticket_panel(bot)
+
+    bot.get_channel.assert_not_called()
+
+
+async def test_repost_skips_a_missing_channel(panel_configured):
+    bot = _panel_bot(None)
+
+    await event_tickets.repost_event_ticket_panel(bot)  # must not raise
+
+
+async def test_repost_skips_a_non_text_channel(panel_configured):
+    voice = MagicMock(spec=discord.VoiceChannel)
+    bot = _panel_bot(voice)
+
+    await event_tickets.repost_event_ticket_panel(bot)  # must not raise
+
+
+async def test_repost_skips_when_the_bot_cannot_manage_messages(panel_configured):
+    # Posting without being able to clean up would stack a new panel on every
+    # restart, so skip entirely and leave the log line as the signal.
+    channel = _panel_channel()
+    channel.permissions_for.return_value.manage_messages = False
+
+    await event_tickets.repost_event_ticket_panel(_panel_bot(channel))
+
+    channel.purge.assert_not_awaited()
+    channel.send.assert_not_awaited()
+
+
+async def test_repost_runs_once_per_process(panel_configured):
+    # on_ready re-fires on every gateway reconnect; only a real restart should
+    # wipe and repost the channel.
+    channel = _panel_channel()
+    bot = _panel_bot(channel)
+
+    await event_tickets.repost_event_ticket_panel(bot)
+    await event_tickets.repost_event_ticket_panel(bot)
+
+    channel.send.assert_awaited_once()
+
+
+async def test_repost_survives_a_discord_error(panel_configured):
+    channel = _panel_channel()
+    channel.send = AsyncMock(side_effect=discord.HTTPException(MagicMock(), "boom"))
+
+    await event_tickets.repost_event_ticket_panel(_panel_bot(channel))  # must not raise

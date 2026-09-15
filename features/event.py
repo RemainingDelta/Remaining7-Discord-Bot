@@ -906,7 +906,9 @@ class Events(commands.Cog):
 
         # --- Event Tickets ---
         ticket_text = (
-            "`/event-ticket-panel` - Post the Open Event Ticket panel.\n"
+            "`/event-ticket-panel` - Post the Open Event Ticket panel "
+            "(Event Staff or Admin). The panel is also wiped and reposted "
+            "automatically on every bot restart.\n"
             "Members open one private channel each (`「❗」event-username`) to submit "
             "their event answer. **One open ticket per member at a time.**\n\n"
             "**Managing a ticket (inside the ticket channel):**\n"
