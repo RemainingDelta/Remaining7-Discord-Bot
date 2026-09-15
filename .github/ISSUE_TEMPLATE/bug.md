@@ -23,7 +23,7 @@ How do we know it's done?
 ### Impact
 Describe how this affects users, performance, or other parts of the system.
 
-### Screenshots/Logs [if applicable]
+### Screenshots/Logs
 Attach screenshots, error logs, or any relevant artifacts.
 
 ### Branch 

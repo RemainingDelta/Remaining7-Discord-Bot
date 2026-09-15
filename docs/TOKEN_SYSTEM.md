@@ -86,24 +86,6 @@ The supply (`/drop` and the auto `supply_drop_task`), booster, and admin drops a
 
 ---
 
-## Permission System (`/perm`)
-
-A simple allow-list (`allowed_users: set` in-memory) that gates certain admin-like economy commands (e.g. `/set-balance`) for non-Admin users:
-
-```python
-allowed_users = set()  # module-level set; reset on restart
-
-# Grant access:
-allowed_users.add(user.id)
-
-# Revoke:
-allowed_users.discard(user.id)
-```
-
-This is volatile — resets on bot restart. It's intended for temporary delegation, not permanent grants.
-
----
-
 ## Excluded Channels
 
 `PASSIVE_REWARD_EXCLUDED_CHANNEL_IDS` in `features/config.py` is a list of channel IDs where the passive `on_message` listener skips token/XP earning. This is used for channels like bot-spam or announcement channels where engagement shouldn't be rewarded.

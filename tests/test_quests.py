@@ -7,7 +7,11 @@ import pytest
 
 import database.mongo as mongo
 from database.mongo import booster_quest_target, update_quest_progress
-from features.config import SERVER_BOOSTER_ROLE_ID
+from features.config import (
+    BOTS_CATEGORY_ID,
+    GENERAL_CHANNEL_ID,
+    SERVER_BOOSTER_ROLE_ID,
+)
 from features.quests import Quests, _is_booster
 
 
@@ -208,3 +212,41 @@ async def test_reconcile_noop_when_nothing_pending(monkeypatch):
 
     pay.assert_not_awaited()
     flag.assert_not_awaited()
+
+
+# --- on_message DM handling (#517) ---
+
+
+async def test_on_message_ignores_dm(mock_dm_message):
+    # #517: DMChannel has no `category`, so reading it raised AttributeError
+    # and killed the listener on every DM. Quests gates independently of
+    # economy, so it needs its own coverage.
+    cog = _make_quests_cog()
+    cog.process_quest_update = AsyncMock()
+
+    await cog.on_message(mock_dm_message)
+
+    cog.process_quest_update.assert_not_awaited()
+
+
+async def test_on_message_still_skips_bots_category(guild_message):
+    # The DM guard must not replace the BOTS-category skip.
+    cog = _make_quests_cog()
+    cog.process_quest_update = AsyncMock()
+
+    await cog.on_message(guild_message(GENERAL_CHANNEL_ID, BOTS_CATEGORY_ID))
+
+    cog.process_quest_update.assert_not_awaited()
+
+
+async def test_on_message_still_updates_in_general(guild_message):
+    # Guild messages are unaffected by the DM guard.
+    cog = _make_quests_cog()
+    cog.process_quest_update = AsyncMock()
+    message = guild_message(GENERAL_CHANNEL_ID)
+
+    await cog.on_message(message)
+
+    cog.process_quest_update.assert_awaited_once_with(
+        str(message.author.id), message.channel, "message", member=message.author
+    )

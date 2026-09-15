@@ -21,13 +21,13 @@ State reads/writes hit MongoDB on every valid count — the channel is low-traff
 
 ## Persistence
 
-State is stored in a single MongoDB document in the `counting_state` collection:
+State is stored in a single MongoDB document in the `counting` collection:
 
 ```json
 {
   "_id": "state",
-  "count": 142,
-  "last_user_id": "123456789"
+  "current_count": 142,
+  "last_user_id": 123456789
 }
 ```
 

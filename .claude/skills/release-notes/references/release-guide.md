@@ -56,6 +56,6 @@ Versions follow `v<major>.<minor>.<patch>`:
 - **Minor** (e.g. v1.7.x → v1.8.0): New features or meaningful additions
 - **Major** (e.g. v1.x.x → v2.0.0): Large rewrites or breaking changes
 
-Always bump `BOT_VERSION` in `features/config.py` to match the release tag before merging.
+Always bump `version` in `pyproject.toml` to match the release tag before merging, and the `**Version:**` line in `README.md`. Do not edit `features/config.py` — `BOT_VERSION` is derived from `pyproject.toml` by regex, so an edit there has no effect.
 
-> ⚠️ **Reminder:** When drafting release notes, always prompt yourself — did you bump `BOT_VERSION` in `features/config.py`? Do not tag the release until this is done.
+> ⚠️ **Reminder:** When drafting release notes, always prompt yourself — did you bump `version` in `pyproject.toml` and the `**Version:**` line in `README.md`? Do not tag the release until this is done.

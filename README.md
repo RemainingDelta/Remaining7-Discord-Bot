@@ -2,10 +2,11 @@
 
 ## Overview
 **Name:** Remaining7 Discord Bot
-**Version:** v1.12.0
+**Version:** v1.13.2
 **Contributors:** remainingdelta, nightwarrior5
 **Objective:** A feature-rich Discord bot for the Remaining7 community server (16k+ members). Handles an R7 Token economy, leveling, quests, a Brawl Stars collection minigame, tournament management with Matcherino integration, support tickets, event operations, a security protocol, and multi-language translation.
 **Server Link:** https://discord.gg/6MzrjS2X8k
+**Privacy:** What the bot stores about members and why — [`PRIVACY_POLICY.md`](./PRIVACY_POLICY.md)
 
 ---
 
@@ -31,6 +32,7 @@ Remaining7-Discord-Bot/
 ├── .env.example
 ├── .gitignore
 ├── README.md
+├── PRIVACY_POLICY.md                # Privacy policy (mirrored by /privacy-policy)
 ├── docs/                             # Feature implementation guides
 │   └── logs/                         # SPECS.md & CHANGELOG.md — development history
 ├── database/
@@ -43,6 +45,7 @@ Remaining7-Discord-Bot/
 │   ├── scam_detection.py            # Scam image detection (MD5/pHash/ORB blacklist)
 │   ├── event.py                     # Event channel cleanup & reward payouts
 │   ├── general.py                   # /help, /mod-help, /admin-help, /version, /convert-time
+│   ├── privacy_policy.py            # Policy content, /privacy-policy, startup repost
 │   ├── translation.py               # !t prefix & /translate slash command (54 languages)
 │   ├── counting.py                  # Sequential counting game with /set-count
 │   ├── story.py                     # Collaborative one-word story game (staff-run, moderated)
@@ -69,7 +72,7 @@ Remaining7-Discord-Bot/
 ├── tests/                            # Pytest unit tests (pure functions & regex helpers)
 ├── .claude/                          # Claude Code project config (tracked, see Workflow)
 │   ├── settings.json                # Hook registrations
-│   ├── hooks/                       # format-file, require-tests, stop-checks, check-config-parity
+│   ├── hooks/                       # format-file, require-tests, stop-checks, check-config-parity, session-setup
 │   └── skills/                      # Repo slash commands (/ship, /pr-desc, /write-tests, ...)
 └── .github/
     ├── ISSUE_TEMPLATE/
@@ -80,7 +83,9 @@ Remaining7-Discord-Bot/
         ├── lint.yml                 # Ruff linting CI
         ├── tests.yml                # Pytest CI
         ├── version-check.yml        # Blocks PRs into main without a pyproject.toml version bump
-        └── pr-issue-reference-check.yml  # Verifies issue number matches across branch/title/body
+        ├── pr-issue-reference-check.yml  # Verifies issue number matches across branch/title/body
+        ├── pr-title-format-check.yml     # Enforces PR title shape on PRs into dev (no colon, lowercase verb)
+        └── strip-pr-footer.yml           # Strips the Claude Code footer from PR bodies targeting dev
 ```
 
 ---
@@ -93,7 +98,6 @@ Remaining7-Discord-Bot/
 - **Supply Drop:** `/drop <amount>` (Admin) to force a token drop in general chat.
 - **Balance & Ranking:** `/balance [user]`, `/leaderboard token`.
 - **Give & Set:** `/give <user> <token/xp/level> <amount>`, `/set-balance <user> <amount>` (Admin).
-- **Permissions:** `/perm <user> <add/remove>` to grant/revoke command access.
 - **Guide:** `/economy-help` for a full user-facing guide.
 
 ### Shop & Budget System
@@ -200,9 +204,16 @@ Every user always has **4 active quests** — one daily and one weekly per categ
 - Deleting saves a transcript to the event transcript channel and DMs a copy to the opener.
 
 ### GitHub Ticket Integration
-- AI-powered GitHub issue creation from support tickets using Gemini.
-- Automatically generates structured bug reports, feature requests, and enhancement issues from ticket conversations.
-- Requires `GEMINI_TOKEN` and `GITHUB_TOKEN` environment variables.
+- AI-powered GitHub issue creation. One authorized staff member @mentions the bot with a description; Gemini classifies it as a bug, enhancement, or feature and fills in the matching template.
+- **Reply for context:** @mention the bot as a reply to another message and that message is folded in — its text, embed contents, attached `.txt`/`.log` files (copied in verbatim), attachment filenames, and a permanent link back to it. Turns an error post in the bot logs channel into a filed issue in one step.
+- Requires `GEMINI_TOKEN` and `GITHUB_TOKEN` environment variables. See [`docs/GITHUB_TICKETS.md`](docs/GITHUB_TICKETS.md).
+
+### Error Reporting
+- Reports the bot's own failures to a dedicated logs channel, because the host drops console output — a failing feature or a dead background task was previously invisible.
+- **On startup:** version, features loaded, commands synced, and any failure with its traceback attached as a file.
+- **At runtime:** unhandled errors in listeners, prefix commands, slash commands, and all 19 background tasks, each with a plain-English explanation and a severity colour.
+- User mistakes are not reported — unknown commands, failed permission checks, and bad arguments are not bugs.
+- Rate limited so a repeating failure cannot flood the channel. See [`docs/ERROR_REPORTING.md`](docs/ERROR_REPORTING.md).
 
 ### Event Management
 - **Automated Monitoring:** Daily background task at 12:00 AM ET scans event channels.
@@ -238,7 +249,7 @@ Every user always has **4 active quests** — one daily and one weekly per categ
 - Auto-detects source language. Google Translate backend.
 
 ### Counting Game
-- Sequential counting game in a designated channel — users must send the next number in sequence.
+- Sequential counting game in a designated channel — users send the next number in sequence, as a plain number or a basic arithmetic expression (`7*10` counts as `70`, evaluated by a safe `ast` parser). Off-sequence, repeat-user, or invalid messages are removed and the count is left unchanged.
 - `/set-count <number>` (Staff) — manually set the current count.
 
 ### One-Word Story
@@ -253,6 +264,7 @@ Every user always has **4 active quests** — one daily and one weekly per categ
 ### Utility
 - `/convert-time <date> <time> <timezone>` — convert a date and time to all Discord timestamp formats. Supports 20+ timezone aliases (EST, PT, GMT, etc.) and IANA names.
 - `/version` — view the bot's current version.
+- `/privacy-policy` — view what data the bot collects, why, and how to request deletion. Ephemeral (visible only to you), no permission gate. The same policy is posted publicly in the privacy channel and kept current on every restart, and lives in [`PRIVACY_POLICY.md`](./PRIVACY_POLICY.md).
 
 ### Help Commands
 - `/help` — user command directory.
@@ -360,6 +372,7 @@ Uses MongoDB database `r7_bot_db` with the following collections:
 | Progress dashboard | Every 5 minutes (live) | Semi-final/final bracket announcements |
 | Match refresher | Every 1 minute (live) | Refresh Matcherino scores in active tickets |
 | Budget reset | On interaction | Auto-reset monthly redemption cap on month change |
+| Privacy policy repost | On startup | Delete the bot's old copy in the privacy channel and post the current policy |
 
 ---
 
@@ -368,7 +381,7 @@ Uses MongoDB database `r7_bot_db` with the following collections:
 | Role | Access |
 |---|---|
 | Admin | Full access to all commands |
-| Moderator | Economy oversight, security protocol |
+| Moderator | Redemption queue oversight, security protocol |
 | Tourney Admin | Tournament commands, ticket management |
 | Event Staff | Event channel cleanup, reward distribution, sticky messages |
 | Member | Economy, quests, brawl, translation, help |
@@ -382,8 +395,9 @@ Uses MongoDB database `r7_bot_db` with the following collections:
 - Ruff enforced via CI (`.github/workflows/lint.yml`); pytest suite runs on every push/PR (`tests.yml`).
 - Common dev tasks are wrapped in the `Makefile`: `make test`, `make lint`, `make fix`, `make ci`, `make up`, and `make commit m="..."` (stages, commits, and pushes in one step).
 - PRs into `main` are blocked unless `pyproject.toml`'s version was bumped (`version-check.yml`).
-- PRs into `dev` are checked for a consistent issue number across branch name, title, and body (`pr-issue-reference-check.yml`).
-- `.claude/` is tracked in git, so hooks and skills survive a fresh clone. Three hooks run automatically in Claude Code sessions:
+- PRs into `dev` are checked for a consistent issue number across branch name, title, and body (`pr-issue-reference-check.yml`), must follow the `<issue>-<Type> <lowercase verb> …` title convention (`pr-title-format-check.yml`), and have any Claude Code footer stripped from the PR body (`strip-pr-footer.yml`).
+- `.claude/` is tracked in git, so hooks and skills survive a fresh clone. Four hooks run automatically in Claude Code sessions:
+  - **At session start** — the git hooks path is pointed at `.githooks` and the commit author is pinned to `RemainingDelta` so cloud and routine commits are authored correctly (`session-setup.sh`).
   - **On every Python write** — `ruff format` on that one file, and the bot is flagged for restart. Formatting only; `ruff check --fix` deletes unused imports, which breaks a multi-edit sequence that writes an import before the line using it.
   - **Before editing `features/` or `database/`** — the edit is blocked unless the ticket branch has touched something under `tests/`. Bypass a session with `SKIP_TEST_GATE=1 claude`.
   - **At the end of a turn** — `features/config.py` is checked for IDs added to only one of the REAL/TEST branches (a silent break on one server), then `ruff check --fix` runs and the bot is relaunched from `.venv/`. Suppress the restart with `touch /tmp/claude-no-restart`.

@@ -203,6 +203,11 @@ class Quests(commands.Cog):
     async def on_message(self, message: discord.Message):
         if message.author.bot:
             return
+        # DMs make no quest progress (the channel gate below is guild-only) and a
+        # DMChannel has no `category`, so reading it raised AttributeError on
+        # every DM (#517).
+        if message.guild is None:
+            return
 
         # Skip quest progress outside general chat and restricted channels
         if message.channel.category and message.channel.category.id == BOTS_CATEGORY_ID:

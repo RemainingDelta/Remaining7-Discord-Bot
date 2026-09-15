@@ -6,7 +6,11 @@ from unittest.mock import AsyncMock, MagicMock
 import discord
 import pytest
 
+import features.economy as economy
 from features.config import (
+    ADMIN_ROLE_ID,
+    BOTS_CATEGORY_ID,
+    GENERAL_CHANNEL_ID,
     REDEMPTION_TICKET_CATEGORY_ID,
     REDEMPTION_TRANSCRIPT_CHANNEL_ID,
 )
@@ -1082,3 +1086,117 @@ async def test_claim_drop_records_claimer_via_setoninsert(monkeypatch):
     kwargs = fake_db.drop_claims.find_one_and_update.call_args.kwargs
     assert update["$setOnInsert"]["claimed_by"] == "u1"
     assert kwargs["upsert"] is True
+
+
+# --- on_message DM handling (#517) ---
+
+
+def _patch_reward_path(monkeypatch):
+    """Patch every DB call the passive-reward path makes.
+
+    get_setting is called with and without a default, so echo the default
+    back: that yields "0:0" for the daily counter and None for the token
+    cooldown (i.e. no cooldown recorded -> tokens are due).
+    """
+    increment = AsyncMock()
+    monkeypatch.setattr("features.economy.get_user_data", AsyncMock(return_value={}))
+    monkeypatch.setattr(
+        "features.economy.get_setting",
+        AsyncMock(side_effect=lambda key, default=None: default),
+    )
+    monkeypatch.setattr("features.economy.set_setting", AsyncMock())
+    monkeypatch.setattr("features.economy.increment_user_balance", increment)
+    monkeypatch.setattr(
+        "features.economy.get_leveling_data", AsyncMock(return_value=(1, 0))
+    )
+    monkeypatch.setattr("features.economy.update_leveling_data", AsyncMock())
+    return increment
+
+
+async def test_on_message_ignores_dm(mock_dm_message, monkeypatch):
+    # #517: DMChannel has no `category`, so reading it raised AttributeError
+    # and killed the listener on every DM.
+    cog, _ = _make_economy_cog(None)
+    increment = _patch_reward_path(monkeypatch)
+
+    await cog.on_message(mock_dm_message)
+
+    increment.assert_not_awaited()
+
+
+async def test_on_message_still_skips_bots_category(guild_message, monkeypatch):
+    # The DM guard must not replace the BOTS-category skip.
+    cog, _ = _make_economy_cog(None)
+    increment = _patch_reward_path(monkeypatch)
+    message = guild_message(GENERAL_CHANNEL_ID, BOTS_CATEGORY_ID)
+
+    await cog.on_message(message)
+
+    increment.assert_not_awaited()
+
+
+async def test_on_message_still_rewards_general_channel(guild_message, monkeypatch):
+    # Guild messages are unaffected by the DM guard.
+    cog, _ = _make_economy_cog(None)
+    increment = _patch_reward_path(monkeypatch)
+    message = guild_message(GENERAL_CHANNEL_ID)
+
+    await cog.on_message(message)
+
+    increment.assert_awaited_once()
+
+
+# --- has_permission and the removed /perm command ---
+
+
+def _member_with_roles(*role_ids):
+    """A Member-spec'd mock whose get_role only matches the given role IDs.
+
+    Spec'd on discord.Member so it satisfies the isinstance guard in
+    has_permission; _FakeMember above is a plain class and would not.
+    """
+    member = MagicMock(spec=discord.Member)
+    member.id = 4242
+    member.get_role = lambda role_id: MagicMock() if role_id in role_ids else None
+    return member
+
+
+def _permission_interaction(user):
+    interaction = MagicMock(spec=discord.Interaction)
+    interaction.user = user
+    return interaction
+
+
+def test_perm_command_is_gone():
+    cog = Economy.__new__(Economy)
+    names = {command.name for command in cog.get_app_commands()}
+    assert "perm" not in names
+
+
+def test_allowed_users_allow_list_is_gone():
+    # The in-memory set /perm wrote to. Its only reader was has_permission,
+    # which is now a plain role check.
+    assert not hasattr(economy, "allowed_users")
+
+
+async def test_has_permission_allows_admin_role():
+    cog = Economy.__new__(Economy)
+    interaction = _permission_interaction(_member_with_roles(ADMIN_ROLE_ID))
+
+    assert await cog.has_permission(interaction) is True
+
+
+async def test_has_permission_denies_member_without_admin_role():
+    cog = Economy.__new__(Economy)
+    interaction = _permission_interaction(_member_with_roles())
+
+    assert await cog.has_permission(interaction) is False
+
+
+async def test_has_permission_denies_plain_user():
+    # A discord.User (DM context) has no roles at all. The gate must return
+    # False rather than raising AttributeError.
+    cog = Economy.__new__(Economy)
+    interaction = _permission_interaction(MagicMock(spec=discord.User))
+
+    assert await cog.has_permission(interaction) is False

@@ -70,8 +70,9 @@ class General(commands.Cog):
         embed.add_field(name="🌐 Translation", value=translation_text, inline=False)
 
         counting_text = (
-            "Type the next number in sequence in the counting channel!\n"
-            "*(Stay on track — any wrong number resets the count)*"
+            "Type the next number in the counting channel — a plain number or a "
+            "simple math expression like `7*10` both count!\n"
+            "*(Off-sequence, repeat-user, or invalid messages are removed; the count keeps going)*"
         )
         embed.add_field(name="🔢 Counting Game", value=counting_text, inline=False)
 
@@ -85,7 +86,8 @@ class General(commands.Cog):
         utility_text = (
             "`/booster-perks` - View all Server Booster perks\n"
             "`/convert-time` - Convert a date and time to Discord timestamp formats\n"
-            "`/version` - View the bot's current version"
+            "`/version` - View the bot's current version\n"
+            "`/privacy-policy` - See what data the bot stores about you and why"
         )
         embed.add_field(name="🔧 Utility", value=utility_text, inline=False)
 
@@ -115,8 +117,6 @@ class General(commands.Cog):
 
         # Economy Oversight
         economy_text = (
-            "`/give <user> <type> <amount>` - Manually grant Tokens, XP, or Levels.\n"
-            "`/set-balance <user> <amount>` - Directly set a user's token balance.\n"
             "`/redemption-queue-list` - View queued redemptions awaiting budget.\n"
             "`/redemption-queue-remove <entry_id>` - Remove a queued redemption."
         )
@@ -186,8 +186,7 @@ class General(commands.Cog):
             "`/drop <amount>` - Manual supply drop in general.\n"
             "`/give <user> <tokens/xp> <amount>` - Grant resources.\n"
             "`/set-balance <user> <amount>` - Hard reset of a user's tokens.\n"
-            "`/set-budget <amount>` - Override the monthly reward budget.\n"
-            "`/perm <user> <add/remove>` - Manage bot command access."
+            "`/set-budget <amount>` - Override the monthly reward budget."
         )
         embed.add_field(name="💰 Economy Management", value=economy_text, inline=False)
 
