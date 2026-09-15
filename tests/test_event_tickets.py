@@ -1,3 +1,5 @@
+import importlib
+import os
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
@@ -519,3 +521,41 @@ async def test_opener_topic_is_set_in_the_create_call(configured):
         f"event-opener:{OPENER_ID}"
     )
     channel.edit.assert_not_called()
+
+
+# --- config parity: every ID must exist in BOTH config branches ---
+
+EVENT_TICKET_CONSTANTS = (
+    "EVENT_TICKET_PANEL_CHANNEL_ID",
+    "EVENT_TICKET_CATEGORY_ID",
+    "EVENT_TICKET_TRANSCRIPT_CHANNEL_ID",
+)
+
+
+def _assert_event_ticket_ids_configured(config_module):
+    values = []
+    for name in EVENT_TICKET_CONSTANTS:
+        value = getattr(config_module, name)
+        assert isinstance(value, int) and value > 0, f"{name} is not configured"
+        values.append(value)
+    assert len(set(values)) == len(values), "the three IDs must be distinct channels"
+
+
+def test_dev_config_has_every_event_ticket_id():
+    # The suite runs under BOT_MODE=TEST, which resolves to the DEV branch.
+    import features.config
+
+    _assert_event_ticket_ids_configured(features.config)
+
+
+def test_prod_config_has_every_event_ticket_id():
+    # An ID set in only one branch leaves the feature silently inert on the
+    # other server, since every guard treats 0 as "not configured".
+    import features.config
+
+    os.environ["BOT_MODE"] = "PROD"
+    try:
+        _assert_event_ticket_ids_configured(importlib.reload(features.config))
+    finally:
+        os.environ["BOT_MODE"] = "TEST"
+        importlib.reload(features.config)

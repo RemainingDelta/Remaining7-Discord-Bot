@@ -61,8 +61,9 @@ Reopening restores the opener's send permission and flips the prefix back.
 ---
 
 ## Configuration (`features/config.py`)
-Three IDs must be set in **both** the PROD and DEV blocks before the feature works
-(they ship as `0` placeholders):
+Three IDs, set in **both** the PROD and DEV blocks. Every guard treats `0` as
+"not configured" and disables the feature rather than raising, so a value missing
+from one branch leaves event tickets silently inert on that server:
 
 | Constant | Purpose |
 |----------|---------|
