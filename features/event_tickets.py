@@ -13,6 +13,7 @@ between categories. Namespaced ``event_ticket*`` to avoid colliding with
 import asyncio
 import io
 import re
+from typing import NamedTuple
 
 import discord
 from discord import app_commands
@@ -29,6 +30,13 @@ from features.config import (
 # Leave headroom under Discord's 100-char channel-name limit for the
 # "「❗」event-" prefix.
 _MAX_USERNAME_LEN = 90
+
+# Discord accepts 10 attachments per message and the transcript .txt takes one
+# slot, so at most nine images ride along with it.
+_MAX_TRANSCRIPT_IMAGES = 9
+
+# Same list as features/scam_detection.py. Deliberately excludes .gif.
+_IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".webp")
 
 
 def _event_staff_role_ids() -> set[int]:
@@ -167,13 +175,36 @@ async def _try_rename_channel(
         return False
 
 
-async def _build_transcript_text(channel: discord.TextChannel) -> str:
+class Transcript(NamedTuple):
+    """A ticket's history, plus the image bytes worth keeping with it."""
+
+    text: str
+    images: list[tuple[str, bytes]]
+
+
+def _is_transcript_image(attachment: discord.Attachment) -> bool:
+    return attachment.filename.lower().endswith(_IMAGE_EXTENSIONS)
+
+
+async def _build_transcript(channel: discord.TextChannel) -> Transcript:
+    """Render the ticket history and download its images in one history pass.
+
+    Images are re-uploaded rather than linked: Discord attachment URLs are
+    signed and expire within about a day, and deleting the channel makes the
+    originals collectable, so a linked screenshot is gone by the time anyone
+    reads the transcript. Anything not downloaded still gets its name and URL
+    in the text, so nothing disappears without a trace.
+    """
     opener_id = _extract_opener_id(channel.topic)
     lines: list[str] = [
         f"Channel: {channel.name}",
         f"Opener ID: {opener_id or 'Unknown'}",
         "",
     ]
+    images: list[tuple[str, bytes]] = []
+    skipped: list[str] = []
+    # Discord caps the whole payload, not each file, so this is one shared budget.
+    budget = channel.guild.filesize_limit
 
     async for msg in channel.history(limit=None, oldest_first=True):
         ts = msg.created_at.strftime("%Y-%m-%d %H:%M")
@@ -186,10 +217,34 @@ async def _build_transcript_text(channel: discord.TextChannel) -> str:
             content += f"[Attachments: {attachment_list}]"
         lines.append(f"[{ts}] {author}: {content}")
 
+        for attachment in msg.attachments:
+            if (
+                len(images) >= _MAX_TRANSCRIPT_IMAGES
+                or not _is_transcript_image(attachment)
+                or attachment.size > budget
+            ):
+                skipped.append(attachment.filename)
+                continue
+            try:
+                data = await attachment.read()
+            except (discord.HTTPException, discord.NotFound):
+                skipped.append(attachment.filename)
+                continue
+            # Prefixed so two "image.png" from different messages stay distinct.
+            images.append((f"{len(images) + 1:02d}-{attachment.filename}", data))
+            budget -= attachment.size
+
     if len(lines) <= 3:
         lines.append("No messages in this ticket.")
 
-    return "\n".join(lines)
+    if images:
+        lines += ["", "Attached to this transcript:"]
+        lines += [f"  {name}" for name, _ in images]
+    if skipped:
+        lines += ["", "Not attached (links above expire):"]
+        lines += [f"  {name}" for name in skipped]
+
+    return Transcript("\n".join(lines), images)
 
 
 # ---------------------------------------------------------------------------
@@ -371,9 +426,18 @@ async def delete_event_ticket_channel(
     if not is_event_ticket_channel(channel):
         return False
 
-    transcript_text = await _build_transcript_text(channel)
-    transcript_bytes = transcript_text.encode("utf-8")
+    transcript = await _build_transcript(channel)
+    transcript_bytes = transcript.text.encode("utf-8")
     filename = f"{channel.name}_transcript.txt"
+
+    def transcript_files() -> list[discord.File]:
+        # Fresh File objects per send: each wraps a single-use stream.
+        files = [discord.File(io.BytesIO(transcript_bytes), filename=filename)]
+        files += [
+            discord.File(io.BytesIO(data), filename=name)
+            for name, data in transcript.images
+        ]
+        return files
 
     opener_id = _extract_opener_id(channel.topic)
     opener_display = "unknown"
@@ -387,13 +451,12 @@ async def delete_event_ticket_channel(
                 user = None
         if user is not None:
             try:
-                dm_file = discord.File(io.BytesIO(transcript_bytes), filename=filename)
                 await user.send(
                     content=(
                         "Here is the transcript for your closed event ticket in "
                         f"**{channel.guild.name}**."
                     ),
-                    file=dm_file,
+                    files=transcript_files(),
                 )
             except discord.HTTPException:
                 # DMs closed, or transcript too large. Never block deletion.
@@ -407,13 +470,12 @@ async def delete_event_ticket_channel(
     )
     if isinstance(log_channel, discord.TextChannel):
         try:
-            log_file = discord.File(io.BytesIO(transcript_bytes), filename=filename)
             await log_channel.send(
                 content=(
                     f"📝 Transcript for event ticket **#{channel.name}** "
                     f"deleted by **{actor.name}** (opener: {opener_display})."
                 ),
-                file=log_file,
+                files=transcript_files(),
             )
         except discord.HTTPException:
             # Missing permissions or oversized transcript must not block deletion.

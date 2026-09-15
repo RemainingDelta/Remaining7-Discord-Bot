@@ -221,13 +221,28 @@ class _Author:
         return self._name
 
 
-def _history_message(content, author="alice", author_id=OPENER_ID):
+def _history_message(content, author="alice", author_id=OPENER_ID, attachments=()):
     return SimpleNamespace(
         created_at=datetime(2026, 1, 2, 3, 4, tzinfo=timezone.utc),
         author=_Author(author, author_id),
         content=content,
-        attachments=[],
+        attachments=list(attachments),
     )
+
+
+FILESIZE_LIMIT = 10 * 1024 * 1024
+
+
+def _attachment(filename, data=b"IMAGEBYTES", size=None, read_error=None):
+    attachment = MagicMock(spec=discord.Attachment)
+    attachment.filename = filename
+    attachment.size = len(data) if size is None else size
+    attachment.url = f"https://cdn.invalid/{filename}"
+    if read_error is None:
+        attachment.read = AsyncMock(return_value=data)
+    else:
+        attachment.read = AsyncMock(side_effect=read_error)
+    return attachment
 
 
 def _member(user_id, *role_ids, name="someone"):
@@ -258,6 +273,7 @@ def _ticket_channel(
 
     guild = MagicMock(spec=discord.Guild)
     guild.name = "TestGuild"
+    guild.filesize_limit = FILESIZE_LIMIT
     guild.get_member = MagicMock(return_value=None)
     guild.get_channel = MagicMock(return_value=None)
     channel.guild = guild
@@ -382,7 +398,7 @@ async def test_delete_posts_the_transcript_to_the_log_channel(configured):
         is True
     )
 
-    sent = log.send.await_args.kwargs["file"]
+    sent = log.send.await_args.kwargs["files"][0]
     assert sent.filename == "「❗」event-alice_transcript.txt"
     assert b"my submission" in sent.fp.getvalue()
 
@@ -398,7 +414,7 @@ async def test_delete_dms_the_transcript_to_the_opener(configured):
         channel, _member(1, STAFF_ROLE), _bot_with_opener(opener)
     )
 
-    dm_file = opener.send.await_args.kwargs["file"]
+    dm_file = opener.send.await_args.kwargs["files"][0]
     assert b"my submission" in dm_file.fp.getvalue()
 
 
@@ -416,8 +432,8 @@ async def test_dm_and_log_transcripts_are_separate_file_objects(configured):
     )
 
     assert (
-        opener.send.await_args.kwargs["file"].fp
-        is not log.send.await_args.kwargs["file"].fp
+        opener.send.await_args.kwargs["files"][0].fp
+        is not log.send.await_args.kwargs["files"][0].fp
     )
 
 
@@ -790,3 +806,150 @@ async def test_repost_survives_a_discord_error(panel_configured):
     channel.send = AsyncMock(side_effect=discord.HTTPException(MagicMock(), "boom"))
 
     await event_tickets.repost_event_ticket_panel(_panel_bot(channel))  # must not raise
+
+
+# ---------------------------------------------------------------------------
+# Transcript images (#387)
+#
+# Attachment URLs are signed and expire in about a day, and deleting the
+# channel makes the originals collectable, so the bytes have to be re-uploaded
+# while the channel still exists.
+# ---------------------------------------------------------------------------
+
+
+def _images_in(send_mock):
+    files = send_mock.await_args.kwargs["files"]
+    return [f for f in files if not f.filename.endswith(".txt")]
+
+
+def _transcript_text(send_mock):
+    files = send_mock.await_args.kwargs["files"]
+    return files[0].fp.getvalue().decode()
+
+
+def _channel_with_attachments(*attachments_per_message):
+    messages = [
+        _history_message("see attached", attachments=list(attachments))
+        for attachments in attachments_per_message
+    ]
+    channel = _ticket_channel(messages=messages)
+    log = _log_channel()
+    channel.guild.get_channel.return_value = log
+    return channel, log
+
+
+async def test_delete_reuploads_images_to_the_log_channel(configured):
+    channel, log = _channel_with_attachments([_attachment("shot.png", b"PNGDATA")])
+
+    await event_tickets.delete_event_ticket_channel(
+        channel, _member(1, STAFF_ROLE), _bot_with_opener()
+    )
+
+    images = _images_in(log.send)
+    assert len(images) == 1
+    assert "shot.png" in images[0].filename
+    assert images[0].fp.getvalue() == b"PNGDATA"
+
+
+async def test_delete_dms_the_images_to_the_opener(configured):
+    opener = MagicMock(spec=discord.User)
+    opener.send = AsyncMock()
+    channel, _ = _channel_with_attachments([_attachment("shot.png", b"PNGDATA")])
+
+    await event_tickets.delete_event_ticket_channel(
+        channel, _member(1, STAFF_ROLE), _bot_with_opener(opener)
+    )
+
+    images = _images_in(opener.send)
+    assert [image.fp.getvalue() for image in images] == [b"PNGDATA"]
+
+
+async def test_dm_and_log_images_are_separate_file_objects(configured):
+    # Same single-use-stream rule as the transcript itself.
+    opener = MagicMock(spec=discord.User)
+    opener.send = AsyncMock()
+    channel, log = _channel_with_attachments([_attachment("shot.png", b"PNGDATA")])
+
+    await event_tickets.delete_event_ticket_channel(
+        channel, _member(1, STAFF_ROLE), _bot_with_opener(opener)
+    )
+
+    assert _images_in(opener.send)[0].fp is not _images_in(log.send)[0].fp
+
+
+async def test_delete_does_not_reupload_non_images(configured):
+    channel, log = _channel_with_attachments([_attachment("notes.pdf", b"PDFDATA")])
+
+    await event_tickets.delete_event_ticket_channel(
+        channel, _member(1, STAFF_ROLE), _bot_with_opener()
+    )
+
+    assert _images_in(log.send) == []
+    # Still recorded, so nothing disappears without a trace.
+    assert "notes.pdf" in _transcript_text(log.send)
+
+
+async def test_delete_attaches_at_most_nine_images(configured):
+    # Discord allows 10 attachments per message and the .txt takes one slot.
+    channel, log = _channel_with_attachments(
+        *[[_attachment(f"shot{i}.png", b"D")] for i in range(10)]
+    )
+
+    await event_tickets.delete_event_ticket_channel(
+        channel, _member(1, STAFF_ROLE), _bot_with_opener()
+    )
+
+    assert len(_images_in(log.send)) == 9
+    assert "shot9.png" in _transcript_text(log.send)
+
+
+async def test_delete_skips_an_image_larger_than_the_upload_limit(configured):
+    channel, log = _channel_with_attachments(
+        [_attachment("huge.png", b"D", size=FILESIZE_LIMIT + 1)]
+    )
+
+    await event_tickets.delete_event_ticket_channel(
+        channel, _member(1, STAFF_ROLE), _bot_with_opener()
+    )
+
+    assert _images_in(log.send) == []
+    assert "huge.png" in _transcript_text(log.send)
+
+
+async def test_delete_skips_an_unreadable_image_and_still_completes(configured):
+    channel, log = _channel_with_attachments(
+        [_attachment("gone.png", read_error=discord.NotFound(MagicMock(), "gone"))]
+    )
+
+    result = await event_tickets.delete_event_ticket_channel(
+        channel, _member(1, STAFF_ROLE), _bot_with_opener()
+    )
+
+    assert result is True
+    assert _images_in(log.send) == []
+    channel.delete.assert_awaited_once()
+
+
+async def test_delete_keeps_duplicate_image_filenames_distinct(configured):
+    channel, log = _channel_with_attachments(
+        [_attachment("image.png", b"FIRST")], [_attachment("image.png", b"SECOND")]
+    )
+
+    await event_tickets.delete_event_ticket_channel(
+        channel, _member(1, STAFF_ROLE), _bot_with_opener()
+    )
+
+    images = _images_in(log.send)
+    assert len({image.filename for image in images}) == 2
+
+
+async def test_delete_scans_the_channel_history_once(configured):
+    # Collecting the text and the images in separate passes would double the
+    # API cost on a long ticket.
+    channel, log = _channel_with_attachments([_attachment("shot.png", b"PNGDATA")])
+
+    await event_tickets.delete_event_ticket_channel(
+        channel, _member(1, STAFF_ROLE), _bot_with_opener()
+    )
+
+    channel.history.assert_called_once()

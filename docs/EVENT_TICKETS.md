@@ -53,10 +53,33 @@ Reopening restores the opener's send permission and flips the prefix back.
 
 ## Deleting (with transcript)
 `!delete`/`!del` or the **Delete Ticket** button:
-1. Builds a plain-text transcript of the channel history.
-2. DMs the transcript to the opener (skipped silently if their DMs are closed).
-3. Posts the transcript to `EVENT_TICKET_TRANSCRIPT_CHANNEL_ID` (when configured).
+1. Builds the transcript in a single pass over the channel history: the plain-text
+   log, plus the bytes of up to **9 images** posted in the ticket.
+2. DMs the transcript and its images to the opener (skipped silently if their DMs
+   are closed).
+3. Posts the same set to `EVENT_TICKET_TRANSCRIPT_CHANNEL_ID` (when configured).
 4. Deletes the channel.
+
+### Why images are re-uploaded, not linked
+Discord attachment URLs are signed and expire within about a day, and deleting the
+channel makes the originals collectable — so a transcript that only linked a
+screenshot would be dead by the time anyone read it. `_build_transcript()` downloads
+the bytes while the channel still exists and re-uploads them alongside the `.txt`.
+This is the same reasoning `features/github_tickets.py` uses for inlining log files.
+
+An attachment is downloaded only if all of these hold:
+
+| Rule | Why |
+|------|-----|
+| Fewer than 9 images collected so far | Discord accepts 10 attachments per message; the `.txt` takes one slot |
+| Extension in `.png` / `.jpg` / `.jpeg` / `.webp` | Same list as `features/scam_detection.py`; `.gif` is excluded |
+| Fits the remaining byte budget, seeded from `guild.filesize_limit` | Discord caps the whole payload, and the limit varies with boost tier |
+| `attachment.read()` succeeds | The file may already be gone |
+
+Anything skipped still has its filename and URL in the transcript text, under
+"Not attached (links above expire)", so nothing disappears without a trace. Image
+filenames are prefixed (`01-shot.png`) so two `image.png` from different messages
+stay distinguishable. A failed upload never blocks the channel deletion.
 
 ---
 
