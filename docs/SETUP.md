@@ -132,11 +132,15 @@ await bot.load_extension("features.tourney.tourney_reports")
 setup_tourney_commands(bot)
 await restore_tourney_panels(bot)   # Re-registers persistent views after restart
 
+await repost_privacy_policy(bot)       # Rewrites the policy channel
+await repost_event_ticket_panel(bot)   # Wipes and reposts the event panel
+
 # Always last
 await bot.tree.sync()
 ```
 
-`restore_tourney_panels()` must run after `setup_tourney_commands()`. `bot.tree.sync()` must always be last — syncing before all cogs are loaded will miss slash commands.
+`restore_tourney_panels()` must run after `setup_tourney_commands()`. Both reposts run
+after the cogs, so the views they attach are already registered. `bot.tree.sync()` must always be last — syncing before all cogs are loaded will miss slash commands.
 
 ---
 
@@ -266,4 +270,5 @@ Tests use `pytest-asyncio`. Individual test files map 1:1 to feature files (e.g.
 | `MongoDB Connection Failed` | Bad `MONGO_URI` or network issue | Check Atlas IP allowlist and URI format |
 | `Command Sync Error` | Slash commands sync failed | Usually a rate limit — wait and restart |
 | Buttons dead after restart | `restore_tourney_panels()` not called or views not re-registered | Ensure `restore_tourney_panels(bot)` runs in `on_ready` |
+| Event panel missing after restart | Bot lacks Manage Messages in the panel channel, or `EVENT_TICKET_PANEL_CHANNEL_ID` is `0` | Grant Manage Messages and set the ID in both config branches |
 | `Tourney category is not configured correctly` | `TOURNEY_CATEGORY_ID` points to wrong channel type | Must be a Category, not a Text Channel |
