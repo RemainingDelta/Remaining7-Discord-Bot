@@ -817,14 +817,25 @@ async def test_repost_survives_a_discord_error(panel_configured):
 # ---------------------------------------------------------------------------
 
 
+def _all_files(send_mock):
+    """Every file across every send: delivery may split into several messages."""
+    files = []
+    for call in send_mock.await_args_list:
+        files.extend(call.kwargs.get("files", []))
+    return files
+
+
 def _images_in(send_mock):
-    files = send_mock.await_args.kwargs["files"]
-    return [f for f in files if not f.filename.endswith(".txt")]
+    return [f for f in _all_files(send_mock) if not f.filename.endswith(".txt")]
 
 
 def _transcript_text(send_mock):
-    files = send_mock.await_args.kwargs["files"]
-    return files[0].fp.getvalue().decode()
+    txt = [f for f in _all_files(send_mock) if f.filename.endswith(".txt")]
+    return txt[0].fp.getvalue().decode()
+
+
+def _http_error(status):
+    return discord.HTTPException(MagicMock(status=status), "nope")
 
 
 def _channel_with_attachments(*attachments_per_message):
@@ -903,19 +914,6 @@ async def test_delete_attaches_at_most_nine_images(configured):
     assert "shot9.png" in _transcript_text(log.send)
 
 
-async def test_delete_skips_an_image_larger_than_the_upload_limit(configured):
-    channel, log = _channel_with_attachments(
-        [_attachment("huge.png", b"D", size=FILESIZE_LIMIT + 1)]
-    )
-
-    await event_tickets.delete_event_ticket_channel(
-        channel, _member(1, STAFF_ROLE), _bot_with_opener()
-    )
-
-    assert _images_in(log.send) == []
-    assert "huge.png" in _transcript_text(log.send)
-
-
 async def test_delete_skips_an_unreadable_image_and_still_completes(configured):
     channel, log = _channel_with_attachments(
         [_attachment("gone.png", read_error=discord.NotFound(MagicMock(), "gone"))]
@@ -953,3 +951,145 @@ async def test_delete_scans_the_channel_history_once(configured):
     )
 
     channel.history.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# Delivery: the download must not be throttled by the upload limit, and the
+# upload must adapt to whatever Discord actually accepts.
+# ---------------------------------------------------------------------------
+
+IMAGE_BYTES = 2_500_000  # a battle-card screenshot, roughly
+
+
+def _nine_images_across_four_messages():
+    return _channel_with_attachments(
+        [_attachment("a.png", b"D", size=IMAGE_BYTES)],
+        [_attachment("b.png", b"D", size=IMAGE_BYTES)],
+        [_attachment(f"c{i}.png", b"D", size=IMAGE_BYTES) for i in range(3)],
+        [_attachment(f"d{i}.png", b"D", size=IMAGE_BYTES) for i in range(4)],
+    )
+
+
+async def test_all_nine_images_survive_a_small_guild_upload_limit(configured):
+    """The reported bug: 9 images over 4 messages, only 4 arrived.
+
+    A single shared budget seeded from guild.filesize_limit (10 MB) was
+    exhausted by the fourth 2.5 MB screenshot, and every later image then
+    failed the same check.
+    """
+    channel, log = _nine_images_across_four_messages()
+
+    await event_tickets.delete_event_ticket_channel(
+        channel, _member(1, STAFF_ROLE), _bot_with_opener()
+    )
+
+    assert len(_images_in(log.send)) == 9
+
+
+async def test_guild_filesize_limit_does_not_gate_downloads(configured):
+    # It is a stale local hint discord.py never enforces on send, so it must
+    # play no part in deciding what to collect.
+    channel, log = _nine_images_across_four_messages()
+    channel.guild.filesize_limit = 1
+
+    await event_tickets.delete_event_ticket_channel(
+        channel, _member(1, STAFF_ROLE), _bot_with_opener()
+    )
+
+    assert len(_images_in(log.send)) == 9
+
+
+async def test_transcript_is_one_message_when_discord_accepts_it(configured):
+    channel, log = _nine_images_across_four_messages()
+
+    await event_tickets.delete_event_ticket_channel(
+        channel, _member(1, STAFF_ROLE), _bot_with_opener()
+    )
+
+    assert log.send.await_count == 1
+
+
+async def test_delivery_splits_when_discord_rejects_the_payload(configured):
+    # Discord decides, not us: a 413 means split and retry, not drop.
+    channel, log = _nine_images_across_four_messages()
+    delivered = []
+    attempts = []
+
+    def reject_once(*args, **kwargs):
+        attempts.append(kwargs)
+        if len(attempts) == 1:
+            raise _http_error(413)
+        delivered.extend(kwargs.get("files", []))
+
+    log.send.side_effect = reject_once
+
+    await event_tickets.delete_event_ticket_channel(
+        channel, _member(1, STAFF_ROLE), _bot_with_opener()
+    )
+
+    assert len(attempts) == 3  # the rejected attempt, then two halves
+    images = [f for f in delivered if not f.filename.endswith(".txt")]
+    assert len(images) == 9
+
+
+async def test_a_file_discord_always_rejects_is_dropped_and_named(configured):
+    channel, log = _nine_images_across_four_messages()
+    log.send.side_effect = _http_error(413)
+
+    result = await event_tickets.delete_event_ticket_channel(
+        channel, _member(1, STAFF_ROLE), _bot_with_opener()
+    )
+
+    assert result is True
+    channel.delete.assert_awaited_once()
+
+
+async def test_a_non_413_error_is_not_retried(configured):
+    # Missing permissions must not turn into a retry storm.
+    channel, log = _nine_images_across_four_messages()
+    log.send.side_effect = _http_error(403)
+
+    result = await event_tickets.delete_event_ticket_channel(
+        channel, _member(1, STAFF_ROLE), _bot_with_opener()
+    )
+
+    assert result is True
+    assert log.send.await_count == 1
+    channel.delete.assert_awaited_once()
+
+
+async def test_the_transcript_txt_rides_in_the_first_message(configured):
+    channel, log = _nine_images_across_four_messages()
+    log.send.side_effect = [_http_error(413), None, None]
+
+    await event_tickets.delete_event_ticket_channel(
+        channel, _member(1, STAFF_ROLE), _bot_with_opener()
+    )
+
+    delivered = [c for c in log.send.await_args_list if c.kwargs.get("files")]
+    assert delivered[0].kwargs["files"][0].filename.endswith(".txt")
+
+
+async def test_no_message_exceeds_ten_attachments(configured):
+    channel, log = _nine_images_across_four_messages()
+
+    await event_tickets.delete_event_ticket_channel(
+        channel, _member(1, STAFF_ROLE), _bot_with_opener()
+    )
+
+    for call in log.send.await_args_list:
+        assert len(call.kwargs.get("files", [])) <= 10
+
+
+async def test_an_image_over_the_memory_cap_is_skipped(configured):
+    # A memory guard, deliberately unrelated to any Discord limit.
+    channel, log = _channel_with_attachments(
+        [_attachment("huge.png", b"D", size=event_tickets._MAX_IMAGE_BYTES + 1)]
+    )
+
+    await event_tickets.delete_event_ticket_channel(
+        channel, _member(1, STAFF_ROLE), _bot_with_opener()
+    )
+
+    assert _images_in(log.send) == []
+    assert "huge.png" in _transcript_text(log.send)

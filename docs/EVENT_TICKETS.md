@@ -73,8 +73,21 @@ An attachment is downloaded only if all of these hold:
 |------|-----|
 | Fewer than 9 images collected so far | Discord accepts 10 attachments per message; the `.txt` takes one slot |
 | Extension in `.png` / `.jpg` / `.jpeg` / `.webp` | Same list as `features/scam_detection.py`; `.gif` is excluded |
-| Fits the remaining byte budget, seeded from `guild.filesize_limit` | Discord caps the whole payload, and the limit varies with boost tier |
+| Under `_MAX_IMAGE_BYTES`, and the running total under `_MAX_TOTAL_IMAGE_BYTES` | Memory guards while downloading — deliberately **not** Discord upload limits |
 | `attachment.read()` succeeds | The file may already be gone |
+
+### Delivery adapts instead of predicting
+`guild.filesize_limit` is deliberately **not** used. It is a stale local constant
+discord.py never enforces on send, and Discord's real limit is variable — the live
+value is reported only on interactions, as `attachment_size_limit`. Using it as a
+download budget capped transcripts at four images regardless of the 9-image limit.
+
+So `_send_transcript()` attempts one message with everything, and splits only when
+Discord answers `413`, halving and retrying until each part is accepted. This is
+correct whether the limit is 10 MB or 20 MB, per file or per payload: if it all
+fits, it is one message; if not, Discord says so. Files are rebuilt from bytes on
+each attempt, since a `discord.File` wraps a single-use stream. A file rejected
+even on its own is dropped and logged. Any non-413 error is not retried.
 
 Anything skipped still has its filename and URL in the transcript text, under
 "Not attached (links above expire)", so nothing disappears without a trace. Image

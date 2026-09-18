@@ -38,6 +38,15 @@ _MAX_TRANSCRIPT_IMAGES = 9
 # Same list as features/scam_detection.py. Deliberately excludes .gif.
 _IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".webp")
 
+# Memory guards for the download, NOT Discord upload limits. Throttling the
+# download by an upload limit is what capped transcripts at four images.
+# Discord's real limit is variable and cannot be known from here:
+# guild.filesize_limit is a stale local hint discord.py never enforces on send,
+# and Discord reports the live value only on interactions. So these are set
+# generously and delivery adapts to a 413 instead of predicting one.
+_MAX_IMAGE_BYTES = 25 * 1024 * 1024
+_MAX_TOTAL_IMAGE_BYTES = 100 * 1024 * 1024
+
 
 def _event_staff_role_ids() -> set[int]:
     """Roles that may manage event tickets: event staff and admins.
@@ -203,8 +212,7 @@ async def _build_transcript(channel: discord.TextChannel) -> Transcript:
     ]
     images: list[tuple[str, bytes]] = []
     skipped: list[str] = []
-    # Discord caps the whole payload, not each file, so this is one shared budget.
-    budget = channel.guild.filesize_limit
+    remaining = _MAX_TOTAL_IMAGE_BYTES
 
     async for msg in channel.history(limit=None, oldest_first=True):
         ts = msg.created_at.strftime("%Y-%m-%d %H:%M")
@@ -221,7 +229,8 @@ async def _build_transcript(channel: discord.TextChannel) -> Transcript:
             if (
                 len(images) >= _MAX_TRANSCRIPT_IMAGES
                 or not _is_transcript_image(attachment)
-                or attachment.size > budget
+                or attachment.size > _MAX_IMAGE_BYTES
+                or attachment.size > remaining
             ):
                 skipped.append(attachment.filename)
                 continue
@@ -232,7 +241,7 @@ async def _build_transcript(channel: discord.TextChannel) -> Transcript:
                 continue
             # Prefixed so two "image.png" from different messages stay distinct.
             images.append((f"{len(images) + 1:02d}-{attachment.filename}", data))
-            budget -= attachment.size
+            remaining -= attachment.size
 
     if len(lines) <= 3:
         lines.append("No messages in this ticket.")
@@ -250,6 +259,37 @@ async def _build_transcript(channel: discord.TextChannel) -> Transcript:
 # ---------------------------------------------------------------------------
 # Lifecycle
 # ---------------------------------------------------------------------------
+
+
+async def _send_transcript(destination, content, payload) -> list[str]:
+    """Send the transcript files, splitting only when Discord refuses them.
+
+    Discord's attachment limit is variable and may apply per file or per
+    payload, so rather than predict it we attempt the send and let a 413 drive
+    the split. Files are rebuilt from bytes on every attempt: a discord.File
+    wraps a single-use stream and cannot be retried.
+
+    Returns the filenames Discord rejected even on their own.
+    """
+    try:
+        await destination.send(
+            content=content,
+            files=[
+                discord.File(io.BytesIO(data), filename=name) for name, data in payload
+            ],
+        )
+        return []
+    except discord.HTTPException as e:
+        if e.status != 413:
+            raise  # not a size problem; the caller's handler owns it
+
+    if len(payload) == 1:
+        return [payload[0][0]]
+
+    half = len(payload) // 2
+    dropped = await _send_transcript(destination, content, payload[:half])
+    # Follow-ups carry no content line; the first message already has it.
+    return dropped + await _send_transcript(destination, None, payload[half:])
 
 
 async def create_event_ticket_channel(interaction: discord.Interaction) -> None:
@@ -430,14 +470,9 @@ async def delete_event_ticket_channel(
     transcript_bytes = transcript.text.encode("utf-8")
     filename = f"{channel.name}_transcript.txt"
 
-    def transcript_files() -> list[discord.File]:
-        # Fresh File objects per send: each wraps a single-use stream.
-        files = [discord.File(io.BytesIO(transcript_bytes), filename=filename)]
-        files += [
-            discord.File(io.BytesIO(data), filename=name)
-            for name, data in transcript.images
-        ]
-        return files
+    # Kept as bytes, not discord.File: a File is single-use and the delivery
+    # below may have to retry with a smaller split.
+    payload = [(filename, transcript_bytes)] + transcript.images
 
     opener_id = _extract_opener_id(channel.topic)
     opener_display = "unknown"
@@ -451,13 +486,14 @@ async def delete_event_ticket_channel(
                 user = None
         if user is not None:
             try:
-                await user.send(
-                    content=(
-                        "Here is the transcript for your closed event ticket in "
-                        f"**{channel.guild.name}**."
-                    ),
-                    files=transcript_files(),
+                dropped = await _send_transcript(
+                    user,
+                    "Here is the transcript for your closed event ticket in "
+                    f"**{channel.guild.name}**.",
+                    payload,
                 )
+                if dropped:
+                    print(f"⚠️ Discord refused {dropped} in the opener's DM")
             except discord.HTTPException:
                 # DMs closed, or transcript too large. Never block deletion.
                 pass
@@ -470,13 +506,14 @@ async def delete_event_ticket_channel(
     )
     if isinstance(log_channel, discord.TextChannel):
         try:
-            await log_channel.send(
-                content=(
-                    f"📝 Transcript for event ticket **#{channel.name}** "
-                    f"deleted by **{actor.name}** (opener: {opener_display})."
-                ),
-                files=transcript_files(),
+            dropped = await _send_transcript(
+                log_channel,
+                f"📝 Transcript for event ticket **#{channel.name}** "
+                f"deleted by **{actor.name}** (opener: {opener_display}).",
+                payload,
             )
+            if dropped:
+                print(f"⚠️ Discord refused {dropped} in the transcript channel")
         except discord.HTTPException:
             # Missing permissions or oversized transcript must not block deletion.
             pass
