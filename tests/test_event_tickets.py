@@ -431,9 +431,7 @@ async def test_dm_and_log_transcripts_are_separate_file_objects(configured):
         channel, _member(1, STAFF_ROLE), _bot_with_opener(opener)
     )
 
-    assert (
-        _txt_file(opener.send).fp is not _txt_file(log.send).fp
-    )
+    assert _txt_file(opener.send).fp is not _txt_file(log.send).fp
 
 
 async def test_delete_completes_when_the_opener_has_left_the_server(configured):
