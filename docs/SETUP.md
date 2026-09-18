@@ -131,11 +131,16 @@ await bot.load_extension("features.tourney.tourney_reports")
 # Tourney system uses a setup function, not load_extension
 await start_tourney_system(bot)     # setup_tourney_commands + restore_tourney_panels
 
+await repost_privacy_policy(bot)       # Rewrites the policy channel
+await repost_event_ticket_panel(bot)   # Wipes and reposts the event panel
+
 # Always last
 await bot.tree.sync()
 ```
 
-`restore_tourney_panels()` must run after `setup_tourney_commands()`. `bot.tree.sync()` must always be last — syncing before all cogs are loaded will miss slash commands.
+`start_tourney_system()` sequences `setup_tourney_commands()` before
+`restore_tourney_panels()` internally. Both reposts run
+after the cogs, so the views they attach are already registered. `bot.tree.sync()` must always be last — syncing before all cogs are loaded will miss slash commands.
 
 **`on_ready` re-fires on every gateway reconnect, not just on startup.** Anything it
 calls has to be safe to run again. Cog loading handles this by swallowing
@@ -274,4 +279,5 @@ Tests use `pytest-asyncio`. Individual test files map 1:1 to feature files (e.g.
 | `Command Sync Error` | Slash commands sync failed | Usually a rate limit — wait and restart |
 | Buttons dead after restart | `restore_tourney_panels()` not called or views not re-registered | Ensure `restore_tourney_panels(bot)` runs in `on_ready` |
 | `CommandRegistrationError` on reconnect | Something in `on_ready` registers a command without being re-entrant | `on_ready` re-fires on every reconnect — guard the registration, see `setup_tourney_commands` |
+| Event panel missing after restart | Bot lacks Manage Messages in the panel channel, or `EVENT_TICKET_PANEL_CHANNEL_ID` is `0` | Grant Manage Messages and set the ID in both config branches |
 | `Tourney category is not configured correctly` | `TOURNEY_CATEGORY_ID` points to wrong channel type | Must be a Category, not a Text Channel |

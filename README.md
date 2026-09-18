@@ -52,6 +52,7 @@ Remaining7-Discord-Bot/
 │   ├── sticky.py                    # !sticky / !unsticky persistent channel messages
 │   ├── support_tickets.py           # General support tickets (issues, support, apps, partnership)
 │   ├── github_tickets.py           # AI-powered GitHub issue creation from tickets (Gemini)
+│   ├── event_tickets.py            # Private event answer-submission tickets
 │   ├── ticket_command_router.py     # Shared routing for tourney & support ticket commands
 │   ├── booster_shoutout.py          # Auto-opened booster shoutout tickets
 │   ├── message_mirror.py            # Moderator message link mirror via webhook
@@ -194,6 +195,15 @@ Every user always has **4 active quests** — one daily and one weekly per categ
 - Staff can close, reopen, and delete tickets with transcript generation.
 - Transcripts DM'd to the opener and archived in a log channel.
 
+### Event Tickets
+- `/event-ticket-panel` — post the event ticket panel (Event Staff or Admin).
+- The panel channel is cleared and reposted automatically on bot restart, so the panel always reflects the current wording.
+- Members click **Open Event Ticket** to get a private channel for their event submission.
+- Channels are named after the opener (`「❗」event-username`); **one open ticket per member**.
+- Event Staff and Admins can close, reopen, and delete tickets via `!close` / `!reopen` / `!delete`.
+- Closing renames the channel in place (`「❗」` → `「👍」`) and locks the opener to read-only — the channel is not moved.
+- Deleting saves a transcript to the event transcript channel and DMs a copy to the opener, re-uploading up to 25 images from the ticket so submissions survive the channel being deleted.
+
 ### GitHub Ticket Integration
 - AI-powered GitHub issue creation. One authorized staff member @mentions the bot with a description; Gemini classifies it as a bug, enhancement, or feature and fills in the matching template.
 - **Reply for context:** @mention the bot as a reply to another message and that message is folded in — its text, embed contents, attached `.txt`/`.log` files (copied in verbatim), attachment filenames, and a permanent link back to it. Turns an error post in the bot logs channel into a filed issue in one step.
@@ -319,13 +329,15 @@ The bot runs 24/7 on **RamNaym Cloud** (Nano plan, the lowest paid tier), deploy
 | **Plan specs** | 0.10 CPU · 256 MB RAM · 2 GB disk |
 | **Cost** | 4 EUR/year (≈ $4.55 USD as of now; paid $4.75) |
 
-**Current usage** (refresh if the plan or load changes materially):
+**Current usage** (last checked 2026-09-18; refresh if the plan or load changes materially):
 
 | Resource | Usage |
 |---|---|
-| vCPU load | 0.5% |
-| Memory | 126.6 / 256.0 MB |
-| Project storage | 2.1 MB / 2.00 GB |
+| vCPU load | 5.8% avg |
+| Memory | ~223 / 256.0 MB (typically ~87%) |
+| Project storage | 16 MB / 2.00 GB |
+
+Memory is the binding constraint — roughly 33 MB free — so anything that buffers in memory must be sized against that, not the 256 MB total.
 
 See [`docs/HOSTING.md`](docs/HOSTING.md) for the full hosting history and the reasoning behind the migration from the previous host.
 
