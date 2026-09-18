@@ -329,13 +329,15 @@ The bot runs 24/7 on **RamNaym Cloud** (Nano plan, the lowest paid tier), deploy
 | **Plan specs** | 0.10 CPU · 256 MB RAM · 2 GB disk |
 | **Cost** | 4 EUR/year (≈ $4.55 USD as of now; paid $4.75) |
 
-**Current usage** (refresh if the plan or load changes materially):
+**Current usage** (last checked 2026-09-18; refresh if the plan or load changes materially):
 
 | Resource | Usage |
 |---|---|
-| vCPU load | 0.5% |
-| Memory | 126.6 / 256.0 MB |
-| Project storage | 2.1 MB / 2.00 GB |
+| vCPU load | 5.8% avg |
+| Memory | ~223 / 256.0 MB (typically ~87%) |
+| Project storage | 16 MB / 2.00 GB |
+
+Memory is the binding constraint — roughly 33 MB free — so anything that buffers in memory must be sized against that, not the 256 MB total.
 
 See [`docs/HOSTING.md`](docs/HOSTING.md) for the full hosting history and the reasoning behind the migration from the previous host.
 

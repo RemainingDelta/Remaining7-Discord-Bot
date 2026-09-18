@@ -17,13 +17,15 @@ The bot runs 24/7 on **RamNaym Cloud** (Nano plan, the lowest paid tier), deploy
 
 ### Current usage
 
-Refresh these figures if the plan changes or load moves materially — they exist for capacity planning.
+Refresh these figures if the plan changes or load moves materially — they exist for capacity
+planning. **Last checked 2026-09-18**; date any future update, since a stale table here reads as
+reassurance rather than as an unknown.
 
 | Resource | Usage |
 |---|---|
-| vCPU load | 0.5% |
+| vCPU load | 5.8% avg |
 | Memory | ~223 / 256.0 MB (typically ~87%) |
-| Project storage | 2.1 MB / 2.00 GB |
+| Project storage | 16 MB / 2.00 GB |
 
 Memory is the binding constraint: the bot typically sits around **87%**, leaving roughly
 **33 MB** free. Anything that buffers in memory has to be bounded against that figure rather
