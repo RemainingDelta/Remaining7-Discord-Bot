@@ -271,15 +271,15 @@ def _batch_attachments(attachments) -> list[list[tuple[str, discord.Attachment]]
     unit. Count is Discord's own limit, reported as a 400 rather than the 413
     that drives size splitting, so it has to be respected up front.
 
-    The first batch is one slot short: the transcript .txt rides with it.
+    Every batch may hold the full ten. The transcript .txt is appended to the
+    last one during delivery, or sent alone if that batch is already full.
     """
     batches: list[list[tuple[str, discord.Attachment]]] = []
     current: list[tuple[str, discord.Attachment]] = []
     held = 0
     for name, attachment in attachments:
-        limit = _MAX_ATTACHMENTS_PER_MESSAGE - (1 if not batches else 0)
         too_big = held + attachment.size > _MAX_BATCH_BYTES
-        too_many = len(current) >= limit
+        too_many = len(current) >= _MAX_ATTACHMENTS_PER_MESSAGE
         if current and (too_big or too_many):
             batches.append(current)
             current, held = [], 0
@@ -297,19 +297,26 @@ async def _deliver_transcript(destinations, transcript_file, attachments) -> lis
     the next is read, so peak memory is _MAX_BATCH_BYTES rather than the size
     of the whole ticket. A destination that fails is skipped for that batch
     without abandoning the others.
+
+    Images go first and the transcript .txt closes the delivery: the images
+    are the submission, the .txt only summarises them.
     """
     dropped: list[str] = []
-    batches = _batch_attachments(attachments) or [[]]
+    batches = _batch_attachments(attachments)
+    # The .txt needs a slot of its own when the final batch is already full,
+    # or when there are no images at all.
+    if not batches or len(batches[-1]) >= _MAX_ATTACHMENTS_PER_MESSAGE:
+        batches.append([])
 
     for index, batch in enumerate(batches):
         payload: list[tuple[str, bytes]] = []
-        if index == 0:
-            payload.append(transcript_file)
         for name, attachment in batch:
             try:
                 payload.append((name, await attachment.read()))
             except (discord.HTTPException, discord.NotFound):
                 dropped.append(name)
+        if index == len(batches) - 1:
+            payload.append(transcript_file)
         if not payload:
             continue
 

@@ -398,7 +398,7 @@ async def test_delete_posts_the_transcript_to_the_log_channel(configured):
         is True
     )
 
-    sent = log.send.await_args.kwargs["files"][0]
+    sent = _txt_file(log.send)
     assert sent.filename == "「❗」event-alice_transcript.txt"
     assert b"my submission" in sent.fp.getvalue()
 
@@ -414,7 +414,7 @@ async def test_delete_dms_the_transcript_to_the_opener(configured):
         channel, _member(1, STAFF_ROLE), _bot_with_opener(opener)
     )
 
-    dm_file = opener.send.await_args.kwargs["files"][0]
+    dm_file = _txt_file(opener.send)
     assert b"my submission" in dm_file.fp.getvalue()
 
 
@@ -432,8 +432,7 @@ async def test_dm_and_log_transcripts_are_separate_file_objects(configured):
     )
 
     assert (
-        opener.send.await_args.kwargs["files"][0].fp
-        is not log.send.await_args.kwargs["files"][0].fp
+        _txt_file(opener.send).fp is not _txt_file(log.send).fp
     )
 
 
@@ -835,6 +834,11 @@ def _transcript_text(send_mock):
     return txt[0].fp.getvalue().decode()
 
 
+def _txt_file(send_mock):
+    """The transcript .txt, found by suffix so position changes do not matter."""
+    return [f for f in _all_files(send_mock) if f.filename.endswith(".txt")][0]
+
+
 def _http_error(status):
     return discord.HTTPException(MagicMock(status=status), "nope")
 
@@ -1062,16 +1066,16 @@ async def test_a_non_413_error_is_not_retried(configured):
     channel.delete.assert_awaited_once()
 
 
-async def test_the_transcript_txt_rides_in_the_first_message(configured):
+async def test_the_transcript_txt_rides_in_the_last_message(configured):
+    # The images are the submission; the .txt summarises them, so it closes.
     channel, log = _channel_with_n_images(9)
-    log.send.side_effect = [_http_error(413), None, None]
 
     await event_tickets.delete_event_ticket_channel(
         channel, _member(1, STAFF_ROLE), _bot_with_opener()
     )
 
     delivered = [c for c in log.send.await_args_list if c.kwargs.get("files")]
-    assert delivered[0].kwargs["files"][0].filename.endswith(".txt")
+    assert delivered[-1].kwargs["files"][-1].filename.endswith(".txt")
 
 
 async def test_no_message_exceeds_ten_attachments(configured):
@@ -1145,7 +1149,8 @@ async def test_only_the_first_chunk_carries_the_content_line(configured):
     contents = [c.kwargs.get("content") for c in log.send.await_args_list]
     assert contents[0] is not None
     assert all(content is None for content in contents[1:])
-    assert log.send.await_args_list[0].kwargs["files"][0].filename.endswith(".txt")
+    # The header opens the delivery; the .txt closes it.
+    assert not log.send.await_args_list[0].kwargs["files"][0].filename.endswith(".txt")
 
 
 async def test_count_chunking_and_size_splitting_compose(configured):
@@ -1297,3 +1302,48 @@ async def test_a_failed_dm_batch_does_not_stop_the_log_or_the_deletion(configure
     assert result is True
     assert len(_images_in(log.send)) == 9
     channel.delete.assert_awaited_once()
+
+
+# ---------------------------------------------------------------------------
+# Ordering: images are the submission, the .txt summarises them, so the
+# transcript closes the delivery rather than opening it.
+# ---------------------------------------------------------------------------
+
+
+async def test_the_txt_is_the_final_attachment_of_the_final_message(configured):
+    channel, log = _channel_with_screenshots(25)
+
+    await event_tickets.delete_event_ticket_channel(
+        channel, _member(1, STAFF_ROLE), _bot_with_opener()
+    )
+
+    files = _all_files(log.send)
+    assert files[-1].filename.endswith(".txt")
+    assert sum(f.filename.endswith(".txt") for f in files) == 1
+
+
+async def test_a_single_message_puts_images_before_the_txt(configured):
+    channel, log = _channel_with_n_images(3)
+
+    await event_tickets.delete_event_ticket_channel(
+        channel, _member(1, STAFF_ROLE), _bot_with_opener()
+    )
+
+    names = [f.filename for f in log.send.await_args.kwargs["files"]]
+    assert names[-1].endswith(".txt")
+    assert not names[0].endswith(".txt")
+
+
+async def test_a_full_final_batch_gives_the_txt_its_own_message(configured):
+    # Exactly 20 images fills two batches of ten, leaving no room for the .txt.
+    channel, log = _channel_with_n_images(20)
+
+    await event_tickets.delete_event_ticket_channel(
+        channel, _member(1, STAFF_ROLE), _bot_with_opener()
+    )
+
+    for call in log.send.await_args_list:
+        assert len(call.kwargs.get("files", [])) <= 10
+    last = log.send.await_args_list[-1].kwargs["files"]
+    assert len(last) == 1
+    assert last[0].filename.endswith(".txt")

@@ -87,7 +87,7 @@ Two independent ceilings apply, and Discord reports them differently:
 | Ceiling | How Discord says no | How delivery handles it |
 |---------|--------------------|-------------------------|
 | Peak memory on a 256 MB host | — | `_batch_attachments()` groups by bytes; each batch is downloaded, sent, then released before the next is read |
-| More than 10 attachments in a message | `400` | Known up front, so the same batching caps each group (the first reserves a slot for the `.txt`) |
+| More than 10 attachments in a message | `400` | Known up front, so the same batching caps each group; the `.txt` joins the last batch, or gets its own message when that batch is already full |
 | Too many bytes in a message | `413` | Not knowable up front, so `_send_one_message()` attempts the send and halves on rejection |
 
 The 413 path deliberately does not retry a `400`, which is why the count has to be
@@ -104,7 +104,12 @@ with the ticket and OOM the process, which is a SIGKILL: no handler runs, nothin
 `BOT_LOGS_CHANNEL_ID`, and it would look like `!delete` silently doing nothing.
 
 `_deliver_transcript()` therefore reads one batch, sends it to the log channel and the
-opener's DM, then drops it before reading the next. Peak memory is `_MAX_BATCH_BYTES`
+opener's DM, then drops it before reading the next.
+
+Images come first and the `.txt` closes the delivery, as the final attachment of the
+final message — the images are the submission, the transcript only summarises them. The
+header line (`📝 Transcript for event ticket …`) stays on the first message so the post
+has context from the top. Peak memory is `_MAX_BATCH_BYTES`
 regardless of how many images the ticket holds. At ~2.5 MB per screenshot a full 25-image
 ticket arrives in roughly nine messages; ordinary tickets stay at one.
 
