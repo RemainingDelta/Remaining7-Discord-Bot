@@ -112,6 +112,34 @@ async def load_features() -> list[str]:
     return failed
 
 
+# Panels are re-posted only when the process actually restarted: a reconnect
+# leaves the View objects alive, so their buttons still work and a repost would
+# only break the panel's pins and jump links (#548).
+_TOURNEY_PANELS_RESTORED = False
+
+
+async def start_tourney_system(bot) -> list[str]:
+    """Register the tourney commands and restore its panels. Returns failures.
+
+    Command registration is idempotent in setup_tourney_commands itself. The
+    restore is guarded here and only latched on success, so one that fails on a
+    network error is retried on the next reconnect.
+    """
+    global _TOURNEY_PANELS_RESTORED
+    try:
+        setup_tourney_commands(bot)
+        print("✅ Loaded Feature: Tournaments")
+        if not _TOURNEY_PANELS_RESTORED:
+            await restore_tourney_panels(bot)
+            _TOURNEY_PANELS_RESTORED = True
+    except Exception as e:
+        record_failure("Tournaments", "features.tourney.tourney_commands", e)
+        print(f"⚠️ Tourney Error: {e!r}")
+        traceback.print_exc()
+        return ["Tournaments"]
+    return []
+
+
 async def sync_commands(failed: list[str]) -> int | None:
     """Publish the command tree, but never let a partial load delete commands.
 
@@ -514,15 +542,7 @@ async def on_ready():
 
     # 3. Load Tourney System. Registers its own top-level commands, so a failure
     #    here also has to block a destructive sync.
-    try:
-        setup_tourney_commands(bot)
-        print("✅ Loaded Feature: Tournaments")
-        await restore_tourney_panels(bot)
-    except Exception as e:
-        failed.append("Tournaments")
-        record_failure("Tournaments", "features.tourney.tourney_commands", e)
-        print(f"⚠️ Tourney Error: {e!r}")
-        traceback.print_exc()
+    failed += await start_tourney_system(bot)
 
     # 4. Repost the privacy policy so the channel reflects the current wording
     try:
