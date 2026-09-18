@@ -31,9 +31,14 @@ from features.config import (
 # "「❗」event-" prefix.
 _MAX_USERNAME_LEN = 90
 
-# Discord accepts 10 attachments per message and the transcript .txt takes one
-# slot, so at most nine images ride along with it.
-_MAX_TRANSCRIPT_IMAGES = 9
+# A policy cap on how much of a ticket is worth preserving, not a Discord
+# limit. Collection is oldest-first, so a ticket above this keeps its earliest
+# images; the rest stay named and linked in the transcript text.
+_MAX_TRANSCRIPT_IMAGES = 25
+
+# This one is Discord's, and it is enforced with a 400 rather than the 413 that
+# drives size splitting -- so it has to be respected up front, by chunking.
+_MAX_ATTACHMENTS_PER_MESSAGE = 10
 
 # Same list as features/scam_detection.py. Deliberately excludes .gif.
 _IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".webp")
@@ -262,14 +267,32 @@ async def _build_transcript(channel: discord.TextChannel) -> Transcript:
 
 
 async def _send_transcript(destination, content, payload) -> list[str]:
-    """Send the transcript files, splitting only when Discord refuses them.
+    """Deliver the transcript, in as many messages as Discord requires.
 
-    Discord's attachment limit is variable and may apply per file or per
-    payload, so rather than predict it we attempt the send and let a 413 drive
-    the split. Files are rebuilt from bytes on every attempt: a discord.File
-    wraps a single-use stream and cannot be retried.
+    Two independent ceilings apply and Discord reports them differently: more
+    than ten attachments is a 400, too many bytes is a 413. The count is known
+    up front so it is chunked here; the size is not, so it is left to
+    _send_one_message to discover.
 
     Returns the filenames Discord rejected even on their own.
+    """
+    dropped: list[str] = []
+    for start in range(0, len(payload), _MAX_ATTACHMENTS_PER_MESSAGE):
+        chunk = payload[start : start + _MAX_ATTACHMENTS_PER_MESSAGE]
+        # Only the first message carries the content line.
+        dropped += await _send_one_message(
+            destination, content if start == 0 else None, chunk
+        )
+    return dropped
+
+
+async def _send_one_message(destination, content, payload) -> list[str]:
+    """Send one message's worth of files, splitting only if Discord refuses.
+
+    The byte limit is variable and may apply per file or per payload, so rather
+    than predict it we attempt the send and let a 413 drive the split. Files are
+    rebuilt from bytes on every attempt: a discord.File wraps a single-use
+    stream and cannot be retried.
     """
     try:
         await destination.send(
@@ -287,9 +310,9 @@ async def _send_transcript(destination, content, payload) -> list[str]:
         return [payload[0][0]]
 
     half = len(payload) // 2
-    dropped = await _send_transcript(destination, content, payload[:half])
+    dropped = await _send_one_message(destination, content, payload[:half])
     # Follow-ups carry no content line; the first message already has it.
-    return dropped + await _send_transcript(destination, None, payload[half:])
+    return dropped + await _send_one_message(destination, None, payload[half:])
 
 
 async def create_event_ticket_channel(interaction: discord.Interaction) -> None:

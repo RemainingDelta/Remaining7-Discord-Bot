@@ -900,18 +900,19 @@ async def test_delete_does_not_reupload_non_images(configured):
     assert "notes.pdf" in _transcript_text(log.send)
 
 
-async def test_delete_attaches_at_most_nine_images(configured):
-    # Discord allows 10 attachments per message and the .txt takes one slot.
+async def test_delete_attaches_at_most_the_image_cap(configured):
+    # A policy cap, not a Discord one. Collection is oldest-first, so the last
+    # image posted is the one dropped.
     channel, log = _channel_with_attachments(
-        *[[_attachment(f"shot{i}.png", b"D")] for i in range(10)]
+        *[[_attachment(f"shot{i:02d}.png", b"D")] for i in range(26)]
     )
 
     await event_tickets.delete_event_ticket_channel(
         channel, _member(1, STAFF_ROLE), _bot_with_opener()
     )
 
-    assert len(_images_in(log.send)) == 9
-    assert "shot9.png" in _transcript_text(log.send)
+    assert len(_images_in(log.send)) == 25
+    assert "shot25.png" in _transcript_text(log.send)
 
 
 async def test_delete_skips_an_unreadable_image_and_still_completes(configured):
@@ -1093,3 +1094,87 @@ async def test_an_image_over_the_memory_cap_is_skipped(configured):
 
     assert _images_in(log.send) == []
     assert "huge.png" in _transcript_text(log.send)
+
+
+# ---------------------------------------------------------------------------
+# Count chunking: Discord refuses more than 10 attachments per message with a
+# 400, which the 413 splitter deliberately does not retry. Without chunking a
+# cap above 9 would lose the whole transcript.
+# ---------------------------------------------------------------------------
+
+
+def _channel_with_n_images(count):
+    return _channel_with_attachments(
+        *[[_attachment(f"shot{i:02d}.png", b"D")] for i in range(count)]
+    )
+
+
+async def test_every_image_up_to_the_cap_is_delivered(configured):
+    channel, log = _channel_with_n_images(25)
+
+    await event_tickets.delete_event_ticket_channel(
+        channel, _member(1, STAFF_ROLE), _bot_with_opener()
+    )
+
+    assert len(_images_in(log.send)) == 25
+    assert log.send.await_count == 3  # 26 files chunked 10 / 10 / 6
+
+
+async def test_no_send_is_given_more_than_ten_files(configured):
+    # The 400 guard. This is the reason the cap could not simply be raised.
+    channel, log = _channel_with_n_images(25)
+
+    await event_tickets.delete_event_ticket_channel(
+        channel, _member(1, STAFF_ROLE), _bot_with_opener()
+    )
+
+    for call in log.send.await_args_list:
+        assert len(call.kwargs.get("files", [])) <= 10
+
+
+async def test_only_the_first_chunk_carries_the_content_line(configured):
+    channel, log = _channel_with_n_images(25)
+
+    await event_tickets.delete_event_ticket_channel(
+        channel, _member(1, STAFF_ROLE), _bot_with_opener()
+    )
+
+    contents = [c.kwargs.get("content") for c in log.send.await_args_list]
+    assert contents[0] is not None
+    assert all(content is None for content in contents[1:])
+    assert log.send.await_args_list[0].kwargs["files"][0].filename.endswith(".txt")
+
+
+async def test_count_chunking_and_size_splitting_compose(configured):
+    # A chunk rejected for size still splits, and nothing is lost.
+    channel, log = _channel_with_n_images(25)
+    delivered = []
+    attempts = []
+
+    def reject_first(*args, **kwargs):
+        attempts.append(kwargs)
+        if len(attempts) == 1:
+            raise _http_error(413)
+        delivered.extend(kwargs.get("files", []))
+
+    log.send.side_effect = reject_first
+
+    await event_tickets.delete_event_ticket_channel(
+        channel, _member(1, STAFF_ROLE), _bot_with_opener()
+    )
+
+    images = [f for f in delivered if not f.filename.endswith(".txt")]
+    assert len(images) == 25
+
+
+async def test_a_non_413_error_inside_a_chunk_is_not_retried(configured):
+    channel, log = _channel_with_n_images(25)
+    log.send.side_effect = _http_error(403)
+
+    result = await event_tickets.delete_event_ticket_channel(
+        channel, _member(1, STAFF_ROLE), _bot_with_opener()
+    )
+
+    assert result is True
+    assert log.send.await_count == 1
+    channel.delete.assert_awaited_once()

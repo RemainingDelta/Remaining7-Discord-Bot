@@ -54,7 +54,7 @@ Reopening restores the opener's send permission and flips the prefix back.
 ## Deleting (with transcript)
 `!delete`/`!del` or the **Delete Ticket** button:
 1. Builds the transcript in a single pass over the channel history: the plain-text
-   log, plus the bytes of up to **9 images** posted in the ticket.
+   log, plus the bytes of up to **25 images** posted in the ticket.
 2. DMs the transcript and its images to the opener (skipped silently if their DMs
    are closed).
 3. Posts the same set to `EVENT_TICKET_TRANSCRIPT_CHANNEL_ID` (when configured).
@@ -71,7 +71,7 @@ An attachment is downloaded only if all of these hold:
 
 | Rule | Why |
 |------|-----|
-| Fewer than 9 images collected so far | Discord accepts 10 attachments per message; the `.txt` takes one slot |
+| Fewer than 25 images collected so far | A policy cap on how much of a ticket is worth keeping — collection is oldest-first, so a busier ticket keeps its earliest images |
 | Extension in `.png` / `.jpg` / `.jpeg` / `.webp` | Same list as `features/scam_detection.py`; `.gif` is excluded |
 | Under `_MAX_IMAGE_BYTES`, and the running total under `_MAX_TOTAL_IMAGE_BYTES` | Memory guards while downloading — deliberately **not** Discord upload limits |
 | `attachment.read()` succeeds | The file may already be gone |
@@ -82,7 +82,18 @@ discord.py never enforces on send, and Discord's real limit is variable — the 
 value is reported only on interactions, as `attachment_size_limit`. Using it as a
 download budget capped transcripts at four images regardless of the 9-image limit.
 
-So `_send_transcript()` attempts one message with everything, and splits only when
+Two independent ceilings apply, and Discord reports them differently:
+
+| Ceiling | How Discord says no | How delivery handles it |
+|---------|--------------------|-------------------------|
+| More than 10 attachments in a message | `400` | Known up front, so `_send_transcript()` chunks the payload by count before sending |
+| Too many bytes in a message | `413` | Not knowable up front, so `_send_one_message()` attempts the send and halves on rejection |
+
+The 413 path deliberately does not retry a `400`, which is why the count has to be
+respected in advance rather than discovered: an over-long message would otherwise
+be swallowed and lose the transcript entirely.
+
+So `_send_one_message()` attempts one chunk with everything, and splits only when
 Discord answers `413`, halving and retrying until each part is accepted. This is
 correct whether the limit is 10 MB or 20 MB, per file or per payload: if it all
 fits, it is one message; if not, Discord says so. Files are rebuilt from bytes on

@@ -202,7 +202,7 @@ Every user always has **4 active quests** — one daily and one weekly per categ
 - Channels are named after the opener (`「❗」event-username`); **one open ticket per member**.
 - Event Staff and Admins can close, reopen, and delete tickets via `!close` / `!reopen` / `!delete`.
 - Closing renames the channel in place (`「❗」` → `「👍」`) and locks the opener to read-only — the channel is not moved.
-- Deleting saves a transcript to the event transcript channel and DMs a copy to the opener, re-uploading up to 9 images from the ticket so submissions survive the channel being deleted.
+- Deleting saves a transcript to the event transcript channel and DMs a copy to the opener, re-uploading up to 25 images from the ticket so submissions survive the channel being deleted.
 
 ### GitHub Ticket Integration
 - AI-powered GitHub issue creation. One authorized staff member @mentions the bot with a description; Gemini classifies it as a bug, enhancement, or feature and fills in the matching template.
