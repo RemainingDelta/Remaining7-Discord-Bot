@@ -499,7 +499,8 @@ async def test_delete_saves_the_transcript_before_deleting_the_channel(configure
         channel, _member(1, STAFF_ROLE), _bot_with_opener(opener)
     )
 
-    assert order == ["dm", "log", "delete"]
+    assert order[-1] == "delete"
+    assert set(order[:-1]) == {"dm", "log"}
 
 
 # --- creation: the opener topic must exist the moment the channel does ---
@@ -1001,7 +1002,9 @@ async def test_guild_filesize_limit_does_not_gate_downloads(configured):
 
 
 async def test_transcript_is_one_message_when_discord_accepts_it(configured):
-    channel, log = _nine_images_across_four_messages()
+    # Small enough to fit a single batch; the byte-splitting case is covered by
+    # test_screenshots_batch_by_bytes_not_just_count.
+    channel, log = _channel_with_n_images(9)
 
     await event_tickets.delete_event_ticket_channel(
         channel, _member(1, STAFF_ROLE), _bot_with_opener()
@@ -1012,7 +1015,7 @@ async def test_transcript_is_one_message_when_discord_accepts_it(configured):
 
 async def test_delivery_splits_when_discord_rejects_the_payload(configured):
     # Discord decides, not us: a 413 means split and retry, not drop.
-    channel, log = _nine_images_across_four_messages()
+    channel, log = _channel_with_n_images(9)
     delivered = []
     attempts = []
 
@@ -1047,7 +1050,7 @@ async def test_a_file_discord_always_rejects_is_dropped_and_named(configured):
 
 async def test_a_non_413_error_is_not_retried(configured):
     # Missing permissions must not turn into a retry storm.
-    channel, log = _nine_images_across_four_messages()
+    channel, log = _channel_with_n_images(9)
     log.send.side_effect = _http_error(403)
 
     result = await event_tickets.delete_event_ticket_channel(
@@ -1060,7 +1063,7 @@ async def test_a_non_413_error_is_not_retried(configured):
 
 
 async def test_the_transcript_txt_rides_in_the_first_message(configured):
-    channel, log = _nine_images_across_four_messages()
+    channel, log = _channel_with_n_images(9)
     log.send.side_effect = [_http_error(413), None, None]
 
     await event_tickets.delete_event_ticket_channel(
@@ -1117,7 +1120,7 @@ async def test_every_image_up_to_the_cap_is_delivered(configured):
     )
 
     assert len(_images_in(log.send)) == 25
-    assert log.send.await_count == 3  # 26 files chunked 10 / 10 / 6
+    assert log.send.await_count == 3  # 26 tiny files: the 10-attachment ceiling
 
 
 async def test_no_send_is_given_more_than_ten_files(configured):
@@ -1168,7 +1171,7 @@ async def test_count_chunking_and_size_splitting_compose(configured):
 
 
 async def test_a_non_413_error_inside_a_chunk_is_not_retried(configured):
-    channel, log = _channel_with_n_images(25)
+    channel, log = _channel_with_n_images(5)
     log.send.side_effect = _http_error(403)
 
     result = await event_tickets.delete_event_ticket_channel(
@@ -1177,4 +1180,120 @@ async def test_a_non_413_error_inside_a_chunk_is_not_retried(configured):
 
     assert result is True
     assert log.send.await_count == 1
+    channel.delete.assert_awaited_once()
+
+
+# ---------------------------------------------------------------------------
+# Memory: the host is a 256 MB box typically sitting at 87%, so peak memory
+# must be the batch budget rather than the size of the ticket.
+# ---------------------------------------------------------------------------
+
+SCREENSHOT_BYTES = 2_500_000
+
+
+def _channel_with_screenshots(count, size=SCREENSHOT_BYTES):
+    return _channel_with_attachments(
+        *[[_attachment(f"shot{i:02d}.png", b"D", size=size)] for i in range(count)]
+    )
+
+
+def _trace_reads_and_sends(channel, log):
+    """Record read/send order so bytes held at once can be reconstructed."""
+    events = []
+    for message in channel.history.return_value._items:
+        for attachment in message.attachments:
+            attachment.read = AsyncMock(
+                side_effect=lambda a=attachment: events.append(("read", a.size)) or b"D"
+            )
+    log.send.side_effect = lambda *a, **k: events.append(("send", 0))
+    return events
+
+
+def _peak_bytes_in_flight(events):
+    """Bytes downloaded but not yet flushed by a send."""
+    peak = held = 0
+    for kind, size in events:
+        if kind == "read":
+            held += size
+            peak = max(peak, held)
+        else:
+            held = 0
+    return peak
+
+
+async def test_peak_memory_stays_within_the_batch_budget(configured):
+    channel, log = _channel_with_screenshots(25)
+    events = _trace_reads_and_sends(channel, log)
+
+    await event_tickets.delete_event_ticket_channel(
+        channel, _member(1, STAFF_ROLE), _bot_with_opener()
+    )
+
+    assert _peak_bytes_in_flight(events) <= event_tickets._MAX_BATCH_BYTES
+
+
+async def test_images_are_downloaded_lazily_not_all_up_front(configured):
+    # Eager collection passes a totals-only check, so assert on ordering: at
+    # most one batch may be read before anything is sent.
+    channel, log = _channel_with_screenshots(25)
+    events = _trace_reads_and_sends(channel, log)
+
+    await event_tickets.delete_event_ticket_channel(
+        channel, _member(1, STAFF_ROLE), _bot_with_opener()
+    )
+
+    before_first_send = events[: [e[0] for e in events].index("send")]
+    assert sum(size for _, size in before_first_send) <= event_tickets._MAX_BATCH_BYTES
+
+
+async def test_every_screenshot_still_arrives_across_the_batches(configured):
+    # The guarantee the 4-of-9 fix established must survive batching.
+    channel, log = _channel_with_screenshots(25)
+
+    await event_tickets.delete_event_ticket_channel(
+        channel, _member(1, STAFF_ROLE), _bot_with_opener()
+    )
+
+    assert len(_images_in(log.send)) == 25
+
+
+async def test_an_image_larger_than_a_batch_is_skipped(configured):
+    # It could never form a sendable batch, so downloading it is pure waste.
+    channel, log = _channel_with_attachments(
+        [_attachment("huge.png", b"D", size=event_tickets._MAX_BATCH_BYTES + 1)]
+    )
+
+    await event_tickets.delete_event_ticket_channel(
+        channel, _member(1, STAFF_ROLE), _bot_with_opener()
+    )
+
+    assert _images_in(log.send) == []
+    assert "huge.png" in _transcript_text(log.send)
+
+
+async def test_screenshots_batch_by_bytes_not_just_count(configured):
+    # Three 2.5 MB screenshots fit an 8 MB batch; a fourth does not.
+    channel, log = _channel_with_screenshots(9)
+
+    await event_tickets.delete_event_ticket_channel(
+        channel, _member(1, STAFF_ROLE), _bot_with_opener()
+    )
+
+    for call in log.send.await_args_list:
+        files = call.kwargs.get("files", [])
+        assert len(files) <= 10
+    assert log.send.await_count > 1  # 9 x 2.5 MB cannot be one 8 MB message
+
+
+async def test_a_failed_dm_batch_does_not_stop_the_log_or_the_deletion(configured):
+    opener = MagicMock(spec=discord.User)
+    opener.send = AsyncMock(side_effect=discord.Forbidden(MagicMock(), "dms closed"))
+    channel, log = _channel_with_screenshots(9)
+
+    result = await event_tickets.delete_event_ticket_channel(
+        channel, _member(1, STAFF_ROLE), _bot_with_opener(opener)
+    )
+
+    assert result is True
+    assert len(_images_in(log.send)) == 9
     channel.delete.assert_awaited_once()

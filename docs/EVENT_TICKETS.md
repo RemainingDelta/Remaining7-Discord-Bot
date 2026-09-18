@@ -73,7 +73,7 @@ An attachment is downloaded only if all of these hold:
 |------|-----|
 | Fewer than 25 images collected so far | A policy cap on how much of a ticket is worth keeping — collection is oldest-first, so a busier ticket keeps its earliest images |
 | Extension in `.png` / `.jpg` / `.jpeg` / `.webp` | Same list as `features/scam_detection.py`; `.gif` is excluded |
-| Under `_MAX_IMAGE_BYTES`, and the running total under `_MAX_TOTAL_IMAGE_BYTES` | Memory guards while downloading — deliberately **not** Discord upload limits |
+| No larger than `_MAX_BATCH_BYTES` (8 MB) | A file bigger than one batch could never be sent, so downloading it would be waste |
 | `attachment.read()` succeeds | The file may already be gone |
 
 ### Delivery adapts instead of predicting
@@ -86,15 +86,34 @@ Two independent ceilings apply, and Discord reports them differently:
 
 | Ceiling | How Discord says no | How delivery handles it |
 |---------|--------------------|-------------------------|
-| More than 10 attachments in a message | `400` | Known up front, so `_send_transcript()` chunks the payload by count before sending |
+| Peak memory on a 256 MB host | — | `_batch_attachments()` groups by bytes; each batch is downloaded, sent, then released before the next is read |
+| More than 10 attachments in a message | `400` | Known up front, so the same batching caps each group (the first reserves a slot for the `.txt`) |
 | Too many bytes in a message | `413` | Not knowable up front, so `_send_one_message()` attempts the send and halves on rejection |
 
 The 413 path deliberately does not retry a `400`, which is why the count has to be
 respected in advance rather than discovered: an over-long message would otherwise
 be swallowed and lose the transcript entirely.
 
-So `_send_one_message()` attempts one chunk with everything, and splits only when
-Discord answers `413`, halving and retrying until each part is accepted. This is
+So `_send_one_message()` attempts one batch with everything, and splits only when
+Discord answers `413`, halving and retrying until each part is accepted.
+
+### Memory, and why images stream
+The bot runs on a 256 MB host that typically sits near 87%, leaving roughly 33 MB free
+(`docs/HOSTING.md`). Holding a whole ticket's images before sending would scale peak memory
+with the ticket and OOM the process, which is a SIGKILL: no handler runs, nothing reaches
+`BOT_LOGS_CHANNEL_ID`, and it would look like `!delete` silently doing nothing.
+
+`_deliver_transcript()` therefore reads one batch, sends it to the log channel and the
+opener's DM, then drops it before reading the next. Peak memory is `_MAX_BATCH_BYTES`
+regardless of how many images the ticket holds. At ~2.5 MB per screenshot a full 25-image
+ticket arrives in roughly nine messages; ordinary tickets stay at one.
+
+### If the bot restarts mid-delete
+`channel.delete()` runs **last**, after every send, so a crash at any earlier point loses
+nothing: the ticket channel, its messages and its images all survive and staff can re-run
+`!delete`. There is no resumption — a crash between the sends and the deletion means the
+retry posts a second transcript. That duplicate is the accepted cost of never deleting a
+channel whose transcript failed to save. This is
 correct whether the limit is 10 MB or 20 MB, per file or per payload: if it all
 fits, it is one message; if not, Discord says so. Files are rebuilt from bytes on
 each attempt, since a `discord.File` wraps a single-use stream. A file rejected

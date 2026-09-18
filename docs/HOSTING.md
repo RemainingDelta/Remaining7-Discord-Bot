@@ -22,10 +22,14 @@ Refresh these figures if the plan changes or load moves materially — they exis
 | Resource | Usage |
 |---|---|
 | vCPU load | 0.5% |
-| Memory | 126.6 / 256.0 MB |
+| Memory | ~223 / 256.0 MB (typically ~87%) |
 | Project storage | 2.1 MB / 2.00 GB |
 
-At current load the Nano plan has comfortable headroom (memory is the tightest resource at roughly 50% used).
+Memory is the binding constraint: the bot typically sits around **87%**, leaving roughly
+**33 MB** free. Anything that buffers in memory has to be bounded against that figure rather
+than against the 256 MB total — the event-ticket transcript downloads images in 8 MB batches
+for exactly this reason (`docs/EVENT_TICKETS.md`). An OOM here is a SIGKILL, so it reports
+nowhere: no handler runs and nothing reaches `BOT_LOGS_CHANNEL_ID`.
 
 ---
 
