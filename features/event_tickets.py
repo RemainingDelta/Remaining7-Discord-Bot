@@ -191,6 +191,21 @@ async def _try_rename_channel(
         return False
 
 
+# One attachment chosen for the transcript, with the prefixed filename it will
+# be uploaded under. Bytes are not read until delivery.
+SelectedImage = tuple[str, discord.Attachment]
+
+# A file ready to upload: filename and its bytes.
+TranscriptFile = tuple[str, bytes]
+
+
+class Destination(NamedTuple):
+    """Somewhere a transcript is sent, and the line that introduces it."""
+
+    target: discord.abc.Messageable
+    content: str
+
+
 class Transcript(NamedTuple):
     """A ticket's history, plus the images chosen to keep with it.
 
@@ -199,7 +214,7 @@ class Transcript(NamedTuple):
     """
 
     text: str
-    attachments: list[tuple[str, discord.Attachment]]
+    attachments: list[SelectedImage]
 
 
 def _is_transcript_image(attachment: discord.Attachment) -> bool:
@@ -221,7 +236,7 @@ async def _build_transcript(channel: discord.TextChannel) -> Transcript:
         f"Opener ID: {opener_id or 'Unknown'}",
         "",
     ]
-    chosen: list[tuple[str, discord.Attachment]] = []
+    chosen: list[SelectedImage] = []
     skipped: list[str] = []
 
     async for msg in channel.history(limit=None, oldest_first=True):
@@ -264,7 +279,7 @@ async def _build_transcript(channel: discord.TextChannel) -> Transcript:
 # ---------------------------------------------------------------------------
 
 
-def _batch_attachments(attachments) -> list[list[tuple[str, discord.Attachment]]]:
+def _batch_attachments(attachments: list[SelectedImage]) -> list[list[SelectedImage]]:
     """Group attachments so each message stays within both ceilings.
 
     Bytes bound peak memory, since a batch is downloaded and released as a
@@ -274,8 +289,8 @@ def _batch_attachments(attachments) -> list[list[tuple[str, discord.Attachment]]
     Every batch may hold the full ten. The transcript .txt is appended to the
     last one during delivery, or sent alone if that batch is already full.
     """
-    batches: list[list[tuple[str, discord.Attachment]]] = []
-    current: list[tuple[str, discord.Attachment]] = []
+    batches: list[list[SelectedImage]] = []
+    current: list[SelectedImage] = []
     held = 0
     for name, attachment in attachments:
         too_big = held + attachment.size > _MAX_BATCH_BYTES
@@ -290,7 +305,11 @@ def _batch_attachments(attachments) -> list[list[tuple[str, discord.Attachment]]
     return batches
 
 
-async def _deliver_transcript(destinations, transcript_file, attachments) -> list[str]:
+async def _deliver_transcript(
+    destinations: list[Destination],
+    transcript_file: TranscriptFile,
+    attachments: list[SelectedImage],
+) -> list[str]:
     """Send the transcript and its images, one batch of bytes at a time.
 
     Each batch is downloaded, sent to every destination, then dropped before
@@ -309,7 +328,7 @@ async def _deliver_transcript(destinations, transcript_file, attachments) -> lis
         batches.append([])
 
     for index, batch in enumerate(batches):
-        payload: list[tuple[str, bytes]] = []
+        payload: list[TranscriptFile] = []
         for name, attachment in batch:
             try:
                 payload.append((name, await attachment.read()))
@@ -320,20 +339,24 @@ async def _deliver_transcript(destinations, transcript_file, attachments) -> lis
         if not payload:
             continue
 
-        for destination, content in destinations:
+        for destination in destinations:
             try:
                 dropped += await _send_one_message(
-                    destination, content if index == 0 else None, payload
+                    destination.target,
+                    destination.content if index == 0 else None,
+                    payload,
                 )
             except discord.HTTPException:
                 # DMs closed, missing permissions: never block the rest.
                 pass
-        # Release this batch's bytes before reading the next.
-        del payload
     return dropped
 
 
-async def _send_one_message(destination, content, payload) -> list[str]:
+async def _send_one_message(
+    destination: discord.abc.Messageable,
+    content: str | None,
+    payload: list[TranscriptFile],
+) -> list[str]:
     """Send one message's worth of files, splitting only if Discord refuses.
 
     The byte limit is variable and may apply per file or per payload, so rather
@@ -563,10 +586,10 @@ async def delete_event_ticket_channel(
 
     # Both destinations share one download pass: each batch is read once, sent
     # everywhere, then released.
-    destinations = []
+    destinations: list[Destination] = []
     if isinstance(log_channel, discord.TextChannel):
         destinations.append(
-            (
+            Destination(
                 log_channel,
                 f"📝 Transcript for event ticket **#{channel.name}** "
                 f"deleted by **{actor.name}** (opener: {opener_display}).",
@@ -574,7 +597,7 @@ async def delete_event_ticket_channel(
         )
     if user is not None:
         destinations.append(
-            (
+            Destination(
                 user,
                 "Here is the transcript for your closed event ticket in "
                 f"**{channel.guild.name}**.",
@@ -659,9 +682,52 @@ class EventTicketPanelView(discord.ui.View):
         await create_event_ticket_channel(interaction)
 
 
+async def _respond(interaction: discord.Interaction, text: str) -> None:
+    """Reply to a button press, whether or not the interaction was deferred.
+
+    Once defer() has succeeded the only usable channel is the followup; before
+    that it is the initial response. Either can 404 on an expired interaction,
+    which is not worth reporting to anyone.
+    """
+    send = (
+        interaction.followup.send
+        if interaction.response.is_done()
+        else interaction.response.send_message
+    )
+    try:
+        await send(text, ephemeral=True)
+    except discord.NotFound:
+        pass
+
+
 class EventClosedTicketView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
+
+    async def _run(self, interaction: discord.Interaction, action, success: str | None):
+        """Shared body of both buttons: guard, defer, act, report.
+
+        `success` is None for delete: the channel is gone by then, so any
+        followup would 404 and its disappearance is the confirmation.
+        """
+        if not isinstance(interaction.user, discord.Member):
+            await _respond(interaction, "Only server members can use this.")
+            return
+        if not isinstance(interaction.channel, discord.TextChannel):
+            await _respond(interaction, "This only works in event ticket channels.")
+            return
+
+        try:
+            await interaction.response.defer(ephemeral=True)
+        except discord.NotFound:
+            pass
+
+        if not await action(interaction):
+            await _respond(
+                interaction, "This button can only be used in event tickets by staff."
+            )
+        elif success is not None:
+            await _respond(interaction, success)
 
     @discord.ui.button(
         label="Delete Ticket",
@@ -671,43 +737,11 @@ class EventClosedTicketView(discord.ui.View):
     async def delete_ticket_button(
         self, interaction: discord.Interaction, button: discord.ui.Button
     ):
-        if not isinstance(interaction.user, discord.Member):
-            await interaction.response.send_message(
-                "Only server members can use this.", ephemeral=True
-            )
-            return
-        if not isinstance(interaction.channel, discord.TextChannel):
-            await interaction.response.send_message(
-                "This only works in event ticket channels.", ephemeral=True
-            )
-            return
-
-        deferred = False
-        try:
-            await interaction.response.defer(ephemeral=True)
-            deferred = True
-        except discord.NotFound:
-            deferred = False
-
-        ok = await delete_event_ticket_channel(
-            interaction.channel, interaction.user, interaction.client
+        await self._run(
+            interaction,
+            lambda i: delete_event_ticket_channel(i.channel, i.user, i.client),
+            success=None,
         )
-        if ok:
-            # Channel is gone; any followup would 404. Its disappearance is confirmation.
-            return
-        try:
-            if deferred or interaction.response.is_done():
-                await interaction.followup.send(
-                    "This button can only be used in event tickets by staff.",
-                    ephemeral=True,
-                )
-            else:
-                await interaction.response.send_message(
-                    "This button can only be used in event tickets by staff.",
-                    ephemeral=True,
-                )
-        except discord.NotFound:
-            pass
 
     @discord.ui.button(
         label="Reopen Ticket",
@@ -717,49 +751,11 @@ class EventClosedTicketView(discord.ui.View):
     async def reopen_ticket_button(
         self, interaction: discord.Interaction, button: discord.ui.Button
     ):
-        if not isinstance(interaction.user, discord.Member):
-            await interaction.response.send_message(
-                "Only server members can use this.", ephemeral=True
-            )
-            return
-        if not isinstance(interaction.channel, discord.TextChannel):
-            await interaction.response.send_message(
-                "This only works in event ticket channels.", ephemeral=True
-            )
-            return
-
-        deferred = False
-        try:
-            await interaction.response.defer(ephemeral=True)
-            deferred = True
-        except discord.NotFound:
-            deferred = False
-
-        ok = await reopen_event_ticket_channel(interaction.channel, interaction.user)
-        if not ok:
-            try:
-                if deferred or interaction.response.is_done():
-                    await interaction.followup.send(
-                        "This button can only be used in event tickets by staff.",
-                        ephemeral=True,
-                    )
-                else:
-                    await interaction.response.send_message(
-                        "This button can only be used in event tickets by staff.",
-                        ephemeral=True,
-                    )
-            except discord.NotFound:
-                pass
-            return
-        try:
-            if deferred or interaction.response.is_done():
-                await interaction.followup.send("Ticket reopened.", ephemeral=True)
-            else:
-                await interaction.response.send_message(
-                    "Ticket reopened.", ephemeral=True
-                )
-        except discord.NotFound:
-            pass
+        await self._run(
+            interaction,
+            lambda i: reopen_event_ticket_channel(i.channel, i.user),
+            success="Ticket reopened.",
+        )
 
 
 # ---------------------------------------------------------------------------

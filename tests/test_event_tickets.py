@@ -1345,3 +1345,144 @@ async def test_a_full_final_batch_gives_the_txt_its_own_message(configured):
     last = log.send.await_args_list[-1].kwargs["files"]
     assert len(last) == 1
     assert last[0].filename.endswith(".txt")
+
+
+# ---------------------------------------------------------------------------
+# Closed-ticket buttons. Characterization first: these pin the behaviour the
+# handlers have today so the duplication in them can be collapsed safely.
+# ---------------------------------------------------------------------------
+
+DENIED = "This button can only be used in event tickets by staff."
+
+
+def _button_interaction(channel=None, user=None):
+    interaction = MagicMock(spec=discord.Interaction)
+    interaction.response = AsyncMock()
+    interaction.response.is_done = MagicMock(return_value=False)
+    interaction.followup = AsyncMock()
+    interaction.user = _member(1, STAFF_ROLE) if user is None else user
+    interaction.channel = (
+        MagicMock(spec=discord.TextChannel) if channel is None else channel
+    )
+    interaction.client = MagicMock(spec=commands.Bot)
+    return interaction
+
+
+async def _press(name, interaction):
+    view = event_tickets.EventClosedTicketView()
+    await getattr(event_tickets.EventClosedTicketView, name)(view, interaction, None)
+
+
+def _replies(interaction):
+    """Everything the handler said, whichever channel it used."""
+    return [
+        call.args[0] if call.args else call.kwargs.get("content")
+        for call in interaction.response.send_message.await_args_list
+        + interaction.followup.send.await_args_list
+    ]
+
+
+@pytest.mark.parametrize("name", ["delete_ticket_button", "reopen_ticket_button"])
+async def test_buttons_reject_a_non_member(configured, name):
+    interaction = _button_interaction(user=MagicMock(spec=discord.User))
+
+    await _press(name, interaction)
+
+    assert _replies(interaction) == ["Only server members can use this."]
+
+
+@pytest.mark.parametrize("name", ["delete_ticket_button", "reopen_ticket_button"])
+async def test_buttons_reject_a_non_text_channel(configured, name):
+    interaction = _button_interaction(channel=MagicMock(spec=discord.VoiceChannel))
+
+    await _press(name, interaction)
+
+    assert _replies(interaction) == ["This only works in event ticket channels."]
+
+
+async def test_delete_button_stays_silent_once_the_channel_is_gone(
+    configured, monkeypatch
+):
+    # Any followup would 404; the channel disappearing is the confirmation.
+    monkeypatch.setattr(
+        event_tickets, "delete_event_ticket_channel", AsyncMock(return_value=True)
+    )
+    interaction = _button_interaction()
+
+    await _press("delete_ticket_button", interaction)
+
+    assert _replies(interaction) == []
+
+
+async def test_delete_button_reports_when_it_is_not_allowed(configured, monkeypatch):
+    monkeypatch.setattr(
+        event_tickets, "delete_event_ticket_channel", AsyncMock(return_value=False)
+    )
+    interaction = _button_interaction()
+
+    await _press("delete_ticket_button", interaction)
+
+    assert _replies(interaction) == [DENIED]
+
+
+async def test_reopen_button_confirms_on_success(configured, monkeypatch):
+    monkeypatch.setattr(
+        event_tickets, "reopen_event_ticket_channel", AsyncMock(return_value=True)
+    )
+    interaction = _button_interaction()
+
+    await _press("reopen_ticket_button", interaction)
+
+    assert _replies(interaction) == ["Ticket reopened."]
+
+
+async def test_reopen_button_reports_when_it_is_not_allowed(configured, monkeypatch):
+    monkeypatch.setattr(
+        event_tickets, "reopen_event_ticket_channel", AsyncMock(return_value=False)
+    )
+    interaction = _button_interaction()
+
+    await _press("reopen_ticket_button", interaction)
+
+    assert _replies(interaction) == [DENIED]
+
+
+@pytest.mark.parametrize("name", ["delete_ticket_button", "reopen_ticket_button"])
+async def test_buttons_survive_a_dead_interaction(configured, monkeypatch, name):
+    # The interaction expired: defer and followup both 404. Must not raise.
+    monkeypatch.setattr(
+        event_tickets, "delete_event_ticket_channel", AsyncMock(return_value=False)
+    )
+    monkeypatch.setattr(
+        event_tickets, "reopen_event_ticket_channel", AsyncMock(return_value=False)
+    )
+    interaction = _button_interaction()
+    interaction.response.defer = AsyncMock(
+        side_effect=discord.NotFound(MagicMock(status=404), "gone")
+    )
+    interaction.followup.send = AsyncMock(
+        side_effect=discord.NotFound(MagicMock(status=404), "gone")
+    )
+    interaction.response.send_message = AsyncMock(
+        side_effect=discord.NotFound(MagicMock(status=404), "gone")
+    )
+
+    await _press(name, interaction)  # must not raise
+
+
+async def test_a_reply_after_deferring_goes_through_the_followup(
+    configured, monkeypatch
+):
+    # Once defer() has succeeded the initial response is spent, so replying on
+    # it would fail in production. Every other button test leaves is_done()
+    # False, which makes both branches look identical.
+    monkeypatch.setattr(
+        event_tickets, "reopen_event_ticket_channel", AsyncMock(return_value=True)
+    )
+    interaction = _button_interaction()
+    interaction.response.is_done = MagicMock(return_value=True)
+
+    await _press("reopen_ticket_button", interaction)
+
+    interaction.followup.send.assert_awaited_once()
+    interaction.response.send_message.assert_not_awaited()
