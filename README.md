@@ -2,7 +2,7 @@
 
 ## Overview
 **Name:** Remaining7 Discord Bot
-**Version:** v1.13.2
+**Version:** v1.14.0
 **Contributors:** remainingdelta, nightwarrior5
 **Objective:** A feature-rich Discord bot for the Remaining7 community server (16k+ members). Handles an R7 Token economy, leveling, quests, a Brawl Stars collection minigame, tournament management with Matcherino integration, support tickets, event operations, a security protocol, and multi-language translation.
 **Server Link:** https://discord.gg/6MzrjS2X8k
@@ -51,7 +51,8 @@ Remaining7-Discord-Bot/
 │   ├── story.py                     # Collaborative one-word story game (staff-run, moderated)
 │   ├── sticky.py                    # !sticky / !unsticky persistent channel messages
 │   ├── support_tickets.py           # General support tickets (issues, support, apps, partnership)
-│   ├── github_tickets.py           # AI-powered GitHub issue creation from tickets (Gemini)
+│   ├── github_tickets.py            # AI-powered GitHub issue creation from tickets (Gemini)
+│   ├── event_tickets.py             # Private event answer-submission tickets
 │   ├── ticket_command_router.py     # Shared routing for tourney & support ticket commands
 │   ├── booster_shoutout.py          # Auto-opened booster shoutout tickets
 │   ├── message_mirror.py            # Moderator message link mirror via webhook
@@ -65,6 +66,7 @@ Remaining7-Discord-Bot/
 │       ├── tourney_utils.py         # Ticket lifecycle helpers, auto-translation
 │       ├── tourney_views.py         # discord.ui.View classes for ticket buttons
 │       ├── tourney_reports.py       # Monthly tournament report generation
+│       ├── hall_of_fame.py          # Hall of Fame posts and prize splits
 │       └── matcherino.py            # Matcherino API integration
 ├── scripts/
 │   └── generate_specs.py            # Generates docs/logs/ SPECS & CHANGELOG from GitHub data
@@ -93,11 +95,10 @@ Remaining7-Discord-Bot/
 
 ### R7 Token Economy
 - **Passive Income:** Users earn 2–5 R7 Tokens per message (20-second cooldown), restricted to the general and booster channels. Server Boosters get a ~10% increase in tokens on average.
-- **Daily Rewards:** `/daily` grants 80–160 tokens (scaled by level). Requires 5 messages sent since last claim and a 24-hour cooldown.
+- **Daily Rewards:** `/daily` grants a random 80–160 tokens, increased 5% per level above 1. Requires 5 messages sent since last claim and a 24-hour cooldown.
 - **Supply Drop:** `/drop <amount>` (Admin) to force a token drop in general chat.
 - **Balance & Ranking:** `/balance [user]`, `/leaderboard token`.
 - **Give & Set:** `/give <user> <token/xp/level> <amount>`, `/set-balance <user> <amount>` (Admin).
-- **Permissions:** `/perm <user> <add/remove>` to grant/revoke command access.
 - **Guide:** `/economy-help` for a full user-facing guide.
 
 ### Shop & Budget System
@@ -194,6 +195,15 @@ Every user always has **4 active quests** — one daily and one weekly per categ
 - One open ticket per type per user.
 - Staff can close, reopen, and delete tickets with transcript generation.
 - Transcripts DM'd to the opener and archived in a log channel.
+
+### Event Tickets
+- `/event-ticket-panel` — post the event ticket panel (Event Staff or Admin).
+- The panel channel is cleared and reposted automatically on bot restart, so the panel always reflects the current wording.
+- Members click **Open Event Ticket** to get a private channel for their event submission.
+- Channels are named after the opener (`「❗」event-username`); **one open ticket per member**.
+- Event Staff and Admins can close, reopen, and delete tickets via `!close` / `!reopen` / `!delete`.
+- Closing renames the channel in place (`「❗」` → `「👍」`) and locks the opener to read-only — the channel is not moved.
+- Deleting saves a transcript to the event transcript channel and DMs a copy to the opener, re-uploading up to 25 images from the ticket so submissions survive the channel being deleted.
 
 ### GitHub Ticket Integration
 - AI-powered GitHub issue creation. One authorized staff member @mentions the bot with a description; Gemini classifies it as a bug, enhancement, or feature and fills in the matching template.
@@ -320,13 +330,15 @@ The bot runs 24/7 on **RamNaym Cloud** (Nano plan, the lowest paid tier), deploy
 | **Plan specs** | 0.10 CPU · 256 MB RAM · 2 GB disk |
 | **Cost** | 4 EUR/year (≈ $4.55 USD as of now; paid $4.75) |
 
-**Current usage** (refresh if the plan or load changes materially):
+**Current usage** (last checked 2026-09-18; refresh if the plan or load changes materially):
 
 | Resource | Usage |
 |---|---|
-| vCPU load | 0.5% |
-| Memory | 126.6 / 256.0 MB |
-| Project storage | 2.1 MB / 2.00 GB |
+| vCPU load | 5.8% avg |
+| Memory | ~223 / 256.0 MB (typically ~87%) |
+| Project storage | 16 MB / 2.00 GB |
+
+Memory is the binding constraint — roughly 33 MB free — so anything that buffers in memory must be sized against that, not the 256 MB total.
 
 See [`docs/HOSTING.md`](docs/HOSTING.md) for the full hosting history and the reasoning behind the migration from the previous host.
 
@@ -373,7 +385,7 @@ Uses MongoDB database `r7_bot_db` with the following collections:
 | Role | Access |
 |---|---|
 | Admin | Full access to all commands |
-| Moderator | Economy oversight, security protocol |
+| Moderator | Redemption queue oversight, security protocol |
 | Tourney Admin | Tournament commands, ticket management |
 | Event Staff | Event channel cleanup, reward distribution, sticky messages |
 | Member | Economy, quests, brawl, translation, help |

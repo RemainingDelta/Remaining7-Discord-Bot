@@ -24,7 +24,7 @@ PolicyPart(title, intro, sections)    # a group of sections = one embed
 | 2 | 🔒 Privacy Policy — Use & Storage | What we do not collect or store, Why we collect this information, Where your information is stored, When information leaves Discord |
 | 3 | 🔒 Privacy Policy — Your Choices | Opt-out and your choices, Age requirement, Changes to this policy, Contact us |
 
-The grouping exists for Discord's limits, not for the reading order. A description caps at **4096 characters** and one message caps at **6000 characters across all its embeds**; the policy renders to roughly 5.2k, so it fits in a single message with headroom. `tests/test_privacy_policy.py` asserts both limits, so a section that grows past them fails the suite rather than the API.
+The grouping exists for Discord's limits, not for the reading order. A description caps at **4096 characters** and one message caps at **6000 characters across all its embeds**; the policy renders to roughly 5.9k, so it fits in a single message but has very little room left. `tests/test_privacy_policy.py` asserts both limits, so a section that grows past them fails the suite rather than the API — which is now the likely outcome of any further disclosure, and the point at which the policy has to be split across two messages.
 
 ---
 

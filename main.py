@@ -20,6 +20,7 @@ from features.tourney.tourney_commands import (
 )
 
 # Import the privacy policy repost (keeps the privacy channel current on restart)
+from features.event_tickets import repost_event_ticket_panel
 from features.privacy_policy import repost_privacy_policy
 
 # Import Database connection check
@@ -52,6 +53,7 @@ FEATURE_EXTENSIONS = [
     ("features.quests", "Quests"),
     ("features.translation", "Translation"),
     ("features.support_tickets", "Support Tickets"),
+    ("features.event_tickets", "Event Tickets"),
     ("features.booster_shoutout", "Booster Shoutout"),
     ("features.github_tickets", "GitHub Tickets"),
     ("features.sticky", "Sticky Messages"),
@@ -108,6 +110,34 @@ async def load_features() -> list[str]:
             print(f"❌ Failed to load {label} ({module}): {e!r}")
             traceback.print_exc()
     return failed
+
+
+# Panels are re-posted only when the process actually restarted: a reconnect
+# leaves the View objects alive, so their buttons still work and a repost would
+# only break the panel's pins and jump links (#548).
+_TOURNEY_PANELS_RESTORED = False
+
+
+async def start_tourney_system(bot) -> list[str]:
+    """Register the tourney commands and restore its panels. Returns failures.
+
+    Command registration is idempotent in setup_tourney_commands itself. The
+    restore is guarded here and only latched on success, so one that fails on a
+    network error is retried on the next reconnect.
+    """
+    global _TOURNEY_PANELS_RESTORED
+    try:
+        setup_tourney_commands(bot)
+        print("✅ Loaded Feature: Tournaments")
+        if not _TOURNEY_PANELS_RESTORED:
+            await restore_tourney_panels(bot)
+            _TOURNEY_PANELS_RESTORED = True
+    except Exception as e:
+        record_failure("Tournaments", "features.tourney.tourney_commands", e)
+        print(f"⚠️ Tourney Error: {e!r}")
+        traceback.print_exc()
+        return ["Tournaments"]
+    return []
 
 
 async def sync_commands(failed: list[str]) -> int | None:
@@ -512,15 +542,7 @@ async def on_ready():
 
     # 3. Load Tourney System. Registers its own top-level commands, so a failure
     #    here also has to block a destructive sync.
-    try:
-        setup_tourney_commands(bot)
-        print("✅ Loaded Feature: Tournaments")
-        await restore_tourney_panels(bot)
-    except Exception as e:
-        failed.append("Tournaments")
-        record_failure("Tournaments", "features.tourney.tourney_commands", e)
-        print(f"⚠️ Tourney Error: {e!r}")
-        traceback.print_exc()
+    failed += await start_tourney_system(bot)
 
     # 4. Repost the privacy policy so the channel reflects the current wording
     try:
@@ -532,10 +554,20 @@ async def on_ready():
         print(f"⚠️ Privacy Policy Repost Error: {e!r}")
         traceback.print_exc()
 
-    # 5. SYNC COMMANDS (Do this LAST)
+    # 5. Repost the event ticket panel so the channel reflects the current panel
+    try:
+        await repost_event_ticket_panel(bot)
+    except Exception as e:
+        # Reported but not added to `failed`, for the same reason as the privacy
+        # repost: it registers no commands, so it must not block the sync.
+        record_failure("Event Panel Repost", "features.event_tickets", e)
+        print(f"⚠️ Event Panel Repost Error: {e!r}")
+        traceback.print_exc()
+
+    # 6. SYNC COMMANDS (Do this LAST)
     synced = await sync_commands(failed)
 
-    # 6. Route background task failures to the log channel too. Guarded like
+    # 7. Route background task failures to the log channel too. Guarded like
     #    every other step: this walks real cog attributes, and losing task
     #    reporting must not cost the startup report that follows it.
     try:
@@ -544,7 +576,7 @@ async def on_ready():
         print(f"⚠️ Could not attach task error reporting: {e!r}")
         traceback.print_exc()
 
-    # 7. Report the boot to Discord, where the host's logs cannot swallow it
+    # 8. Report the boot to Discord, where the host's logs cannot swallow it
     await report_startup_to_discord(loaded, synced)
 
     if failed:
