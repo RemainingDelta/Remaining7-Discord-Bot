@@ -1594,3 +1594,127 @@ Closes #525
 * Updated the `BOT_LOGS_CHANNEL_ID` descriptions in `docs/CONFIG_SYSTEM.md` and `docs/SETUP.md` to cover runtime errors, not just startup
 
 Closes #526
+
+## v1.14.0 — 2026-09-19
+
+# 🚀 Release Notes v1.14.0
+
+## 🎯 Features
+### Event tickets
+- Click a button to open a private channel for your event submission, instead of DMing staff
+- One ticket per member; event staff and admins see them all
+- `!close`, `!reopen` and `!delete` manage a ticket from inside it
+- Deleting saves a transcript to the log channel and DMs you a copy, with the ticket's images attached
+- The panel reposts itself on every bot restart
+
+## 🔒 Security & Monitoring
+- Privacy policy updated for event ticket transcripts and the image copies they carry
+- Policy date now September 19, 2026
+
+## 🐛 Bug Fixes & Improvements
+- **The `/level` bar lied past level 20:** a level 25 member with 200,000 XP saw 81% when they were really at 12%. The display and the level-up check now use one formula
+- **Every reconnect reported a failed feature:** a false Critical alert in the bot logs channel on every network blip. A reconnect is now a no-op
+- **Removed `/perm`:** the access it granted was wiped on every restart, so it never did anything
+
+## 📝 Documentation
+- Added `docs/EVENT_TICKETS.md`
+- Fixed the `/daily` reward formula in the README and two guides — it was documented as capped at 160, but nothing caps it
+- Added the missing `hall_of_fame.py` to the README project tree
+
+**Full Changelog**: https://github.com/RemainingDelta/Remaining7-Discord-Bot/compare/v1.13.2...v1.14.0
+
+
+### PR Descriptions
+
+#### PR #456 — 401-Feature add event ticketing system
+
+### Changes
+* Added `features/event_tickets.py` — members click a button to open a private `「❗」event-<username>` channel for their event submission; one open ticket each, event staff see all of them
+* Close locks the opener and flips `「❗」` → `「👍」` in place; reopen undoes it; delete saves a transcript to the log channel, DMs a copy to the opener, then deletes the channel
+* The transcript re-uploads the ticket's images (up to 25, streamed in 8 MB batches) instead of linking them, since attachment URLs die with the channel; oversized/non-image files stay named and linked in the `.txt`
+* Added `/event-ticket-panel` (staff-gated) to post the button, wired `!close` / `!reopen` / `!delete` through `features/ticket_command_router.py`, and registered the cog in `main.py` (reposts the panel on restart)
+* Set the three channel IDs in both config branches and documented it in `docs/EVENT_TICKETS.md`, `docs/HOSTING.md`, `docs/SETUP.md`, the `/event-staff-help` embed, and `README.md`
+* Added 107 tests covering the helpers, the full lifecycle, transcript image batching, and config parity
+
+### Notes
+Ticket numbering with a per-event reset was dropped in favour of username-based names, and transcripts fire on delete rather than close. Both divergences from the issue are explained in a comment on #401.
+
+Closes #401
+
+#### PR #471 — 461-Bug fix /level display diverging from real level-up requirement past level 20
+
+### Changes
+* Added `_exp_required_for_level` as the single source of truth for the leveling curve (pure exponential `int(100 * 1.5 ** (level - 1))`)
+* Updated the `on_message` level-up loop and the `/level` display to both use `_exp_required_for_level`, removing the display-only linear phase past level 20
+* Added `tests/test_leveling.py` covering the shared helper and the `/level` display/progress-bar behavior above and below level 20
+* Updated `docs/XP_AND_LEVELING.md` to document the single-source-of-truth formula
+
+Closes #461
+
+#### PR #539 — 538-Enhancement remove the unused /perm command and allowed_users allow-list
+
+### Changes
+* Removed `/perm` and the `allowed_users` set from `features/economy.py`; `has_permission` is now a plain `ADMIN_ROLE_ID` check
+* Removed `/perm` from the `/admin-help` embed, `README.md`, and `docs/TOKEN_SYSTEM.md`
+* Removed `/give` and `/set-balance` from `/mod-help` — both are Admin-gated, so they were never reachable for a Moderator
+* Added tests in `tests/test_economy.py`
+
+Closes #538
+
+#### PR #549 — 548-Bug stop the tourney startup raising on every gateway reconnect
+
+### Changes
+* Made `setup_tourney_commands` idempotent, so a reconnect no longer raises `CommandRegistrationError` on `!close` — this also stops a duplicate persistent view being added each time
+* Extracted step 3 of `on_ready` into `start_tourney_system(bot)`, and guarded the panel restore to once per process
+* Added `tests/test_tourney_startup.py` and documented the reconnect hazard in `docs/SETUP.md`
+
+### Notes
+`on_ready` re-fires on every gateway reconnect, which is what made this happen — `load_features()` already handled it for cogs, step 3 didn't. Commands kept working; the cost was a false Critical embed in the bot logs channel on every blip.
+
+The panel restore needed its own guard rather than inheriting the crash as one: a reconnect leaves the Views alive, so reposting would only break the panels' pins and links.
+
+Closes #548
+
+#### PR #554 — 550-Enhancement update version to v1.14.0
+
+### Changes
+* Bumped `version` in `pyproject.toml` from `1.13.2` to `1.14.0`
+* Updated the `**Version:**` line in `README.md` to match
+
+`BOT_VERSION` is derived from `pyproject.toml` by regex, so `features/config.py` needs no edit.
+
+Closes #550
+
+#### PR #555 — 551-Enhancement disclose event ticket transcripts and their image copies
+
+### Changes
+* Added failing tests first, pinning the new disclosures and the policy date
+* Updated the ticket-transcript bullet to name event tickets and to state that up to 25 images posted in one are copied into the transcript — the 25 is pinned against `_MAX_TRANSCRIPT_IMAGES`, so raising the cap without touching the policy now fails CI
+* Updated the deletion carve-out to cover those image copies
+* Bumped the policy date to September 19, 2026 in `features/privacy_policy.py`, `PRIVACY_POLICY.md` and the test that pins it
+* Added a test asserting `PRIVACY_POLICY.md` repeats the module text verbatim — heading parity alone did not catch the two saying different things
+* Corrected the embed-size note in `docs/PRIVACY_SYSTEM.md`
+
+Note: the embed sequence is now 5958 of Discord's 6000-character limit. The next disclosure will not fit without splitting the policy across two messages.
+
+Closes #551
+
+#### PR #556 — 552-Enhancement audit docs and help commands for v1.14.0
+
+### Changes
+* Fixed the `/daily` reward formula in `docs/TOKEN_SYSTEM.md` and `docs/XP_AND_LEVELING.md` — both said `80 + (level * 5) capped at 160`, but the code rolls a random 80–160 base and multiplies it by `1 + (level - 1) * 0.05` with no cap, so a Level 20 member rolls 156–312 rather than the documented 160
+* Reworded the same claim in the README
+* Added the missing `features/tourney/hall_of_fame.py` to the README project-structure tree
+* Corrected the event ticket delete flow in `docs/EVENT_TICKETS.md`, which described the DM and the transcript channel as separate ordered steps
+
+Checked and found already correct: the command inventory against every cog, the in-bot help embeds, `docs/XP_AND_LEVELING.md` against #461, and the "19 background tasks" figure.
+
+Closes #552
+
+#### PR #557 — 553-Enhancement update documentation for v1.14.0 release
+
+### Changes
+* Added the v1.14.0 section to `docs/logs/SPECS.md` — an as-implemented entry and verdict for #401, #461, #538, #548, #551, #552 and this ticket, plus the one-line bump entry for #550
+* Added the v1.14.0 section to `docs/logs/CHANGELOG.md` — the release notes and every PR description
+
+Closes #553

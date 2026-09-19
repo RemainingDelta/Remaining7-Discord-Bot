@@ -4287,3 +4287,163 @@ Implemented in `78aa092`. Files: `docs/logs/SPECS.md`, `docs/logs/CHANGELOG.md`
 ✅ Reviewed against the diff: implementation matches the filed spec.
 
 📝 Review note: Self-referential. This is the release-doc pass that wrote this v1.13.2 SPECS section, along with the v1.13.2 CHANGELOG release notes and PR descriptions. The release notes drop `📊 Data Model`, `⚡ Integrations`, `🎨 Embeds & UI` and `🤖 GitHub Actions`, none of which this release touches, and also drop `🔄 Future Enhancements` at the maintainer's request, so the three open structural items recorded above (the duplicated passive-reward gate from #517, the `main.py` growth and #470 collision from #514, and the missing retention section plus the out-of-repo policy copy from #525) live only in this file. The sha above is the commit that wrote this section; this sentence was filled in by the commit after it, since a commit cannot contain its own hash.
+
+### v1.14.0 — 2026-09-19
+
+#### #401 — Feature: Implement Event Ticketing System (Feature)
+
+> ### Overview
+> This feature introduces a dedicated ticketing system for events, allowing users to submit private answers directly within the server. It replaces the current inefficient method of direct messaging event staff, improving user experience and staff management of event submissions.
+>
+> ### Technical Requirements
+> - [ ] Implement command or mechanism for users to create private ticket channels for event submissions.
+> - [ ] Configure appropriate permissions for event staff to view and manage active ticket channels.
+> - [ ] Develop functionality to save ticket transcripts to a designated log channel (configurable via `config.py`).
+> - [ ] Implement sending ticket transcripts to the user who opened the ticket via direct message upon closure.
+> - [ ] Design and implement a mechanism for ticket numbers to reset after an event concludes.
+>
+> ### Acceptance Criteria
+> - [ ] Users can successfully create a new private ticket channel for event answer submissions.
+> - [ ] Event staff can access and interact with all active event ticket channels.
+> - [ ] Upon ticket closure, a complete transcript is saved to the configured log channel.
+> - [ ] Upon ticket closure, a complete transcript is sent to the user's DMs.
+> - [ ] The ticket numbering system resets to 1 for new events, ensuring unique…(truncated)
+
+Implemented in `37cf58c`, `2681165`, `439fe15`, `bb9eb2a`, `0df09c3`, `f70d365`, `a8e1822`, `ce5069a`, `494fed6`, `27771ae`, `66fe578`, `c26bfac`, `fadc8f9`. Files: `features/event_tickets.py`, `features/config.py`, `features/event.py`, `features/ticket_command_router.py`, `main.py`, `tests/test_event_tickets.py`, `tests/test_startup.py`, `docs/EVENT_TICKETS.md`, `docs/HOSTING.md`, `docs/SETUP.md`, `README.md`
+
+⚠️ as-implemented differs from #401 in two ways the author recorded on the issue before merge, and in a third the issue never contemplated. Per-event ticket numbering was dropped: channels are named `「❗」event-<username>` and one open ticket per member is enforced through the opener ID in the channel topic, because a per-event counter is the bug class already open as #472, where the pre-tourney counter resets to 1 on restart and is never reset by `!starttourney`. Transcripts fire on `!delete` rather than on close: closing is reversible here, locking the opener and flipping `「❗」` → `「👍」` in place, so a transcript per close would post duplicates to the log channel on every reopen/re-close cycle. The third divergence is scope. The issue asked for a transcript; what shipped also re-uploads the ticket's images as real attachments, capped at 25, chunked against Discord's ten-attachments-per-message ceiling, streamed in 8 MB batches and split recursively on a 413 — plus admin access alongside event staff, and a panel that wipes its channel and reposts itself on every restart. None of that was filed.
+
+📝 Review note: The images are copied rather than linked because Discord's attachment URLs are signed and expire in about a day, and deleting the channel makes the originals collectable. A transcript that only linked a screenshot would be dead by the time anyone read it. This is the same reasoning `features/github_tickets.py` uses for inlining log files.
+
+📝 Review note: The 8 MB batch size is not a Discord limit, it is a memory budget for the host. `docs/HOSTING.md` records 256 MB of RAM sitting at roughly 87% used, leaving about 33 MB free. Holding a whole ticket's images before sending would scale peak memory with the size of the ticket, so `_deliver_transcript()` reads one batch, sends it to both destinations, then releases it before reading the next. An earlier revision of this work capped at 100 MB, which was three times the host's free memory; it was only caught because the maintainer volunteered the 87% figure mid-review.
+
+📝 Review note: Two ceilings are deliberately kept separate, because Discord answers them differently. More than ten attachments on one message is a 400 and is prevented by counting; too large a payload is a 413 and is handled by halving the batch and retrying. Conflating them had already produced a real bug during review, where an upload limit was used to throttle downloads and nine posted images reached the transcript as four.
+
+📝 Review note: Never exercised against a real Discord gateway. Every test is offline and the development container cannot reach Discord. Two behaviours are therefore unverified until first deploy: the bot needs Manage Messages in the production panel channel or the repost silently skips, and that channel is wiped on the first restart after deploy.
+
+#### #461 — Bug: /level progress display diverges from the real level-up requirement past level 20 (Bug)
+
+> ### Overview
+> `/level` computes the XP needed for the next level with a **two-phase** curve — exponential `int(100 * 1.5 ** (level - 1))` up to level 20, then a **linear** `level_20_exp + 5000 * (level - 20)` beyond it. The actual level-up logic in `on_message` uses the **pure exponential** formula forever, with no linear phase. For any user above level 20 the displayed "EXP needed" and the progress bar are far lower than the real requirement — e.g. at level 25 the display shows ~247k while the true requirement is ~1.68M
+>
+> ### Acceptance Criteria
+> - [ ] For a user at level > 20, the `next_level_exp` shown by `/level` equals the `required_exp` the `on_message` level-up loop actually checks against for that level.
+> - [ ] The `/level` progress bar reaches 100% only when the user is within one message's XP of leveling up, at every level (including > 20).
+> - [ ] A single formula/helper is the source of truth for "XP required for level N"…(truncated)
+
+Implemented in `7f354cc`. Files: `features/economy.py`, `tests/test_leveling.py`, `docs/XP_AND_LEVELING.md`
+
+✅ Reviewed against the diff: implementation matches the filed spec. `_exp_required_for_level()` is the single source of truth, the display-only linear branch is gone, and the two callers — the `on_message` level-up loop and the `/level` display — are the only ones.
+
+📝 Review note: Display-only, as the issue said. Stored XP and levels were correct throughout; only the number shown to the user was wrong.
+
+📝 Review note: The fix deliberately does not touch the curve itself, which the issue's Impact section did not raise. Now that both sides agree, a single level past 25 costs roughly 168,000 messages, so high levels are effectively unreachable. Whether the exponential curve is the intended game design is a gameplay decision left open on #461 rather than settled here.
+
+📝 Review note: The branch sat 68 commits behind `dev` between filing and merge and landed only after a merge from `dev`. The four releases in between touched different parts of `features/economy.py`, and the full suite was green on the merged branch before anything was pushed.
+
+#### #538 — Enhancement: Remove the unused `/perm` command and the `allowed_users` allow-list (Enhancement)
+
+> ### Overview
+> `/perm` isn't used in practice. Remove the command and the in-memory `allowed_users` set behind it, so `has_permission` becomes a plain `ADMIN_ROLE_ID` check.
+>
+> Supersedes #460 / PR #468, which persisted these grants across restarts — not worth doing for a command nobody uses.
+>
+> ### Technical Requirements
+> - [ ] Delete the `perm` command (`features/economy.py:2270`–`:2305`) and the `allowed_users` set (`:70`).
+> - [ ] Reduce `has_permission` (`:1616`–`:1622`) to the `ADMIN_ROLE_ID` check, keeping the `isinstance(..., discord.Member)` guard so a `discord.User` returns `False` instead of raising.
+> - [ ] Drop the `/perm` line from the admin help embed and the Permissions bullet in `README.md:100`.
+> - [ ] Delete the "Permission System (`/perm`)" section from `docs/TOKEN_SYSTEM.md`…(truncated)
+
+Implemented in `6a2b64f`. Files: `features/economy.py`, `features/general.py`, `tests/test_economy.py`, `README.md`, `docs/TOKEN_SYSTEM.md`
+
+✅ Reviewed against the diff: implementation matches the filed spec. The `isinstance(..., discord.Member)` guard was kept as specified, so `has_permission` returns `False` for a `discord.User` in a DM context rather than raising.
+
+📝 Review note: One change beyond the filed list. `/give` and `/set-balance` were also removed from the `/mod-help` embed, where they were listed for Moderators but gated on `ADMIN_ROLE_ID` and so never usable by one. That was a pre-existing inaccuracy in the help text rather than anything #538 introduced, found while removing the `/perm` line from the neighbouring admin embed.
+
+📝 Review note: This closes a loop rather than opening one. #460 and PR #468 proposed persisting `/perm` grants across restarts; both were closed in favour of removing the command, on the grounds that a permanent privilege grant is worse than a transient one for a command nobody used.
+
+#### #548 — Bug: Tourney startup raises CommandRegistrationError on every gateway reconnect, reporting a false Critical failure (Bug)
+
+> ### Overview
+> `on_ready` re-fires on every gateway reconnect, and step 3 of it re-registers the tourney prefix commands. The second registration raises, so every reconnect reports a failed feature that did not actually fail.
+>
+> ### Technical Requirements
+> - [ ] Make `setup_tourney_commands` idempotent via a module flag in `features/tourney/tourney_commands.py`, so the function owns its own re-entrancy the way `load_extension` owns `ExtensionAlreadyLoaded`. This also stops the `add_view` accumulation, which a caller-side guard would not.
+> - [ ] Guard `restore_tourney_panels` separately in `main.py`, with a flag set only on success, so a restore that fails on a network error is still retried on the next reconnect while the command registration stays a no-op. Two flags, not one
+> - [ ] Extract step 3 into `start_tourney_system(bot)` alongside the existing `load_features()`, `sync_commands()`…(truncated)
+
+Implemented in `28a3260`. Files: `features/tourney/tourney_commands.py`, `main.py`, `tests/test_tourney_startup.py`, `docs/SETUP.md`
+
+✅ Reviewed against the diff: implementation matches the filed spec, including the two-flag requirement. `_TOURNEY_COMMANDS_REGISTERED` latches unconditionally once registration succeeds, while `_TOURNEY_PANELS_RESTORED` latches only on success, so a restore that fails on a network error is retried on the next reconnect rather than being skipped forever.
+
+📝 Review note: The issue's "trap" section is the substance of this fix and it was heeded. The obvious guard stops the exception but unlocks `restore_tourney_panels`, which would delete and repost both tourney support panels — new message IDs, broken pins and jump links — on every network blip. The crash had been acting as an accidental guard on the line below it, and the fix makes that behaviour deliberate.
+
+📝 Review note: Same startup path as #514 one release earlier, and this is the half #514 left behind. #514 taught `load_features()` to survive a reconnect and added the Discord error reporting that made this failure visible at all; the false Critical embed this fixes is posted by #514's own reporter.
+
+#### #550 — Enhancement: Bump project version to v1.14.0 in pyproject.toml (Enhancement)
+
+Version bump only. Implemented in `4d988d5`.
+
+#### #551 — Enhancement: Correct the privacy policy for the data flows added in v1.14.0 (Enhancement)
+
+> ### Overview
+> The event ticketing system shipping in v1.14.0 (#401) made the privacy policy's transcript paragraph factually wrong in two ways. Correct it, and bump the "Last updated" date to September 19, 2026.
+>
+> ### Technical Requirements
+> - [ ] Set `LAST_UPDATED = "September 19, 2026"` in `features/privacy_policy.py:23`
+> - [ ] Update the `Last updated:` line in `PRIVACY_POLICY.md:3` to match
+> - [ ] Update the pinned date in `tests/test_privacy_policy.py:156`
+> - [ ] Rewrite the ticket-transcript bullet in the "When information leaves Discord" section to name event tickets alongside support and tournament tickets, and to state that images posted in an event ticket are copied into the transcript as attachments (up to 25) rather than linked
+> - [ ] Make the deletion carve-out at `PRIVACY_POLICY.md:61` explicit that it covers transcript image copies
+> - [ ] Add a test pinning the new wording…(truncated)
+
+Implemented in `bd19389`, `fa6ba46`. Files: `features/privacy_policy.py`, `PRIVACY_POLICY.md`, `tests/test_privacy_policy.py`, `docs/PRIVACY_SYSTEM.md`
+
+✅ Reviewed against the diff: implementation matches the filed spec. The conditional requirement on `docs/PRIVACY_SYSTEM.md` headings was correctly not actioned, since no section headings changed.
+
+⚠️ The disclosure could not be written as filed. The ticket specified appending the image-copy wording to the existing transcript bullet; the policy was already at 5,887 of Discord's 6,000-character per-message limit for an embed sequence, leaving 113 characters, and the filed wording needed 243. The bullet was therefore rewritten to absorb the disclosure instead of extending it, dropping the "Discord's links expire" rationale — a technical justification rather than a disclosure, and already recorded in `docs/EVENT_TICKETS.md`. The result is 5,958 characters.
+
+📝 Review note: That leaves 42 characters of headroom. The next disclosure of any substance will not fit, and the policy will have to be split across two messages. `docs/PRIVACY_SYSTEM.md` previously described the policy as fitting "with headroom" at roughly 5.2k; it now records the real figure and names the split as the next step.
+
+📝 Review note: The 25-image figure in the policy is pinned in `tests/test_privacy_policy.py` against `_MAX_TRANSCRIPT_IMAGES` in `features/event_tickets.py`, so raising the cap without updating the policy fails CI. A second added test asserts `PRIVACY_POLICY.md` repeats the module text verbatim; the pre-existing parity test compared headings only, which is exactly how this paragraph went stale in the first place.
+
+📝 Review note: Carried forward unchanged from #525. A fourth copy of the policy is hosted at `remaining7.netlify.app/privacy`, referenced from `features/privacy_policy.py:29`. It is outside this repository, no pull request here can reach it, and it disagrees with the bot until someone updates the site by hand.
+
+#### #552 — Enhancement: Full documentation & help-command audit against the v1.14.0 feature set (Enhancement)
+
+> ### Overview
+> Do a comprehensive, line-by-line audit of the README, all in-bot help commands, and every file under `docs/` against the actual shipped v1.14.0 behavior.
+>
+> ### Technical Requirements
+> - [ ] Cross-check README feature/command sections against the current cog command set
+> - [ ] Verify the README project-structure tree matches the actual file layout
+> - [ ] Review every in-bot help-command string for stale commands, counts, or syntax
+> - [ ] Audit each `docs/*.md` feature guide against its implementation and fix any drift
+> - [ ] Check `docs/XP_AND_LEVELING.md` against #461's `_exp_required_for_level()`
+> - [ ] Check `docs/EVENT_TICKETS.md` against what #456 actually merged…(truncated)
+
+Implemented in `0d55ec5`. Files: `README.md`, `docs/TOKEN_SYSTEM.md`, `docs/XP_AND_LEVELING.md`, `docs/EVENT_TICKETS.md`
+
+✅ Reviewed against the diff: implementation matches the filed spec. The two checks the ticket predicted would be needed both came back clean: `docs/XP_AND_LEVELING.md` had already been updated by #471, and `docs/EVENT_TICKETS.md` matched the merged code apart from one ordering error.
+
+⚠️ The audit's largest finding is not from this release. `docs/TOKEN_SYSTEM.md` and `docs/XP_AND_LEVELING.md` both documented the `/daily` reward as `80 + (level * 5)` capped at 160. The code rolls `random.randint(80, 160)` and multiplies by `1 + (level - 1) * 0.05` with no cap, so a level 20 member rolls 156–312 tokens where both guides promised a hard ceiling of 160. Wrong on the base, wrong on the scaling, and wrong on the cap. Nothing in v1.14.0 touched `/daily`; this predates the release and was found only because the audit checked the formula against the code rather than against the other document.
+
+📝 Review note: The `/daily` payout has no test. The formula was verified by reading `features/economy.py:1908-1911`, and nothing under `tests/` pins the base range, the multiplier or the booster bonus, so the same drift can recur silently in the code as well as the docs.
+
+📝 Review note: Smaller findings. `features/tourney/hall_of_fame.py` was absent from the README project-structure tree. The `docs/EVENT_TICKETS.md` delete flow numbered the DM and the transcript channel as separate ordered steps, when each batch is read once and sent to both. Checked and found already correct: the full command inventory against every cog, all in-bot help embeds including `/event-staff-help`, the "19 background tasks" figure, and the complete absence of `/perm` residue after #538.
+
+#### #553 — Enhancement: Update documentation for v1.14.0 release (Enhancement)
+
+> ### Overview
+> Add the v1.14.0 sections to the two release logs under `docs/logs/`, so the project's history survives outside GitHub. Touches nothing else.
+>
+> ### Technical Requirements
+> - [ ] Write the `docs/logs/SPECS.md` v1.14.0 section using the `spec-record` skill, reading every issue in the range alongside its actual diff before writing anything
+> - [ ] Write the `docs/logs/CHANGELOG.md` v1.14.0 section
+> - [ ] Record the divergences, not just what shipped — SPECS.md exists for divergence tracking, and original tickets are never edited to match…(truncated)
+
+Implemented in `1ca4a81`. Files: `docs/logs/SPECS.md`, `docs/logs/CHANGELOG.md`
+
+✅ Reviewed against the diff: implementation matches the filed spec.
+
+📝 Review note: Self-referential. This is the release-doc pass that wrote this v1.14.0 SPECS section, along with the v1.14.0 CHANGELOG release notes and PR descriptions. The release notes drop `📊 Data Model`, `⚡ Integrations`, `🎨 Embeds & UI` and `🤖 GitHub Actions`, none of which this release touches, and drop `🔄 Future Enhancements` as agreed in v1.13.2 — so the open items recorded above live only in this file: the unreachable high levels from #461, the untested `/daily` payout and its pre-existing doc drift from #552, and the 42 characters of privacy-policy headroom from #551. The sha above is filled in by the commit after it, since a commit cannot contain its own hash.
