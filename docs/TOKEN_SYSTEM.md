@@ -25,8 +25,11 @@ The cooldown lives in the `settings` collection, so the check is one small DB re
 ## Daily Reward (`/daily`)
 
 ```
-Tokens = 80 + (level * 5) capped at 160
+base   = random 80-160
+tokens = int(base * (1 + (level - 1) * 0.05))
 ```
+
+Level **multiplies** a random base rather than adding to it, and nothing caps the result — a Level 20 member rolls 156-312 tokens where a Level 1 member rolls 80-160.
 
 Requires:
 - 24-hour cooldown since last claim (stored on the user doc as `users.daily_last_claimed`, an epoch-seconds float)
@@ -35,7 +38,7 @@ Requires:
 On claim:
 1. Reads `daily_last_claimed` from the user doc and derives the message-count window key from it
 2. Checks the message count for the current window is `>= 5` and the 24h cooldown has passed
-3. Calculates the token reward based on the user's current level
+3. Rolls a random 80-160 base and multiplies it by `1 + (level - 1) * 0.05`
 4. Adds a flat **+20 tokens** if the member has the Server Booster role (shown as a separate line in the claim embed)
 5. Grants the tokens and stamps the cooldown in **one atomic write** — `claim_daily_reward()` (`database/mongo.py`) does `find_one_and_update` with a `{"$inc": {"balance": ...}, "$set": {"daily_last_claimed": now}}` guarded by a `daily_last_claimed < cutoff` predicate. This closes the crash window where tokens could be granted before the cooldown was stamped (which allowed a second immediate claim), and also blocks concurrent double-invocations. If the predicate loses (already claimed), the command shows the cooldown status instead of granting.
 

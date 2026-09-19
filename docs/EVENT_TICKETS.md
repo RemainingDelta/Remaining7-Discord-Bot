@@ -55,10 +55,10 @@ Reopening restores the opener's send permission and flips the prefix back.
 `!delete`/`!del` or the **Delete Ticket** button:
 1. Builds the transcript in a single pass over the channel history: the plain-text
    log, plus the bytes of up to **25 images** posted in the ticket.
-2. DMs the transcript and its images to the opener (skipped silently if their DMs
-   are closed).
-3. Posts the same set to `EVENT_TICKET_TRANSCRIPT_CHANNEL_ID` (when configured).
-4. Deletes the channel.
+2. Sends that set to `EVENT_TICKET_TRANSCRIPT_CHANNEL_ID` (when configured) and DMs
+   the same set to the opener (skipped silently if their DMs are closed). Each
+   batch is read once and sent to both, so neither destination is a second pass.
+3. Deletes the channel.
 
 ### Why images are re-uploaded, not linked
 Discord attachment URLs are signed and expire within about a day, and deleting the
