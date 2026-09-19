@@ -4382,7 +4382,7 @@ Implemented in `28a3260`. Files: `features/tourney/tourney_commands.py`, `main.p
 
 #### #550 — Enhancement: Bump project version to v1.14.0 in pyproject.toml (Enhancement)
 
-Version bump only. Implemented in `<pending — set to the 550-Enhancement commit sha once merged>`.
+Version bump only. Implemented in `4d988d5`.
 
 #### #551 — Enhancement: Correct the privacy policy for the data flows added in v1.14.0 (Enhancement)
 
@@ -4442,7 +4442,7 @@ Implemented in `0d55ec5`. Files: `README.md`, `docs/TOKEN_SYSTEM.md`, `docs/XP_A
 > - [ ] Write the `docs/logs/CHANGELOG.md` v1.14.0 section
 > - [ ] Record the divergences, not just what shipped — SPECS.md exists for divergence tracking, and original tickets are never edited to match…(truncated)
 
-Implemented in `<pending — set to the 553-Enhancement doc commit sha once committed>`. Files: `docs/logs/SPECS.md`, `docs/logs/CHANGELOG.md`
+Implemented in `1ca4a81`. Files: `docs/logs/SPECS.md`, `docs/logs/CHANGELOG.md`
 
 ✅ Reviewed against the diff: implementation matches the filed spec.
 

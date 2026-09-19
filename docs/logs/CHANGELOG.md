@@ -1711,4 +1711,10 @@ Checked and found already correct: the command inventory against every cog, the 
 
 Closes #552
 
-#### PR #553-Enhancement — update documentation for v1.14.0 release (pending)
+#### PR #557 — 553-Enhancement update documentation for v1.14.0 release
+
+### Changes
+* Added the v1.14.0 section to `docs/logs/SPECS.md` — an as-implemented entry and verdict for #401, #461, #538, #548, #551, #552 and this ticket, plus the one-line bump entry for #550
+* Added the v1.14.0 section to `docs/logs/CHANGELOG.md` — the release notes and every PR description
+
+Closes #553
