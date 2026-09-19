@@ -37,10 +37,11 @@ required = int(100 * 1.5 ** (level - 1))
 
 `/daily` reward scales with level:
 ```
-tokens = 80 + (level * 5), capped at 160
+base   = random 80-160
+tokens = int(base * (1 + (level - 1) * 0.05))
 ```
 
-So a Level 16+ member earns the max 160 tokens from `/daily`, while a Level 0 member earns 80.
+Level multiplies a random base rather than adding to it, and nothing caps the result: a Level 1 member rolls 80-160 tokens, a Level 20 member rolls 156-312. Server Boosters add a flat +20 on top.
 
 ---
 

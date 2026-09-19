@@ -51,8 +51,8 @@ Remaining7-Discord-Bot/
 │   ├── story.py                     # Collaborative one-word story game (staff-run, moderated)
 │   ├── sticky.py                    # !sticky / !unsticky persistent channel messages
 │   ├── support_tickets.py           # General support tickets (issues, support, apps, partnership)
-│   ├── github_tickets.py           # AI-powered GitHub issue creation from tickets (Gemini)
-│   ├── event_tickets.py            # Private event answer-submission tickets
+│   ├── github_tickets.py            # AI-powered GitHub issue creation from tickets (Gemini)
+│   ├── event_tickets.py             # Private event answer-submission tickets
 │   ├── ticket_command_router.py     # Shared routing for tourney & support ticket commands
 │   ├── booster_shoutout.py          # Auto-opened booster shoutout tickets
 │   ├── message_mirror.py            # Moderator message link mirror via webhook
@@ -66,6 +66,7 @@ Remaining7-Discord-Bot/
 │       ├── tourney_utils.py         # Ticket lifecycle helpers, auto-translation
 │       ├── tourney_views.py         # discord.ui.View classes for ticket buttons
 │       ├── tourney_reports.py       # Monthly tournament report generation
+│       ├── hall_of_fame.py          # Hall of Fame posts and prize splits
 │       └── matcherino.py            # Matcherino API integration
 ├── scripts/
 │   └── generate_specs.py            # Generates docs/logs/ SPECS & CHANGELOG from GitHub data
@@ -94,7 +95,7 @@ Remaining7-Discord-Bot/
 
 ### R7 Token Economy
 - **Passive Income:** Users earn 2–5 R7 Tokens per message (20-second cooldown), restricted to the general and booster channels. Server Boosters get a ~10% increase in tokens on average.
-- **Daily Rewards:** `/daily` grants 80–160 tokens (scaled by level). Requires 5 messages sent since last claim and a 24-hour cooldown.
+- **Daily Rewards:** `/daily` grants a random 80–160 tokens, increased 5% per level above 1. Requires 5 messages sent since last claim and a 24-hour cooldown.
 - **Supply Drop:** `/drop <amount>` (Admin) to force a token drop in general chat.
 - **Balance & Ranking:** `/balance [user]`, `/leaderboard token`.
 - **Give & Set:** `/give <user> <token/xp/level> <amount>`, `/set-balance <user> <amount>` (Admin).
