@@ -17,15 +17,21 @@ The bot runs 24/7 on **RamNaym Cloud** (Nano plan, the lowest paid tier), deploy
 
 ### Current usage
 
-Refresh these figures if the plan changes or load moves materially — they exist for capacity planning.
+Refresh these figures if the plan changes or load moves materially — they exist for capacity
+planning. **Last checked 2026-09-18**; date any future update, since a stale table here reads as
+reassurance rather than as an unknown.
 
 | Resource | Usage |
 |---|---|
-| vCPU load | 0.5% |
-| Memory | 126.6 / 256.0 MB |
-| Project storage | 2.1 MB / 2.00 GB |
+| vCPU load | 5.8% avg |
+| Memory | ~223 / 256.0 MB (typically ~87%) |
+| Project storage | 16 MB / 2.00 GB |
 
-At current load the Nano plan has comfortable headroom (memory is the tightest resource at roughly 50% used).
+Memory is the binding constraint: the bot typically sits around **87%**, leaving roughly
+**33 MB** free. Anything that buffers in memory has to be bounded against that figure rather
+than against the 256 MB total — the event-ticket transcript downloads images in 8 MB batches
+for exactly this reason (`docs/EVENT_TICKETS.md`). An OOM here is a SIGKILL, so it reports
+nowhere: no handler runs and nothing reaches `BOT_LOGS_CHANNEL_ID`.
 
 ---
 
@@ -58,3 +64,5 @@ RamNaym's Nano plan (4 EUR/year, ≈ $4.55 USD as of now; paid $4.75) is roughly
 
 - If the plan (host, tier, specs, or price) changes, update both this file and the **Hosting** section of the [`README`](../README.md).
 - Refresh the **Current usage** figures periodically for capacity planning, especially if memory usage starts approaching the 256 MB ceiling.
+- **The console logs are not a reliable record.** Lines beginning with `⚠️` or `❌` do not appear in the retrievable output — confirmed across three separate deploys, where the `✅` and `🚀` lines either side of them came through and the warning lines did not. Anything that must be seen goes to `BOT_LOGS_CHANNEL_ID` in Discord; the console is a secondary copy only. Startup failures, command errors, listener errors and background task failures all report there as embeds, colour-coded by severity: 🔴 Critical (something stopped running), 🟠 Error (one interaction failed), 🟡 Warning (a permission or config problem rather than a bug). This is why #503 and #513 both went undiagnosed for days.
+- **The dependency panel is not just `requirements.txt`.** A scanner reads the source and adds packages it infers, which is how the desktop `opencv-python` kept reappearing in #513 despite never being in the manifest. Entries deleted by hand come back on the next deploy. Check the panel against `requirements.txt` when a dependency behaves unexpectedly.

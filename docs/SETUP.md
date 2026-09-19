@@ -129,14 +129,26 @@ await bot.load_extension("features.counting")
 await bot.load_extension("features.tourney.tourney_reports")
 
 # Tourney system uses a setup function, not load_extension
-setup_tourney_commands(bot)
-await restore_tourney_panels(bot)   # Re-registers persistent views after restart
+await start_tourney_system(bot)     # setup_tourney_commands + restore_tourney_panels
+
+await repost_privacy_policy(bot)       # Rewrites the policy channel
+await repost_event_ticket_panel(bot)   # Wipes and reposts the event panel
 
 # Always last
 await bot.tree.sync()
 ```
 
-`restore_tourney_panels()` must run after `setup_tourney_commands()`. `bot.tree.sync()` must always be last — syncing before all cogs are loaded will miss slash commands.
+`start_tourney_system()` sequences `setup_tourney_commands()` before
+`restore_tourney_panels()` internally. Both reposts run
+after the cogs, so the views they attach are already registered. `bot.tree.sync()` must always be last — syncing before all cogs are loaded will miss slash commands.
+
+**`on_ready` re-fires on every gateway reconnect, not just on startup.** Anything it
+calls has to be safe to run again. Cog loading handles this by swallowing
+`ExtensionAlreadyLoaded`; `setup_tourney_commands()` is idempotent via its own module
+flag, since re-registering a prefix command raises; and the panel restore is guarded to
+once per process, because a reconnect leaves the View objects alive — reposting would
+only break the panel's pins and jump links. A restore that fails is *not* latched, so a
+network error on the first attempt is retried on the next reconnect (#548).
 
 ---
 
@@ -157,6 +169,7 @@ TOURNEY_UPDATES_CHANNEL_ID       # Where stage announcements are posted
 TOURNEY_SCHEDULE_CHANNEL_ID      # Scanned for Matcherino ID auto-detection
 TOURNEY_REPORT_CHANNEL_ID        # End-of-tourney stat embeds archive
 LOG_CHANNEL_ID                   # Ticket transcript log
+BOT_LOGS_CHANNEL_ID              # Startup summary, load failures, runtime errors
 OTHER_TICKET_CHANNEL_ID          # General support channel (locked during tourney)
 SPANISH_CHANNEL_ID               # Spanish channel (only needed for SA region mode)
 GENERAL_CHANNEL_ID               # Gets 60s slowmode during live tourney
@@ -265,4 +278,6 @@ Tests use `pytest-asyncio`. Individual test files map 1:1 to feature files (e.g.
 | `MongoDB Connection Failed` | Bad `MONGO_URI` or network issue | Check Atlas IP allowlist and URI format |
 | `Command Sync Error` | Slash commands sync failed | Usually a rate limit — wait and restart |
 | Buttons dead after restart | `restore_tourney_panels()` not called or views not re-registered | Ensure `restore_tourney_panels(bot)` runs in `on_ready` |
+| `CommandRegistrationError` on reconnect | Something in `on_ready` registers a command without being re-entrant | `on_ready` re-fires on every reconnect — guard the registration, see `setup_tourney_commands` |
+| Event panel missing after restart | Bot lacks Manage Messages in the panel channel, or `EVENT_TICKET_PANEL_CHANNEL_ID` is `0` | Grant Manage Messages and set the ID in both config branches |
 | `Tourney category is not configured correctly` | `TOURNEY_CATEGORY_ID` points to wrong channel type | Must be a Category, not a Text Channel |

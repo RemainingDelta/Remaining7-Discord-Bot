@@ -1022,7 +1022,10 @@ async def delete_ticket_via_command(ctx: commands.Context):
         TOURNEY_CLOSED_CATEGORY_ID,
         PRE_TOURNEY_CLOSED_CATEGORY_ID,
     )
-    if ctx.channel.category_id not in valid_categories:
+    if (
+        not isinstance(ctx.channel, discord.TextChannel)
+        or ctx.channel.category_id not in valid_categories
+    ):
         await ctx.reply("This command can only be used in a tourney ticket channel.")
         return
 

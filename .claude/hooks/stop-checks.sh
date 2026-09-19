@@ -41,17 +41,23 @@ if [ -f /tmp/r7-files-changed ]; then
 fi
 
 # --- 3. restart the bot ------------------------------------------------------
+# Skipped in cloud/remote sessions (CLAUDE_CODE_REMOTE=true): there is no local
+# bot process to restart there. The parity check and lint autofix above stay
+# unguarded so they still run everywhere.
+#
 # Check the opt-out before consuming the marker, so a no-restart session leaves
 # the "files changed" signal intact for the next turn instead of swallowing it.
-[ -f /tmp/claude-no-restart ] && exit 0
-[ -f /tmp/r7-files-changed ] || exit 0
-rm -f /tmp/r7-files-changed
+if [ "${CLAUDE_CODE_REMOTE:-}" != "true" ]; then
+  [ -f /tmp/claude-no-restart ] && exit 0
+  [ -f /tmp/r7-files-changed ] || exit 0
+  rm -f /tmp/r7-files-changed
 
-[ -f /tmp/r7-bot.pid ] && kill "$(cat /tmp/r7-bot.pid)" 2>/dev/null
-rm -f /tmp/r7-bot.pid
-sleep 1
+  [ -f /tmp/r7-bot.pid ] && kill "$(cat /tmp/r7-bot.pid)" 2>/dev/null
+  rm -f /tmp/r7-bot.pid
+  sleep 1
 
-nohup .venv/bin/python -u main.py </dev/null >> /tmp/r7-bot.log 2>&1 &
-echo $! > /tmp/r7-bot.pid
+  nohup .venv/bin/python -u main.py </dev/null >> /tmp/r7-bot.log 2>&1 &
+  echo $! > /tmp/r7-bot.pid
+fi
 
 exit 0

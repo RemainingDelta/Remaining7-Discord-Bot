@@ -2013,6 +2013,10 @@ async def get_next_support_ticket_number(counter_key: str) -> int:
         return int(doc.get("value", 1))
     except Exception as e:
         print(f"⚠️ DB Error (Support Counter): {e}")
+        # Must return an int: the caller formats this straight into the channel
+        # name, so falling through as None raises TypeError before the ticket
+        # channel is ever created.
+        return 1
 
 
 # --- STICKY MESSAGES ---

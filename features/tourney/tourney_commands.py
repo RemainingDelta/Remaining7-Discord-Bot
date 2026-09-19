@@ -1743,7 +1743,19 @@ class BlacklistGroup(app_commands.Group):
         await interaction.response.send_message(embed=embed)
 
 
+# on_ready re-fires on every gateway reconnect, and this registers top-level
+# prefix commands, so a second run raises CommandRegistrationError. The
+# function owns its own re-entrancy the way load_extension owns
+# ExtensionAlreadyLoaded (#548).
+_TOURNEY_COMMANDS_REGISTERED = False
+
+
 def setup_tourney_commands(bot: commands.Bot):
+    global _TOURNEY_COMMANDS_REGISTERED
+    if _TOURNEY_COMMANDS_REGISTERED:
+        return
+    _TOURNEY_COMMANDS_REGISTERED = True
+
     sticky_redirect_state = {"enabled": False, "region": None}
     admin_role_original_name: list[str | None] = [None]  # mutable container for closure
     slowmode_auto_disable_task: list[asyncio.Task | None] = [
@@ -1880,8 +1892,10 @@ def setup_tourney_commands(bot: commands.Bot):
         if await route_shared_ticket_command(ctx, "reopen"):
             return
 
-        # Check if we are inside a CLOSED ticket category
-        if ctx.channel.category_id in (
+        # Check if we are inside a CLOSED ticket category. The isinstance guard
+        # keeps a DM'd `!reopen` from reading `category_id` off a DMChannel (#517);
+        # the else branch's warning is the right reply there.
+        if isinstance(ctx.channel, discord.TextChannel) and ctx.channel.category_id in (
             TOURNEY_CLOSED_CATEGORY_ID,
             PRE_TOURNEY_CLOSED_CATEGORY_ID,
         ):
