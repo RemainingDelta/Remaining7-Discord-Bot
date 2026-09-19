@@ -16,6 +16,7 @@ import discord
 import pytest
 
 from features.config import OTHER_TICKET_CHANNEL_ID
+from features.event_tickets import _MAX_TRANSCRIPT_IMAGES
 from features.privacy_policy import (
     LAST_UPDATED,
     POLICY_PARTS,
@@ -55,6 +56,13 @@ CONFIGURED_PRIVACY_CHANNEL_ID = 222222222
 
 def _sections():
     return [section for part in POLICY_PARTS for section in part.sections]
+
+
+def _section(heading):
+    for section in _sections():
+        if section.heading == heading:
+            return section
+    raise AssertionError(f"no section named {heading!r}")
 
 
 def _rendered(embeds):
@@ -153,7 +161,34 @@ def test_last_embed_carries_the_last_updated_date():
 
 
 def test_last_updated_matches_the_filed_date():
-    assert LAST_UPDATED == "September 8, 2026"
+    assert LAST_UPDATED == "September 19, 2026"
+
+
+def test_transcript_disclosure_names_every_kind_of_ticket():
+    # #401 added a third kind of ticket that produces a transcript. The policy
+    # named only support and tournament, so a member reading it would not learn
+    # that closing an event ticket copies their messages anywhere.
+    body = _section("When information leaves Discord").body.lower()
+    for kind in ("support", "tournament", "event"):
+        assert kind in body, f"{kind} tickets are not disclosed"
+
+
+def test_transcript_disclosure_covers_re_uploaded_images():
+    # An event transcript does not link images, it re-uploads copies of them
+    # into a staff-only channel. Pinned against the cap in the feature module so
+    # that raising the cap without touching the policy fails here rather than
+    # leaving the policy quietly understating what is copied.
+    body = _section("When information leaves Discord").body.lower()
+    assert "image" in body
+    assert str(_MAX_TRANSCRIPT_IMAGES) in body
+
+
+def test_deletion_carve_out_covers_transcript_images():
+    # The retention carve-out is the one place the deletion promise is limited.
+    # Image copies now fall inside it, so it has to say so rather than leave a
+    # member to infer it from the transcript paragraph two sections earlier.
+    body = _section("Opt-out and your choices").body.lower()
+    assert "image" in body
 
 
 def test_last_embed_mentions_the_tickets_channel():
@@ -236,6 +271,20 @@ def test_privacy_policy_document_covers_every_section():
 def test_privacy_policy_document_carries_the_last_updated_date():
     text = (REPO_ROOT / "PRIVACY_POLICY.md").read_text(encoding="utf-8")
     assert f"Last updated: {LAST_UPDATED}" in text
+
+
+def test_privacy_policy_document_repeats_the_module_text_verbatim():
+    # The module is the source and the markdown is the copy. Heading parity
+    # above does not catch the two saying different things under the same
+    # heading, which is exactly how the transcript paragraph went stale.
+    text = (REPO_ROOT / "PRIVACY_POLICY.md").read_text(encoding="utf-8")
+    for section in _sections():
+        if section.heading == "Contact us":
+            continue  # templated with the guild's tickets channel
+        for line in section.body.splitlines():
+            line = line.strip()
+            if line:
+                assert line in text, f"{section.heading!r} differs: {line!r}"
 
 
 def test_privacy_policy_document_has_no_external_links():
