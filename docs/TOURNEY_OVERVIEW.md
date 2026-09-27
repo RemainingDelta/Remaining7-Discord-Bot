@@ -19,7 +19,7 @@ The tournament system orchestrates the full lifecycle of a Brawl Stars tournamen
    re.search(r"matcherino\.com/supercell/tournaments/(\d+)", content)
    ```
    and saves the ID to the active session. If not found, posts a warning telling staff to set it manually with `/set-matcherino`.
-5. **Locks** `OTHER_TICKET_CHANNEL_ID` from members via the internal `lock_command()` helper (6-hour auto-reopen timer starts)
+5. **Locks** `OTHER_TICKET_CHANNEL_ID` and the event ticket panel (`EVENT_TICKET_PANEL_CHANNEL_ID`) from members via the internal `lock_command()` helper (6-hour auto-reopen timer starts)
 6. **SA region mode** (`!starttourney sa`): locks the Spanish support channel (`SPANISH_CHANNEL_ID`) and posts a redirect embed in Spanish pointing members to the main tourney support channel
 7. **Main tourney support channel** (`TOURNEY_SUPPORT_CHANNEL_ID`):
    - Sets permissions: `@everyone` can view but not send; staff roles can send
@@ -73,7 +73,7 @@ Because the bot auto-resumes, re-running `!starttourney` while a session is acti
 8. **Closes the session** in MongoDB (`end_tourney_session()`) and disables data collection
 9. **Clears the bracket team cache** (`clear_bracket_teams_cache()`)
 10. **Auto-posts Hall of Fame** using the session's `matcherino_id` (shared `post_hall_of_fame()` helper, also used by `/hall-of-fame`) — skipped if no `matcherino_id` was set; failures are caught and reported without blocking the rest of `!endtourney`
-11. **Reopens** `OTHER_TICKET_CHANNEL_ID` (unlocks members)
+11. **Reopens** `OTHER_TICKET_CHANNEL_ID` and the event ticket panel (unlocks members)
 12. **Restores Admin role name** to its original value
 13. **Cancels the slowmode timer** and removes slowmode from general channel immediately
 14. **Unlocks Spanish channel** (`SPANISH_CHANNEL_ID`)
@@ -168,7 +168,7 @@ Active sessions are stored in `tourney_sessions`:
 | `progress_dashboard_task` | 5 minutes | Updates bracket progress in `#tourney-admin` |
 | `match_refresher_task` | 1 minute | Refreshes Matcherino scores in each active ticket |
 | `auto_disable_slowmode` | 1 hour (one-shot) | Removes slowmode from general channel |
-| `auto_reopen` (lock) | 6 hours (one-shot) | Re-opens `OTHER_TICKET_CHANNEL_ID` |
+| `auto_reopen` (lock) | 6 hours (one-shot) | Re-opens `OTHER_TICKET_CHANNEL_ID` and the event ticket panel |
 | `_hof_retry_loop` | 1 hour (up to 2 retries) | Re-reads an unavailable Hall of Fame prize pool |
 
 ---

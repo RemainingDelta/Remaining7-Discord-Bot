@@ -77,6 +77,7 @@ from features.config import (
     TOURNEY_ADMIN_ROLE_ID,
     TOURNEY_REPORT_CHANNEL_ID,
     TOURNEY_SCHEDULE_CHANNEL_ID,
+    EVENT_TICKET_PANEL_CHANNEL_ID,
 )
 from .tourney_utils import (
     close_ticket_via_command,
@@ -1743,6 +1744,133 @@ class BlacklistGroup(app_commands.Group):
         await interaction.response.send_message(embed=embed)
 
 
+async def set_event_panel_visibility(
+    bot: commands.Bot, member_role: discord.Role, visible: bool
+) -> discord.TextChannel | None:
+    """Show or hide the event ticket panel alongside the OTHER ticket channel (#559).
+
+    Never raises: a missing panel or a failed permission edit must not stop
+    tourney start or end. Returns the channel only when it was changed.
+    """
+    channel = (
+        bot.get_channel(EVENT_TICKET_PANEL_CHANNEL_ID)
+        if EVENT_TICKET_PANEL_CHANNEL_ID
+        else None
+    )
+    if not isinstance(channel, discord.TextChannel):
+        print("⚠️ Event ticket panel channel not found, visibility left unchanged")
+        return None
+    try:
+        await channel.set_permissions(member_role, view_channel=visible)
+    except discord.HTTPException as e:
+        print(f"⚠️ Could not update event ticket panel visibility: {e}")
+        return None
+    return channel
+
+
+async def lock_command(ctx: commands.Context):
+    """Temporarily lock the OTHER ticket channel and event panel from members."""
+    if not isinstance(ctx.author, discord.Member) or not is_staff(ctx.author):
+        await ctx.reply("You don't have permission to lock the ticket channel.")
+        return
+
+    bot = ctx.bot
+    channel = bot.get_channel(OTHER_TICKET_CHANNEL_ID)
+    if channel is None or not isinstance(channel, discord.TextChannel):
+        await ctx.reply(
+            "Configured ticket channel not found. Check OTHER_TICKET_CHANNEL_ID."
+        )
+        return
+
+    guild = channel.guild
+
+    # Use member role from config, or @everyone if MEMBER_ROLE_ID is None
+    if MEMBER_ROLE_ID is None:
+        member_role = guild.default_role
+    else:
+        member_role = guild.get_role(MEMBER_ROLE_ID)
+
+    if member_role is None:
+        await ctx.reply("Member role not found in this server.")
+        return
+
+    # Hide from members
+    await channel.set_permissions(member_role, view_channel=False)
+    event_panel = await set_event_panel_visibility(bot, member_role, False)
+    locked = channel.mention + (f" and {event_panel.mention}" if event_panel else "")
+    await ctx.reply(
+        f"🔒 Locked {locked}. It will auto-reopen in {LOCK_DURATION_HOURS} hours "
+        f"or when `!reopen` is used."
+    )
+
+    # Cancel any old timer
+    old = lock_tasks.get(channel.id)
+    if old and not old.done():
+        old.cancel()
+
+    # Remember where the command was run so we can notify there later
+    notify_channel_id = ctx.channel.id
+
+    async def auto_reopen():
+        try:
+            await asyncio.sleep(LOCK_DURATION_HOURS * 3600)
+        except asyncio.CancelledError:
+            return  # manually reopened with !reopen
+
+        ticket_ch = bot.get_channel(OTHER_TICKET_CHANNEL_ID)
+        if isinstance(ticket_ch, discord.TextChannel):
+            await ticket_ch.set_permissions(member_role, view_channel=True)
+        await set_event_panel_visibility(bot, member_role, True)
+
+        # Notify in the original channel where !lock was used
+        notify_ch = bot.get_channel(notify_channel_id)
+        if isinstance(notify_ch, discord.TextChannel):
+            await notify_ch.send(
+                f"🔓 Reopened {ticket_ch.mention} automatically after {LOCK_DURATION_HOURS} hours."
+            )
+
+    task = asyncio.create_task(auto_reopen())
+    lock_tasks[channel.id] = task
+
+
+async def unlock_command(ctx: commands.Context):
+    """Unlock the general support channel and event panel. Called internally by !endtourney."""
+    if not isinstance(ctx.author, discord.Member) or not is_staff(ctx.author):
+        await ctx.reply("You don't have permission to unlock the ticket channel.")
+        return
+
+    bot = ctx.bot
+    channel = bot.get_channel(OTHER_TICKET_CHANNEL_ID)
+    if channel is None or not isinstance(channel, discord.TextChannel):
+        await ctx.reply(
+            "Configured ticket channel not found. Check OTHER_TICKET_CHANNEL_ID."
+        )
+        return
+
+    guild = channel.guild
+
+    if MEMBER_ROLE_ID is None:
+        member_role = guild.default_role
+    else:
+        member_role = guild.get_role(MEMBER_ROLE_ID)
+
+    if member_role is None:
+        await ctx.reply("Member role not found in this server.")
+        return
+
+    # Restore permissions for members
+    await channel.set_permissions(member_role, view_channel=True)
+    event_panel = await set_event_panel_visibility(bot, member_role, True)
+
+    # Cancel any auto-lock timer
+    task = lock_tasks.pop(channel.id, None)
+    if task and not task.done():
+        task.cancel()
+
+    unlocked = channel.mention + (f" and {event_panel.mention}" if event_panel else "")
+    await ctx.reply(f"🔓 **Unlocked** {unlocked}. Members can see it again.")
+
+
 # on_ready re-fires on every gateway reconnect, and this registers top-level
 # prefix commands, so a second run raises CommandRegistrationError. The
 # function owns its own re-entrancy the way load_extension owns
@@ -1781,100 +1909,6 @@ def setup_tourney_commands(bot: commands.Bot):
         # -----------------------
 
         await close_ticket_via_command(ctx)
-
-    async def lock_command(ctx: commands.Context):
-        """Temporarily lock the OTHER ticket channel from members."""
-        if not isinstance(ctx.author, discord.Member) or not is_staff(ctx.author):
-            await ctx.reply("You don't have permission to lock the ticket channel.")
-            return
-
-        channel = bot.get_channel(OTHER_TICKET_CHANNEL_ID)
-        if channel is None or not isinstance(channel, discord.TextChannel):
-            await ctx.reply(
-                "Configured ticket channel not found. Check OTHER_TICKET_CHANNEL_ID."
-            )
-            return
-
-        guild = channel.guild
-
-        # Use member role from config, or @everyone if MEMBER_ROLE_ID is None
-        if MEMBER_ROLE_ID is None:
-            member_role = guild.default_role
-        else:
-            member_role = guild.get_role(MEMBER_ROLE_ID)
-
-        if member_role is None:
-            await ctx.reply("Member role not found in this server.")
-            return
-
-        # Hide from members
-        await channel.set_permissions(member_role, view_channel=False)
-        await ctx.reply(
-            f"🔒 Locked {channel.mention}. It will auto-reopen in {LOCK_DURATION_HOURS} hours "
-            f"or when `!reopen` is used."
-        )
-
-        # Cancel any old timer
-        old = lock_tasks.get(channel.id)
-        if old and not old.done():
-            old.cancel()
-
-        # Remember where the command was run so we can notify there later
-        notify_channel_id = ctx.channel.id
-
-        async def auto_reopen():
-            try:
-                await asyncio.sleep(LOCK_DURATION_HOURS * 3600)
-            except asyncio.CancelledError:
-                return  # manually reopened with !reopen
-
-            ticket_ch = bot.get_channel(OTHER_TICKET_CHANNEL_ID)
-            if isinstance(ticket_ch, discord.TextChannel):
-                await ticket_ch.set_permissions(member_role, view_channel=True)
-
-            # Notify in the original channel where !lock was used
-            notify_ch = bot.get_channel(notify_channel_id)
-            if isinstance(notify_ch, discord.TextChannel):
-                await notify_ch.send(
-                    f"🔓 Reopened {ticket_ch.mention} automatically after {LOCK_DURATION_HOURS} hours."
-                )
-
-        task = asyncio.create_task(auto_reopen())
-        lock_tasks[channel.id] = task
-
-    async def unlock_command(ctx: commands.Context):
-        """Unlock the general support channel. Called internally by !endtourney."""
-        if not isinstance(ctx.author, discord.Member) or not is_staff(ctx.author):
-            await ctx.reply("You don't have permission to unlock the ticket channel.")
-            return
-
-        channel = bot.get_channel(OTHER_TICKET_CHANNEL_ID)
-        if channel is None or not isinstance(channel, discord.TextChannel):
-            await ctx.reply(
-                "Configured ticket channel not found. Check OTHER_TICKET_CHANNEL_ID."
-            )
-            return
-
-        guild = channel.guild
-
-        if MEMBER_ROLE_ID is None:
-            member_role = guild.default_role
-        else:
-            member_role = guild.get_role(MEMBER_ROLE_ID)
-
-        if member_role is None:
-            await ctx.reply("Member role not found in this server.")
-            return
-
-        # Restore permissions for members
-        await channel.set_permissions(member_role, view_channel=True)
-
-        # Cancel any auto-lock timer
-        task = lock_tasks.pop(channel.id, None)
-        if task and not task.done():
-            task.cancel()
-
-        await ctx.reply(f"🔓 **Unlocked** {channel.mention}. Members can see it again.")
 
     @bot.command(name="delete", aliases=["del"])
     async def delete_command(ctx: commands.Context):
@@ -3194,8 +3228,8 @@ def setup_tourney_commands(bot: commands.Bot):
 
         # --- 1. Session & Channel Management ---
         session_text = (
-            "`!starttourney [region]` - Wipes old tickets, locks general support, and posts the live panel. Use `!starttourney SA` for South America mode. The bot auto-resumes after a restart, so add `force` (`!starttourney [region] force`) only to intentionally restart setup over an active session.\n"
-            "`!endtourney` - Closes all active tickets, generates staff stats, posts the Pre-Tourney panel, and unlocks general support.\n"
+            "`!starttourney [region]` - Wipes old tickets, locks general and event support, and posts the live panel. Use `!starttourney SA` for South America mode. The bot auto-resumes after a restart, so add `force` (`!starttourney [region] force`) only to intentionally restart setup over an active session.\n"
+            "`!endtourney` - Closes all active tickets, generates staff stats, posts the Pre-Tourney panel, and unlocks general and event support.\n"
             "`/tourney-panel` - Post the live tourney support button.\n"
             "`/pre-tourney-panel` - Post the pre-tourney support button.\n"
             "`/tourney-test-mode` - Toggle 100-ticket limit and 0.1s cooldown for testing."
@@ -3857,6 +3891,8 @@ def setup_tourney_commands(bot: commands.Bot):
                             print("♻️ Locked ticket channel reopened after resume.")
                         except Exception as e:
                             print(f"⚠️ Tourney resume: lock reopen failed: {e}")
+                    if role:
+                        await set_event_panel_visibility(bot, role, True)
 
                 if member_role:
                     old = lock_tasks.get(channel.id)
