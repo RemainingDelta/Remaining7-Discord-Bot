@@ -78,16 +78,16 @@ When a ticket is created, the issue field is passed through `_get_translation()`
 
 ```python
 async def _get_translation(text: str) -> str | None:
-    detected = await asyncio.to_thread(detect, text)  # langdetect
-    if detected == "en":
+    try:
+        detected = await asyncio.to_thread(detect, text)  # langdetect
+        if detected == "en":
+            return None
+        return await translate_client.translate(text, source="auto", target="en")
+    except Exception:
         return None
-    translated = await asyncio.to_thread(
-        GoogleTranslator(source="auto", target="en").translate, text
-    )
-    return translated
 ```
 
-Both the `detect()` and `translate()` calls are run in a thread pool (`asyncio.to_thread`) so they don't block the async event loop. If a translation is produced, it appears as an additional embed field in the ticket.
+Detection runs in a thread pool (`asyncio.to_thread`) so it doesn't block the event loop. Translation goes through the shared client in `features/translate_client.py`, which throttles, caches, retries and falls back to MyMemory (see [`TRANSLATION.md`](TRANSLATION.md)). If a translation is produced, it appears as an additional embed field in the ticket. If every provider fails, the ticket opens without the translation field.
 
 ---
 

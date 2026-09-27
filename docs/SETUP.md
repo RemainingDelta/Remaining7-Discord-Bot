@@ -41,7 +41,7 @@ ruff==0.16.0
 | `motor` | All MongoDB operations (async driver) |
 | `dnspython` + `certifi` | Required by motor for MongoDB Atlas SRV connection strings |
 | `python-dotenv` | Loading `.env` file |
-| `deep-translator` | Translation cog + tourney ticket auto-translation |
+| `deep-translator` | Translation cog + tourney ticket auto-translation, via `features/translate_client.py` (Google, with MyMemory as fallback) |
 | `langdetect` | Language auto-detection for translation |
 | `requests` + `requests-cache` | Matcherino API calls |
 | `beautifulsoup4` | Matcherino HTML scraping (payout report) |

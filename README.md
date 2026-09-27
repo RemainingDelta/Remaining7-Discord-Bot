@@ -14,7 +14,7 @@
 - **Language:** Python 3.10+
 - **Framework:** `discord.py` (slash commands + prefix commands)
 - **Database:** MongoDB Atlas via `motor` (async)
-- **Translation:** `deep-translator` + `langdetect`
+- **Translation:** `deep-translator` (Google, MyMemory fallback) + `langdetect`
 - **External API:** Matcherino (tournament brackets, payouts)
 - **AI Integration:** Gemini API (GitHub issue generation)
 - **Linting:** Ruff (`ruff check .` / `ruff format .`)
@@ -248,7 +248,7 @@ Every user always has **4 active quests** — one daily and one weekly per categ
 ### Translation
 - `!t [language]` / `!translate [language]` — reply to a message to translate it to English.
 - `/translate <language> <phrase>` — translate English text into any of 55 supported languages.
-- Auto-detects source language. Google Translate backend.
+- Auto-detects source language. Google Translate backend, throttled bot-wide with retry on rate limits and a MyMemory fallback; if both refuse, the user gets a "service is busy" message instead of a raw error.
 
 ### Counting Game
 - Sequential counting game in a designated channel — users send the next number in sequence, as a plain number or a basic arithmetic expression (`7*10` counts as `70`, evaluated by a safe `ast` parser). Off-sequence, repeat-user, or invalid messages are removed and the count is left unchanged.
