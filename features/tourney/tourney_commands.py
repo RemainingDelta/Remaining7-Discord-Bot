@@ -642,7 +642,7 @@ async def run_hall_of_fame(
         await _clear_pending_hof(
             bot, _retry_marker or existing, "✅ Already posted — nothing further to do."
         )
-        return True, "ℹ️ A Hall of Fame post for this tournament already exists."
+        return True, "⚠️ A Hall of Fame post for this tournament already exists."
 
     if prize_pool is None:
         res = data["results"]
