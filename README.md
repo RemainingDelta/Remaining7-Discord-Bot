@@ -49,7 +49,7 @@ Remaining7-Discord-Bot/
 │   ├── translation.py               # !t prefix & /translate slash command (54 languages)
 │   ├── counting.py                  # Sequential counting game with /set-count
 │   ├── story.py                     # Collaborative one-word story game (staff-run, moderated)
-│   ├── sticky.py                    # !sticky / !unsticky persistent channel messages
+│   ├── sticky.py                    # "Set Sticky" message command / /unsticky persistent channel messages
 │   ├── support_tickets.py           # General support tickets (issues, support, apps, partnership)
 │   ├── github_tickets.py            # AI-powered GitHub issue creation from tickets (Gemini)
 │   ├── event_tickets.py             # Private event answer-submission tickets
@@ -260,8 +260,8 @@ Every user always has **4 active quests** — one daily and one weekly per categ
 - `/story-see` — view the current story. `/story-start`, `/story-end`, `/story-reset`, `/story-banword`, `/story-banchar` (Staff) — run and moderate stories.
 
 ### Sticky Messages
-- `!sticky <message>` — pin a message that reposts automatically when other messages are sent. Usable by Admins and Event Staff.
-- `!unsticky` — remove the active sticky message from a channel.
+- **Set Sticky** (right-click a message → Apps → Set Sticky) — make that message sticky so it reposts automatically when other messages are sent. Usable by Admins and Event Staff.
+- `/unsticky` — remove the active sticky message from a channel.
 
 ### Utility
 - `/convert-time <date> <time> <timezone>` — convert a date and time to all Discord timestamp formats. Supports 20+ timezone aliases (EST, PT, GMT, etc.) and IANA names.

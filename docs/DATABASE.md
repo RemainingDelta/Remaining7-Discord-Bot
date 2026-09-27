@@ -238,7 +238,7 @@ The purge writes this doc **before any deletes**, `$addToSet`s each channel into
 ### `sticky_messages`
 Sticky message data per channel. `_id = str(channel_id)`.
 
-Fields: `content`, `attachment_url`, `message_id` (last posted sticky message to delete on repost).
+Fields: `content`, `attachments` (list of `{filename, data}` with the file bytes), `bot_message_id` (last posted sticky message to delete on repost).
 
 ---
 

@@ -146,8 +146,8 @@ class General(commands.Cog):
         # Server Tools
         tools_text = (
             "`/set-count <number>` - Manually set the current count in the counting channel.\n"
-            "`!sticky <message>` - Pin a message that reposts whenever others send in that channel.\n"
-            "`!unsticky` - Remove the active sticky message from a channel."
+            "**Set Sticky** - Right-click a message → Apps → Set Sticky to keep it reposted at the bottom of the channel.\n"
+            "`/unsticky` - Remove the active sticky message from a channel."
         )
         embed.add_field(name="🔧 Server Tools", value=tools_text, inline=False)
 
