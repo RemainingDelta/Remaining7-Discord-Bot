@@ -1,6 +1,9 @@
-"""Tests for pure functions in features/translation.py."""
+"""Tests for features/translation.py."""
 
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
+
+import discord
+from discord import app_commands
 
 from features.translation import Translation
 
@@ -9,46 +12,131 @@ def make_cog():
     return Translation(MagicMock())
 
 
-# --- get_language_code ---
+def make_message(content):
+    message = MagicMock(spec=discord.Message)
+    message.content = content
+    return message
 
 
-def test_get_language_code_by_full_name():
-    assert make_cog().get_language_code("Spanish") == "es"
+def patch_translator(translated="Hello friend", error=None):
+    """Patch GoogleTranslator so .translate returns `translated` or raises `error`."""
+    translator = MagicMock()
+    if error is not None:
+        translator.translate.side_effect = error
+    else:
+        translator.translate.return_value = translated
+    return patch("features.translation.GoogleTranslator", return_value=translator)
 
 
-def test_get_language_code_by_code_directly():
-    assert make_cog().get_language_code("es") == "es"
+def sent_embed(interaction):
+    return interaction.followup.send.call_args.kwargs["embed"]
 
 
-def test_get_language_code_case_insensitive_name():
-    assert make_cog().get_language_code("ENGLISH") == "en"
-    assert make_cog().get_language_code("english") == "en"
+def embed_text(embed):
+    parts = [embed.title or ""]
+    for field in embed.fields:
+        parts.append(field.name)
+        parts.append(field.value)
+    return "\n".join(parts)
 
 
-def test_get_language_code_case_insensitive_code():
-    assert make_cog().get_language_code("ES") == "es"
+# --- "Translate" message command (#564) ---
 
 
-def test_get_language_code_french():
-    assert make_cog().get_language_code("French") == "fr"
-    assert make_cog().get_language_code("fr") == "fr"
+async def test_translate_message_replies_with_original_and_translation(
+    mock_interaction,
+):
+    cog = make_cog()
+    with (
+        patch("features.translation.detect", return_value="es"),
+        patch_translator("Hello friend"),
+    ):
+        await cog.translate_message(mock_interaction, make_message("Hola amigo"))
+
+    text = embed_text(sent_embed(mock_interaction))
+    assert "Hola amigo" in text
+    assert "Hello friend" in text
+    assert "Spanish" in text
 
 
-def test_get_language_code_portuguese():
-    assert make_cog().get_language_code("Portuguese") == "pt"
+async def test_translate_message_with_no_text_errors_without_translating(
+    mock_interaction,
+):
+    cog = make_cog()
+    with patch_translator() as translator_cls:
+        await cog.translate_message(mock_interaction, make_message("   "))
+
+    translator_cls.assert_not_called()
+    mock_interaction.response.send_message.assert_awaited_once()
+    assert mock_interaction.response.send_message.call_args.kwargs["ephemeral"]
+    mock_interaction.followup.send.assert_not_called()
 
 
-def test_get_language_code_unknown_returns_none():
-    assert make_cog().get_language_code("klingon") is None
+async def test_translate_message_translator_error_is_ephemeral(mock_interaction):
+    cog = make_cog()
+    with (
+        patch("features.translation.detect", return_value="es"),
+        patch_translator(error=RuntimeError("service down")),
+    ):
+        await cog.translate_message(mock_interaction, make_message("Hola amigo"))
+
+    mock_interaction.followup.send.assert_awaited_once()
+    assert mock_interaction.followup.send.call_args.kwargs["ephemeral"]
+    assert "embed" not in mock_interaction.followup.send.call_args.kwargs
 
 
-def test_get_language_code_empty_string_returns_none():
-    assert make_cog().get_language_code("") is None
+async def test_translate_message_unmapped_language_code_is_upper_cased(
+    mock_interaction,
+):
+    cog = make_cog()
+    with (
+        patch("features.translation.detect", return_value="xx"),
+        patch_translator("Hello"),
+    ):
+        await cog.translate_message(mock_interaction, make_message("blah"))
+
+    assert "XX" in sent_embed(mock_interaction).title
 
 
-def test_get_language_code_whitespace_only_returns_none():
-    # Strips and lowercases, doesn't match anything
-    assert make_cog().get_language_code("   ") is None
+# --- registration ---
+
+
+def test_no_translate_prefix_command_is_registered():
+    names = set()
+    for command in make_cog().get_commands():
+        names.add(command.name)
+        names.update(command.aliases)
+    assert "translate" not in names
+    assert "t" not in names
+
+
+async def test_cog_load_registers_translate_message_command():
+    bot = MagicMock()
+    cog = Translation(bot)
+
+    await cog.cog_load()
+
+    menu = bot.tree.add_command.call_args.args[0]
+    assert isinstance(menu, app_commands.ContextMenu)
+    assert menu.name == "Translate"
+    assert menu.type is discord.AppCommandType.message
+
+
+async def test_cog_unload_removes_translate_message_command():
+    bot = MagicMock()
+    bot.tree.remove_command = MagicMock()
+    cog = Translation(bot)
+
+    await cog.cog_unload()
+
+    bot.tree.remove_command.assert_called_once_with(
+        "Translate", type=discord.AppCommandType.message
+    )
+
+
+def test_translate_slash_command_is_still_registered():
+    names = [c.name for c in make_cog().get_app_commands()]
+    assert "translate" in names
 
 
 # --- language_autocomplete ---
