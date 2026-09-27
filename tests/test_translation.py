@@ -1,11 +1,12 @@
 """Tests for features/translation.py."""
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import discord
 from discord import app_commands
 
-from features.translation import Translation
+from features import translate_client
+from features.translation import BUSY_MESSAGE, Translation
 
 
 def make_cog():
@@ -19,13 +20,9 @@ def make_message(content):
 
 
 def patch_translator(translated="Hello friend", error=None):
-    """Patch GoogleTranslator so .translate returns `translated` or raises `error`."""
-    translator = MagicMock()
-    if error is not None:
-        translator.translate.side_effect = error
-    else:
-        translator.translate.return_value = translated
-    return patch("features.translation.GoogleTranslator", return_value=translator)
+    """Patch the shared translate client to return `translated` or raise `error`."""
+    translate = AsyncMock(return_value=translated, side_effect=error)
+    return patch("features.translation.translate_client.translate", new=translate)
 
 
 def sent_embed(interaction):
@@ -63,10 +60,10 @@ async def test_translate_message_with_no_text_errors_without_translating(
     mock_interaction,
 ):
     cog = make_cog()
-    with patch_translator() as translator_cls:
+    with patch_translator() as translate:
         await cog.translate_message(mock_interaction, make_message("   "))
 
-    translator_cls.assert_not_called()
+    translate.assert_not_awaited()
     mock_interaction.response.send_message.assert_awaited_once()
     assert mock_interaction.response.send_message.call_args.kwargs["ephemeral"]
     mock_interaction.followup.send.assert_not_called()
@@ -83,6 +80,21 @@ async def test_translate_message_translator_error_is_ephemeral(mock_interaction)
     mock_interaction.followup.send.assert_awaited_once()
     assert mock_interaction.followup.send.call_args.kwargs["ephemeral"]
     assert "embed" not in mock_interaction.followup.send.call_args.kwargs
+
+
+async def test_translate_message_when_providers_unavailable_shows_busy(
+    mock_interaction,
+):
+    cog = make_cog()
+    with (
+        patch("features.translation.detect", return_value="es"),
+        patch_translator(error=translate_client.TranslationUnavailable()),
+    ):
+        await cog.translate_message(mock_interaction, make_message("Hola amigo"))
+
+    mock_interaction.followup.send.assert_awaited_once_with(
+        BUSY_MESSAGE, ephemeral=True
+    )
 
 
 async def test_translate_message_unmapped_language_code_is_upper_cased(

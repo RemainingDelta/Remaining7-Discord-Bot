@@ -2,9 +2,10 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 import asyncio
-from deep_translator import GoogleTranslator
 from langdetect import detect
 from typing import List
+
+from features import translate_client
 
 # Complete dictionary of 55 languages
 LANG_MAP = {
@@ -64,6 +65,10 @@ LANG_MAP = {
     "zh-tw": "Traditional Chinese",
 }
 
+BUSY_MESSAGE = (
+    "⚠️ The translation service is busy right now. Please try again in a minute."
+)
+
 
 class Translation(commands.Cog):
     def __init__(self, bot):
@@ -112,8 +117,8 @@ class Translation(commands.Cog):
             detected_code = await asyncio.to_thread(detect, text)
             display_name = LANG_MAP.get(detected_code, detected_code.upper())
 
-            translated = await asyncio.to_thread(
-                GoogleTranslator(source="auto", target="en").translate, text
+            translated = await translate_client.translate(
+                text, source="auto", target="en"
             )
 
             embed = discord.Embed(
@@ -128,6 +133,8 @@ class Translation(commands.Cog):
                 icon_url=interaction.user.display_avatar.url,
             )
             await interaction.followup.send(embed=embed)
+        except translate_client.TranslationUnavailable:
+            await interaction.followup.send(BUSY_MESSAGE, ephemeral=True)
         except Exception as e:
             await interaction.followup.send(f"❌ Error: {e}", ephemeral=True)
 
@@ -149,8 +156,8 @@ class Translation(commands.Cog):
             # Check if the code provided exists in our map
             target_lang_name = LANG_MAP.get(language, language.upper())
 
-            translated = await asyncio.to_thread(
-                GoogleTranslator(source="en", target=language).translate, phrase
+            translated = await translate_client.translate(
+                phrase, source="en", target=language
             )
 
             embed = discord.Embed(
@@ -171,6 +178,8 @@ class Translation(commands.Cog):
 
             await interaction.followup.send(embed=embed)
 
+        except translate_client.TranslationUnavailable:
+            await interaction.followup.send(BUSY_MESSAGE, ephemeral=True)
         except Exception as e:
             await interaction.followup.send(
                 f"❌ An error occurred: `{e}`", ephemeral=True
