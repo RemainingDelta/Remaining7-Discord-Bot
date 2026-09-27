@@ -10,7 +10,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from deep_translator.constants import MY_MEMORY_LANGUAGES_TO_CODES
-from deep_translator.exceptions import RequestError, TooManyRequests
+from deep_translator.exceptions import (
+    LanguageNotSupportedException,
+    RequestError,
+    TooManyRequests,
+)
 
 from features import translate_client
 from features.translation import LANG_MAP
@@ -23,9 +27,19 @@ def fast_client(monkeypatch):
     """No real waiting, and a clean cache and throttle for every test."""
     monkeypatch.setattr(translate_client, "MIN_INTERVAL", 0)
     monkeypatch.setattr(translate_client, "RETRY_DELAYS", (0, 0))
+    # Never reach the network: tests that need a provider patch it explicitly.
+    offline = MagicMock(side_effect=AssertionError("unpatched provider called"))
+    monkeypatch.setattr(translate_client, "GoogleTranslator", offline)
+    monkeypatch.setattr(translate_client, "MyMemoryTranslator", offline)
     translate_client.clear_cache()
     yield
     translate_client.clear_cache()
+
+
+def _outcomes(outcomes):
+    # An exhausted side_effect list raises StopIteration, which cannot cross
+    # asyncio.to_thread and hangs the test instead of failing it.
+    return [*outcomes, AssertionError("provider called more times than expected")]
 
 
 def google_returning(*outcomes):
@@ -34,7 +48,7 @@ def google_returning(*outcomes):
     An exception instance in `outcomes` is raised instead of returned.
     """
     translator = MagicMock()
-    translator.translate = MagicMock(side_effect=list(outcomes))
+    translator.translate = MagicMock(side_effect=_outcomes(outcomes))
     return patch.object(
         translate_client, "GoogleTranslator", MagicMock(return_value=translator)
     ), translator
@@ -42,7 +56,7 @@ def google_returning(*outcomes):
 
 def mymemory_returning(*outcomes):
     translator = MagicMock()
-    translator.translate = MagicMock(side_effect=list(outcomes))
+    translator.translate = MagicMock(side_effect=_outcomes(outcomes))
     cls = MagicMock(return_value=translator)
     return patch.object(translate_client, "MyMemoryTranslator", cls), translator, cls
 
@@ -168,6 +182,22 @@ async def test_fallback_detects_language_when_source_is_auto():
     ):
         await translate_client.translate("hola amigos", source="auto", target="en")
     assert cls.call_args.kwargs["source"].startswith("es-")
+
+
+async def test_unsupported_language_is_reported_not_treated_as_busy():
+    """A bad language code is the user's mistake, so no fallback and no 'busy'."""
+    google_patch, _ = google_returning()
+    mm_patch, mymemory, _ = mymemory_returning("SHOULD NOT BE USED")
+    unsupported = LanguageNotSupportedException("klingon")
+    with (
+        patch.object(
+            translate_client, "GoogleTranslator", MagicMock(side_effect=unsupported)
+        ),
+        mm_patch,
+    ):
+        with pytest.raises(LanguageNotSupportedException):
+            await translate_client.translate("hello", source="en", target="klingon")
+    mymemory.translate.assert_not_called()
 
 
 def test_every_supported_language_has_a_mymemory_code():
