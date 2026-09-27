@@ -220,7 +220,7 @@ Used by the progress dashboard. Scans the entire bracket to produce:
 
 Scrapes the tournament HTML page for the name and prize pool, then uses the API to determine Top 4 placement:
 
-- **HTML scrape**: Finds `div.title.mr-08` (or `div.title-container`) for name; `div.prize-pool-amt span` for prize pool
+- **HTML scrape**: Name from `div.title.mr-08` or `div.title-container`, falling back to `og:title` / `<title>` (with the " | Matcherino" suffix stripped). Prize pool is the first bare dollar figure inside `section#prize-pool`, then `div.prize-pool-card`, then the legacy `div.prize-pool-amt` (#560). Only ids and semantic class names are matched, never the `tw:` utility classes
 - **Final match determination**: `visible_matches[-2]` = Grand Final (second-to-last created match in Matcherino's sequence), `visible_matches[-1]` = Bronze Match
 - **Placement split**: 1st = 50%, 2nd = 25%, 3rd = 15%, 4th = 10% of total prize pool
 

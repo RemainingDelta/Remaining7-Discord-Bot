@@ -212,3 +212,122 @@ def test_name_survives_a_missing_prize_pool():
     soup = _soup(PAGE_NO_PRIZE_DIV)
     assert _parse_tournament_name(soup) == "Remaining 7 Weekly #42"
     assert _parse_prize_pool(soup) is None
+
+
+# =========================================================================
+#  #560: Matcherino's redesign moved the prize pool. Fixtures below are
+#  trimmed from the live page for tournament 221477 ($145.50). The tw:
+#  utility classes are kept as-is so the parser is proven not to rely on them.
+# =========================================================================
+
+PRIZE_SECTION_HTML = """
+<section class="tw:bg-panel tw:border tw:border-border tw:rounded-xl" id="prize-pool">
+  <div class="tw:flex tw:items-end tw:justify-between tw:px-[22px] tw:py-[18px]">
+    <span class="tw:text-lg tw:font-bold tw:!text-white">Prize Pool</span>
+    <div class="tw:flex tw:flex-col tw:items-end">
+      <span class="tw:text-[26px] tw:font-extrabold tw:bg-clip-text">{amount}</span>
+      <span class="tw:text-xs tw:text-muted-foreground">Current Total</span>
+    </div>
+  </div>
+  <div class="tw:p-[22px] tw:space-y-6"></div>
+</section>
+"""
+
+PRIZE_CARD_HTML = """
+<div class="prize-pool-card tw:relative">
+  <div class="tw:flex tw:items-center tw:gap-2 tw:mb-3">
+    <span class="tw:font-semibold tw:text-sm">Prize Pool</span>
+  </div>
+  <div class="tw:space-y-4">
+    <div><div class="tw:text-[34px] tw:font-extrabold">{amount}</div></div>
+    <button class="contribute-btn tw:w-full">Contribute to Prize Pool</button>
+  </div>
+</div>
+"""
+
+
+def _section(amount: str) -> str:
+    return PRIZE_SECTION_HTML.replace("{amount}", amount)
+
+
+def _card(amount: str) -> str:
+    return PRIZE_CARD_HTML.replace("{amount}", amount)
+
+
+# --- _parse_prize_pool: new markup (#560) ---
+
+
+def test_prize_pool_reads_new_prize_pool_section():
+    assert _parse_prize_pool(_soup(_section("$145.50"))) == 145.50
+
+
+def test_prize_pool_reads_new_sidebar_card():
+    assert _parse_prize_pool(_soup(_card("$145.50"))) == 145.50
+
+
+def test_prize_pool_new_markup_zero_is_a_real_value():
+    assert _parse_prize_pool(_soup(_section("$0.00"))) == 0.0
+
+
+def test_prize_pool_new_markup_strips_thousands_separator():
+    assert _parse_prize_pool(_soup(_section("$1,250.00"))) == 1250.0
+
+
+def test_prize_pool_new_markup_whole_dollars():
+    assert _parse_prize_pool(_soup(_card("$500"))) == 500.0
+
+
+def test_prize_pool_new_section_with_no_amount_returns_none():
+    # Only the labels are present ("Prize Pool", "Current Total"); neither may
+    # be mistaken for the amount.
+    assert _parse_prize_pool(_soup(_section(""))) is None
+
+
+def test_prize_pool_new_card_with_no_amount_returns_none():
+    # The "Contribute to Prize Pool" button text must not be read as the amount.
+    assert _parse_prize_pool(_soup(_card(""))) is None
+
+
+def test_prize_pool_new_markup_unparseable_returns_none():
+    assert _parse_prize_pool(_soup(_section("TBD"))) is None
+
+
+def test_prize_pool_full_page_with_both_locations():
+    page = f"<main>{_section('$145.50')}</main><aside>{_card('$145.50')}</aside>"
+    assert _parse_prize_pool(_soup(page)) == 145.50
+
+
+def test_prize_pool_ignores_unrelated_dollar_amounts():
+    # A dollar figure elsewhere on the page (e.g. a contribution list) must
+    # not be picked up when the prize pool itself is unreadable.
+    page = '<section id="contributions"><span>$25.00</span></section>' + _section("")
+    assert _parse_prize_pool(_soup(page)) is None
+
+
+# --- _parse_tournament_name: fallbacks for the redesigned page (#560) ---
+
+
+def test_name_falls_back_to_og_title():
+    html = (
+        '<head><meta property="og:title" content="Remaining 7 Weekly #99"></head>'
+        + _section("$145.50")
+    )
+    assert _parse_tournament_name(_soup(html)) == "Remaining 7 Weekly #99"
+
+
+def test_name_falls_back_to_title_tag_and_strips_site_suffix():
+    html = "<head><title>Remaining 7 Weekly #99 | Matcherino</title></head>"
+    assert _parse_tournament_name(_soup(html)) == "Remaining 7 Weekly #99"
+
+
+def test_name_title_tag_that_is_only_the_site_name_is_ignored():
+    html = "<head><title>Matcherino</title></head>"
+    assert _parse_tournament_name(_soup(html)) is None
+
+
+def test_name_legacy_selector_wins_over_og_title():
+    html = (
+        '<head><meta property="og:title" content="Generic"></head>'
+        '<div class="title mr-08">Remaining 7 Weekly #42</div>'
+    )
+    assert _parse_tournament_name(_soup(html)) == "Remaining 7 Weekly #42"
