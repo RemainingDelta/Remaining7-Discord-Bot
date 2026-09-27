@@ -180,44 +180,6 @@ class Security(commands.Cog):
         # Log to both channels
         await self._send_security_logs(result_embed)
 
-    # --- COMMAND 2: Text Command (!hacked) ---
-    @commands.command(name="hacked")
-    async def hacked_text(self, ctx):
-        """
-        Usage: Reply to a suspicious message with !hacked
-        """
-        if not await self.has_security_permission(ctx):
-            return
-
-        if ctx.message.content.strip() != "!hacked":
-            return
-
-        if not ctx.message.reference:
-            await ctx.send("❌ Reply to a message with `!hacked` to flag that user.")
-            return
-
-        replied_message = await ctx.channel.fetch_message(
-            ctx.message.reference.message_id
-        )
-        target_user = replied_message.author
-
-        if isinstance(target_user, discord.User):
-            try:
-                target_user = await ctx.guild.fetch_member(target_user.id)
-            except Exception:
-                pass  # User left — proceed with discord.User to still purge messages and tag DB
-
-        status_msg = await ctx.send("⏳ Processing Hacked Protocol...")
-        result_embed = await self._execute_hacked_action(
-            ctx.guild, target_user, ctx.author
-        )
-        await status_msg.edit(content=None, embed=result_embed)
-
-        # Log to both channels
-        await self._send_security_logs(result_embed)
-
-    # --- OTHER COMMANDS ---
-
     @app_commands.command(
         name="unhacked",
         description="MOD/ADMIN: Mark user as recovered (Remove Timeout & Flag).",
