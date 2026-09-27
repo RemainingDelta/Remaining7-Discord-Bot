@@ -1,7 +1,7 @@
 # Translation
 
 ## Overview
-The translation system wraps Google Translate (via `deep-translator`) and `langdetect`. It exposes a reply-based prefix command and a slash command for manual translations. It is also used internally by `tourney_utils.py` to auto-translate ticket issue descriptions.
+The translation system wraps Google Translate (via `deep-translator`) and `langdetect`. It exposes a "Translate" message command and a slash command for manual translations. It is also used internally by `tourney_utils.py` to auto-translate ticket issue descriptions.
 
 ---
 
@@ -22,18 +22,20 @@ Both `detect()` and `translate()` are blocking calls run in a thread pool via `a
 
 ---
 
-## Prefix Command: `!translate [language]` / `!t [language]`
+## Message Command: "Translate"
 
-Must be used as a **reply** to an existing message:
+Right-click any message, then **Apps → Translate** (on mobile, long-press the message → Apps):
 
-1. Reads the referenced message's content
-2. Calls `langdetect.detect()` to identify the source language
-3. If a target language is specified (e.g. `!t Spanish`), translates to that language
-4. Otherwise, translates to English
+1. Reads the target message's content from the interaction (no reply or command text needed)
+2. Replies with an ephemeral error if the message has no text (image-only or embed-only)
+3. Calls `langdetect.detect()` to identify the source language
+4. Translates to English
 5. Posts a response embed with:
-   - Title: `🌐 Translated from {detected_lang}` or `🌐 Translated to {lang}`
+   - Title: `🌐 Translated from {detected_lang}`
    - Field: Original message (quoted)
-   - Field: Translated text (bold)
+   - Field: English translation (bold)
+
+The context menu is registered on the command tree in `cog_load` and removed in `cog_unload`, since discord.py does not allow context menus to be declared as cog methods.
 
 ---
 
