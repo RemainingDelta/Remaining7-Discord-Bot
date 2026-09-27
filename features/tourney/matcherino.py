@@ -564,8 +564,13 @@ def fetch_ticket_context(
         return {"error": f"An unexpected error occurred: {e}"}
 
 
-# Page <title> / og:title carry a site suffix like "Name | Matcherino".
-_SITE_SUFFIX_RE = re.compile(r"\s*[|\-\u2013\u2014]\s*Matcherino\s*$", re.IGNORECASE)
+# Page <title> / og:title carry site suffixes like "Name | Supercell" or
+# "Name | Supercell | Matcherino" (Supercell is the whitelabel host). Only
+# these known names are stripped, so a "|" inside a tourney name survives.
+_SITE_SUFFIX_RE = re.compile(
+    r"\s*[|\-\u2013\u2014]\s*(Matcherino|Supercell)\s*$", re.IGNORECASE
+)
+_SITE_NAMES = ("matcherino", "supercell")
 
 
 def _parse_tournament_name(soup) -> str | None:
@@ -589,8 +594,10 @@ def _parse_tournament_name(soup) -> str | None:
     if soup.title and soup.title.string:
         candidates.append(soup.title.string)
     for raw in candidates:
-        name = _SITE_SUFFIX_RE.sub("", raw).strip()
-        if name and name.lower() != "matcherino":
+        name = raw.strip()
+        while (stripped := _SITE_SUFFIX_RE.sub("", name).strip()) != name:
+            name = stripped
+        if name and name.lower() not in _SITE_NAMES:
             return name
     return None
 

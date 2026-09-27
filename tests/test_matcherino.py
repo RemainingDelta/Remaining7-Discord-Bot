@@ -331,3 +331,24 @@ def test_name_legacy_selector_wins_over_og_title():
         '<div class="title mr-08">Remaining 7 Weekly #42</div>'
     )
     assert _parse_tournament_name(_soup(html)) == "Remaining 7 Weekly #42"
+
+
+def test_name_strips_supercell_whitelabel_suffix():
+    # Supercell's whitelabel page titles read "Name | Supercell".
+    html = '<head><meta property="og:title" content="Remaining 7 Weekly #99 | Supercell"></head>'
+    assert _parse_tournament_name(_soup(html)) == "Remaining 7 Weekly #99"
+
+
+def test_name_strips_stacked_site_suffixes():
+    html = "<head><title>Remaining 7 Weekly #99 | Supercell | Matcherino</title></head>"
+    assert _parse_tournament_name(_soup(html)) == "Remaining 7 Weekly #99"
+
+
+def test_name_keeps_a_pipe_that_is_part_of_the_tourney_name():
+    html = "<head><title>R7 Weekly | NA Region | Supercell</title></head>"
+    assert _parse_tournament_name(_soup(html)) == "R7 Weekly | NA Region"
+
+
+def test_name_title_that_is_only_site_names_is_ignored():
+    html = "<head><title>Supercell | Matcherino</title></head>"
+    assert _parse_tournament_name(_soup(html)) is None
