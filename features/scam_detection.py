@@ -392,6 +392,10 @@ class ScamDetection(commands.Cog):
         self.scam_add_menu = app_commands.ContextMenu(
             name="Add to Scam Blacklist", callback=self.scam_add_message
         )
+        # Hidden from regular members; the Security permission check still runs.
+        self.scam_add_menu.default_permissions = discord.Permissions(
+            moderate_members=True
+        )
 
     async def cog_load(self):
         self.bot.tree.add_command(self.scam_add_menu)
