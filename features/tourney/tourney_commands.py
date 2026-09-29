@@ -1799,9 +1799,11 @@ async def lock_command(ctx: commands.Context):
     await channel.set_permissions(member_role, view_channel=False)
     event_panel = await set_event_panel_visibility(bot, member_role, False)
     locked = channel.mention + (f" and {event_panel.mention}" if event_panel else "")
-    await ctx.reply(
+    # send, not reply: under /starttourney the first reply is private to the
+    # invoker, and this notice belongs in the admin channel.
+    await ctx.send(
         f"🔒 Locked {locked}. It will auto-reopen in {LOCK_DURATION_HOURS} hours "
-        f"or when `!reopen` is used."
+        f"or when `/endtourney` is run."
     )
 
     # Cancel any old timer
@@ -1816,7 +1818,7 @@ async def lock_command(ctx: commands.Context):
         try:
             await asyncio.sleep(LOCK_DURATION_HOURS * 3600)
         except asyncio.CancelledError:
-            return  # manually reopened with !reopen
+            return  # unlocked early by /endtourney
 
         ticket_ch = bot.get_channel(OTHER_TICKET_CHANNEL_ID)
         if isinstance(ticket_ch, discord.TextChannel):
@@ -1869,7 +1871,7 @@ async def unlock_command(ctx: commands.Context):
         task.cancel()
 
     unlocked = channel.mention + (f" and {event_panel.mention}" if event_panel else "")
-    await ctx.reply(f"🔓 **Unlocked** {unlocked}. Members can see it again.")
+    await ctx.send(f"🔓 **Unlocked** {unlocked}. Members can see it again.")
 
 
 # on_ready re-fires on every gateway reconnect, and this registers top-level
