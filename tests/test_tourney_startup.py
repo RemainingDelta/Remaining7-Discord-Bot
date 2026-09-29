@@ -106,3 +106,166 @@ async def test_a_real_registration_failure_is_still_reported(monkeypatch, bot):
         assert await main.start_tourney_system(bot) == ["Tournaments"]
 
     record.assert_called_once()
+
+
+# --- /starttourney and /endtourney replace the prefix commands (#567) ---
+
+ADMIN_CHANNEL = 424242
+
+
+class _StopHere(Exception):
+    """Raised from a patched step to end a run once the behavior under test ran."""
+
+
+def _slash_interaction(channel_id=ADMIN_CHANNEL):
+    interaction = MagicMock(spec=discord.Interaction)
+    interaction.user = MagicMock(spec=discord.Member)
+    interaction.user.id = 1
+    interaction.user.name = "staff"
+    interaction.channel = MagicMock(spec=discord.TextChannel)
+    interaction.channel.id = channel_id
+    interaction.channel.send = AsyncMock()
+    interaction.guild = MagicMock(spec=discord.Guild)
+    interaction.client = MagicMock()
+    interaction.client.get_channel = MagicMock(return_value=None)
+    interaction.response = AsyncMock()
+    interaction.followup = AsyncMock()
+    return interaction
+
+
+def _private_text(interaction):
+    return " ".join(
+        str(c.args[0])
+        for c in interaction.followup.send.call_args_list
+        if c.args and c.kwargs.get("ephemeral")
+    )
+
+
+@pytest.fixture
+async def tourney(bot, monkeypatch):
+    """Registered commands plus patched gates and DB calls."""
+    import features.tourney.tourney_commands as tc
+
+    monkeypatch.setattr(tc, "TOURNEY_ADMIN_CHANNEL_ID", ADMIN_CHANNEL)
+    monkeypatch.setattr(tc, "is_staff", lambda member: True)
+    patches = {
+        "get_active_tourney_session": AsyncMock(return_value=None),
+        "create_tourney_session": AsyncMock(),
+        "reset_tourney_session_start_time": AsyncMock(),
+        "update_tourney_runtime_state": AsyncMock(),
+        "reset_ticket_counter": MagicMock(),
+        "lock_command": AsyncMock(side_effect=_StopHere),
+    }
+    for name, mock in patches.items():
+        monkeypatch.setattr(tc, name, mock)
+    setup_tourney_commands(bot)
+    return MagicMock(tc=tc, bot=bot, **patches)
+
+
+async def _start(tourney, interaction, region=None, force=False):
+    command = tourney.bot.tree.get_command("starttourney")
+    await command.callback(interaction, region=region, force=force)
+
+
+def test_start_and_end_are_slash_commands_registered_once(bot):
+    setup_tourney_commands(bot)
+    setup_tourney_commands(bot)
+
+    assert bot.tree.get_command("starttourney") is not None
+    assert bot.tree.get_command("endtourney") is not None
+    assert bot.get_command("starttourney") is None
+    assert bot.get_command("endtourney") is None
+
+
+def test_region_is_a_picker_and_force_defaults_off(bot):
+    setup_tourney_commands(bot)
+    params = {p.name: p for p in bot.tree.get_command("starttourney").parameters}
+
+    assert [c.value for c in params["region"].choices] == ["SA"]
+    assert params["region"].required is False
+    assert params["force"].required is False
+    assert params["force"].default is False
+
+
+async def test_starttourney_denies_non_staff(tourney, monkeypatch):
+    monkeypatch.setattr(tourney.tc, "is_staff", lambda member: False)
+    interaction = _slash_interaction()
+
+    await _start(tourney, interaction)
+
+    assert "permission" in _private_text(interaction)
+    tourney.create_tourney_session.assert_not_awaited()
+    tourney.reset_ticket_counter.assert_not_called()
+
+
+async def test_starttourney_denies_outside_the_admin_channel(tourney):
+    interaction = _slash_interaction(channel_id=1)
+
+    await _start(tourney, interaction)
+
+    assert f"<#{ADMIN_CHANNEL}>" in _private_text(interaction)
+    tourney.create_tourney_session.assert_not_awaited()
+
+
+async def test_starttourney_refuses_an_active_session_without_force(tourney):
+    tourney.get_active_tourney_session.return_value = {"_id": 7}
+    interaction = _slash_interaction()
+
+    await _start(tourney, interaction)
+
+    text = _private_text(interaction)
+    assert "already" in text and "force" in text
+    assert "!starttourney" not in text, "the warning must name the slash command"
+    tourney.reset_ticket_counter.assert_not_called()
+    tourney.reset_tourney_session_start_time.assert_not_awaited()
+
+
+async def test_starttourney_force_proceeds_over_an_active_session(tourney):
+    tourney.get_active_tourney_session.return_value = {"_id": 7}
+    interaction = _slash_interaction()
+
+    with pytest.raises(_StopHere):
+        await _start(tourney, interaction, force=True)
+
+    tourney.reset_ticket_counter.assert_called_once()
+    tourney.reset_tourney_session_start_time.assert_awaited_once_with(7)
+
+
+@pytest.mark.parametrize("region, stored", [("SA", "SA"), (None, None)])
+async def test_region_reaches_the_session_unchanged(tourney, region, stored):
+    tourney.get_active_tourney_session.side_effect = [None, {"_id": 7}]
+    interaction = _slash_interaction()
+
+    with pytest.raises(_StopHere):
+        await _start(tourney, interaction, region=region)
+
+    tourney.create_tourney_session.assert_awaited_once()
+    tourney.update_tourney_runtime_state.assert_any_await(7, region=stored)
+
+
+async def test_starttourney_defers_before_any_work(tourney):
+    interaction = _slash_interaction()
+
+    with pytest.raises(_StopHere):
+        await _start(tourney, interaction)
+
+    interaction.response.defer.assert_awaited_once_with(ephemeral=True, thinking=True)
+
+
+async def test_endtourney_denies_non_staff(tourney, monkeypatch):
+    monkeypatch.setattr(tourney.tc, "is_staff", lambda member: False)
+    interaction = _slash_interaction()
+
+    await tourney.bot.tree.get_command("endtourney").callback(interaction)
+
+    assert "permission" in _private_text(interaction)
+    tourney.get_active_tourney_session.assert_not_awaited()
+
+
+async def test_endtourney_denies_outside_the_admin_channel(tourney):
+    interaction = _slash_interaction(channel_id=1)
+
+    await tourney.bot.tree.get_command("endtourney").callback(interaction)
+
+    assert f"<#{ADMIN_CHANNEL}>" in _private_text(interaction)
+    tourney.get_active_tourney_session.assert_not_awaited()
