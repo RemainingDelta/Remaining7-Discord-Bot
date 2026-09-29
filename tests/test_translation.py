@@ -6,7 +6,12 @@ import discord
 from discord import app_commands
 
 from features import translate_client
-from features.translation import BUSY_MESSAGE, Translation
+from features.translation import (
+    BUSY_MESSAGE,
+    SourceLanguageModal,
+    TranslateResultView,
+    Translation,
+)
 
 
 def make_cog():
@@ -108,6 +113,147 @@ async def test_translate_message_unmapped_language_code_is_upper_cased(
         await cog.translate_message(mock_interaction, make_message("blah"))
 
     assert "XX" in sent_embed(mock_interaction).title
+
+
+# --- "Wrong language?" override (restores `!t <language>`) ---
+
+
+async def translated_view(mock_interaction, text="Hola amigo"):
+    """Run the Translate command and return the result view it attached."""
+    cog = make_cog()
+    with (
+        patch("features.translation.detect", return_value="es"),
+        patch_translator("Hello friend"),
+    ):
+        await cog.translate_message(mock_interaction, make_message(text))
+    return mock_interaction.followup.send.call_args.kwargs["view"]
+
+
+def make_button_interaction(user_id=987654321):
+    interaction = MagicMock(spec=discord.Interaction)
+    interaction.user = MagicMock(spec=discord.Member)
+    interaction.user.id = user_id
+    interaction.user.display_name = "TestUser"
+    interaction.response = AsyncMock()
+    interaction.followup = AsyncMock()
+    interaction.edit_original_response = AsyncMock()
+    return interaction
+
+
+async def submit_language(view, value):
+    modal = SourceLanguageModal(view)
+    modal.language._value = value
+    interaction = make_button_interaction()
+    await modal.on_submit(interaction)
+    return interaction
+
+
+async def test_result_has_a_wrong_language_button(mock_interaction):
+    view = await translated_view(mock_interaction)
+
+    assert isinstance(view, TranslateResultView)
+    labels = [c.label for c in view.children if isinstance(c, discord.ui.Button)]
+    assert labels == ["Wrong language?"]
+
+
+async def test_wrong_language_button_opens_the_language_modal(mock_interaction):
+    view = await translated_view(mock_interaction)
+    interaction = make_button_interaction()
+
+    await view.wrong_language.callback(interaction)
+
+    modal = interaction.response.send_modal.call_args.args[0]
+    assert isinstance(modal, SourceLanguageModal)
+
+
+async def test_only_the_requester_can_use_the_button(mock_interaction):
+    view = await translated_view(mock_interaction)
+
+    assert await view.interaction_check(make_button_interaction()) is True
+    other = make_button_interaction(user_id=1)
+    assert await view.interaction_check(other) is False
+    assert other.response.send_message.call_args.kwargs["ephemeral"]
+
+
+async def test_language_name_retranslates_with_that_source(mock_interaction):
+    view = await translated_view(mock_interaction, text="namaste dost")
+
+    with patch_translator("hello friend") as translate:
+        interaction = await submit_language(view, "Hindi")
+
+    translate.assert_awaited_once_with("namaste dost", source="hi", target="en")
+    embed = interaction.edit_original_response.call_args.kwargs["embed"]
+    assert "Hindi" in embed.title
+    assert embed.author.name == "Manual Language Override"
+    assert "hello friend" in embed_text(embed)
+
+
+async def test_language_code_also_works(mock_interaction):
+    view = await translated_view(mock_interaction)
+
+    with patch_translator("hello") as translate:
+        await submit_language(view, "hi")
+
+    assert translate.await_args.kwargs["source"] == "hi"
+
+
+async def test_unknown_language_is_rejected_without_translating(mock_interaction):
+    view = await translated_view(mock_interaction)
+
+    with patch_translator() as translate:
+        interaction = await submit_language(view, "klingon")
+
+    translate.assert_not_awaited()
+    assert interaction.response.send_message.call_args.kwargs["ephemeral"]
+    interaction.edit_original_response.assert_not_awaited()
+
+
+async def test_override_when_providers_unavailable_shows_busy(mock_interaction):
+    view = await translated_view(mock_interaction)
+
+    with patch_translator(error=translate_client.TranslationUnavailable()):
+        interaction = await submit_language(view, "hindi")
+
+    interaction.followup.send.assert_awaited_once_with(BUSY_MESSAGE, ephemeral=True)
+    interaction.edit_original_response.assert_not_awaited()
+
+
+async def test_button_is_disabled_on_timeout(mock_interaction):
+    view = await translated_view(mock_interaction)
+    view.message = AsyncMock()
+
+    await view.on_timeout()
+
+    assert all(c.disabled for c in view.children)
+    view.message.edit.assert_awaited_once()
+
+
+# --- get_language_code ---
+
+
+def test_get_language_code_by_full_name():
+    assert make_cog().get_language_code("Spanish") == "es"
+
+
+def test_get_language_code_by_code_directly():
+    assert make_cog().get_language_code("es") == "es"
+
+
+def test_get_language_code_case_insensitive_name():
+    assert make_cog().get_language_code("ENGLISH") == "en"
+    assert make_cog().get_language_code("english") == "en"
+
+
+def test_get_language_code_case_insensitive_code():
+    assert make_cog().get_language_code("ES") == "es"
+
+
+def test_get_language_code_unknown_returns_none():
+    assert make_cog().get_language_code("klingon") is None
+
+
+def test_get_language_code_whitespace_only_returns_none():
+    assert make_cog().get_language_code("   ") is None
 
 
 # --- registration ---
