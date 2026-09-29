@@ -56,6 +56,7 @@ def _ctx(channels: dict[int, MagicMock]) -> MagicMock:
     ctx = MagicMock()
     ctx.author = MagicMock(spec=discord.Member)
     ctx.reply = AsyncMock()
+    ctx.send = AsyncMock()
     ctx.channel = MagicMock()
     ctx.channel.id = 9999
     ctx.bot = MagicMock()
@@ -133,3 +134,28 @@ async def test_forbidden_on_event_panel_does_not_raise(
     await tc.unlock_command(ctx)
 
     other_channel.set_permissions.assert_awaited_with(member_role, view_channel=True)
+
+
+# --- the lock notices post in the channel under /starttourney and /endtourney (#567) ---
+# Under the slash commands the first ctx.reply is private to the invoker, so a
+# success notice sent with reply would vanish from the admin channel.
+
+
+async def test_lock_notice_is_posted_in_the_channel(other_channel, event_channel):
+    ctx = _ctx({OTHER_ID: other_channel, EVENT_ID: event_channel})
+
+    await tc.lock_command(ctx)
+
+    text = ctx.send.await_args.args[0]
+    assert "Locked" in text
+    assert "!reopen" not in text, "the lock is lifted by /endtourney, not !reopen"
+    ctx.reply.assert_not_awaited()
+
+
+async def test_unlock_notice_is_posted_in_the_channel(other_channel, event_channel):
+    ctx = _ctx({OTHER_ID: other_channel, EVENT_ID: event_channel})
+
+    await tc.unlock_command(ctx)
+
+    assert "Unlocked" in ctx.send.await_args.args[0]
+    ctx.reply.assert_not_awaited()
