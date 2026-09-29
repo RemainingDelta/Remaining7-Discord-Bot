@@ -6,6 +6,7 @@ command registration raised on every reconnect and reported a feature as
 failed when nothing had failed.
 """
 
+import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import discord
@@ -167,7 +168,7 @@ async def _start(tourney, interaction, region=None, force=False):
     await command.callback(interaction, region=region, force=force)
 
 
-def test_start_and_end_are_slash_commands_registered_once(bot):
+async def test_start_and_end_are_slash_commands_registered_once(bot):
     setup_tourney_commands(bot)
     setup_tourney_commands(bot)
 
@@ -177,7 +178,7 @@ def test_start_and_end_are_slash_commands_registered_once(bot):
     assert bot.get_command("endtourney") is None
 
 
-def test_region_is_a_picker_and_force_defaults_off(bot):
+async def test_region_is_a_picker_and_force_defaults_off(bot):
     setup_tourney_commands(bot)
     params = {p.name: p for p in bot.tree.get_command("starttourney").parameters}
 
@@ -256,16 +257,24 @@ async def test_endtourney_denies_non_staff(tourney, monkeypatch):
     monkeypatch.setattr(tourney.tc, "is_staff", lambda member: False)
     interaction = _slash_interaction()
 
+    await asyncio.sleep(0)  # let setup's resume task make its own session check
+    checks_before = tourney.get_active_tourney_session.await_count
+
     await tourney.bot.tree.get_command("endtourney").callback(interaction)
 
     assert "permission" in _private_text(interaction)
-    tourney.get_active_tourney_session.assert_not_awaited()
+    assert tourney.get_active_tourney_session.await_count == checks_before
+    interaction.channel.send.assert_not_awaited()
 
 
 async def test_endtourney_denies_outside_the_admin_channel(tourney):
     interaction = _slash_interaction(channel_id=1)
 
+    await asyncio.sleep(0)  # let setup's resume task make its own session check
+    checks_before = tourney.get_active_tourney_session.await_count
+
     await tourney.bot.tree.get_command("endtourney").callback(interaction)
 
     assert f"<#{ADMIN_CHANNEL}>" in _private_text(interaction)
-    tourney.get_active_tourney_session.assert_not_awaited()
+    assert tourney.get_active_tourney_session.await_count == checks_before
+    interaction.channel.send.assert_not_awaited()

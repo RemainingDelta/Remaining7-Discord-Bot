@@ -24,7 +24,7 @@ The dashboard message is edited in place if it's already the latest message in t
 Posted and edited in `TOURNEY_ADMIN_CHANNEL_ID`. Shows the bracket's overall completion state.
 
 **Displayed fields**:
-- Total duration since `!starttourney`
+- Total duration since `/starttourney`
 - Completion percentage (`closed_matches / total_matches * 100`)
 - Dominant round (highest round currently seeing active play)
 - Rounds remaining to finals

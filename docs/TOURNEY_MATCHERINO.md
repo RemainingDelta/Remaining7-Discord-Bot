@@ -164,7 +164,7 @@ if bounty_id not in _bracket_teams_cache:
     ]
 ```
 
-This cache is cleared at the end of a tournament session via `clear_bracket_teams_cache()`, which is called by `!endtourney`.
+This cache is cleared at the end of a tournament session via `clear_bracket_teams_cache()`, which is called by `/endtourney`.
 
 ---
 
