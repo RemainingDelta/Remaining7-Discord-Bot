@@ -70,6 +70,102 @@ BUSY_MESSAGE = (
 )
 
 
+def build_translation_embed(
+    text: str,
+    translated: str,
+    source_name: str,
+    requester: discord.abc.User,
+    override: bool = False,
+) -> discord.Embed:
+    embed = discord.Embed(
+        title=f"🌐 Translated from {source_name}", color=discord.Color.blue()
+    )
+    if override:
+        embed.set_author(name="Manual Language Override")
+    embed.add_field(name="Original Message", value=f"> {text}", inline=False)
+    embed.add_field(name="English Translation", value=f"**{translated}**", inline=False)
+    embed.set_footer(
+        text=f"Requested by {requester.display_name}",
+        icon_url=requester.display_avatar.url,
+    )
+    return embed
+
+
+class SourceLanguageModal(discord.ui.Modal, title="Wrong language?"):
+    language = discord.ui.TextInput(
+        label="Language the message is written in",
+        placeholder="e.g. hindi or hi",
+        max_length=30,
+    )
+
+    def __init__(self, view: "TranslateResultView"):
+        super().__init__()
+        self.result_view = view
+
+    async def on_submit(self, interaction: discord.Interaction):
+        view = self.result_view
+        code = view.cog.get_language_code(self.language.value)
+        if code is None:
+            await interaction.response.send_message(
+                f"❌ Unknown language: `{self.language.value}`. Try something like `hindi` or `es`.",
+                ephemeral=True,
+            )
+            return
+
+        # The shared client can wait on throttling and retries.
+        await interaction.response.defer()
+        try:
+            translated = await translate_client.translate(
+                view.text, source=code, target="en"
+            )
+        except translate_client.TranslationUnavailable:
+            await interaction.followup.send(BUSY_MESSAGE, ephemeral=True)
+            return
+        except Exception as e:
+            await interaction.followup.send(f"❌ Error: {e}", ephemeral=True)
+            return
+
+        embed = build_translation_embed(
+            view.text, translated, LANG_MAP[code], interaction.user, override=True
+        )
+        await interaction.edit_original_response(embed=embed, view=view)
+
+
+class TranslateResultView(discord.ui.View):
+    """Lets the requester correct a misdetected source language (was `!t <language>`)."""
+
+    def __init__(self, cog: "Translation", text: str, requester_id: int):
+        super().__init__(timeout=900)
+        self.cog = cog
+        self.text = text
+        self.requester_id = requester_id
+        self.message: discord.Message | None = None
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id == self.requester_id:
+            return True
+        await interaction.response.send_message(
+            "❌ Only the person who asked for this translation can change its language.",
+            ephemeral=True,
+        )
+        return False
+
+    async def on_timeout(self):
+        for item in self.children:
+            item.disabled = True
+        if self.message:
+            try:
+                await self.message.edit(view=self)
+            except discord.HTTPException:
+                pass
+
+    @discord.ui.button(label="Wrong language?", style=discord.ButtonStyle.secondary)
+    async def wrong_language(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ):
+        await interaction.response.send_modal(SourceLanguageModal(self))
+
+
 class Translation(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
@@ -100,6 +196,16 @@ class Translation(commands.Cog):
         # Discord only allows returning up to 25 choices at a time
         return choices[:25]
 
+    def get_language_code(self, user_input: str) -> str | None:
+        """Matches a language name or code (e.g. 'hindi' or 'hi') to a LANG_MAP code."""
+        user_input = user_input.lower().strip()
+        if user_input in LANG_MAP:
+            return user_input
+        for code, name in LANG_MAP.items():
+            if name.lower() == user_input:
+                return code
+        return None
+
     # --- MESSAGE COMMAND (right-click > Apps > Translate) ---
     async def translate_message(
         self, interaction: discord.Interaction, message: discord.Message
@@ -121,18 +227,13 @@ class Translation(commands.Cog):
                 text, source="auto", target="en"
             )
 
-            embed = discord.Embed(
-                title=f"🌐 Translated from {display_name}", color=discord.Color.blue()
+            embed = build_translation_embed(
+                text, translated, display_name, interaction.user
             )
-            embed.add_field(name="Original Message", value=f"> {text}", inline=False)
-            embed.add_field(
-                name="English Translation", value=f"**{translated}**", inline=False
+            view = TranslateResultView(self, text, interaction.user.id)
+            view.message = await interaction.followup.send(
+                embed=embed, view=view, wait=True
             )
-            embed.set_footer(
-                text=f"Requested by {interaction.user.display_name}",
-                icon_url=interaction.user.display_avatar.url,
-            )
-            await interaction.followup.send(embed=embed)
         except translate_client.TranslationUnavailable:
             await interaction.followup.send(BUSY_MESSAGE, ephemeral=True)
         except Exception as e:

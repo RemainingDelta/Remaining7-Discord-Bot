@@ -50,6 +50,7 @@ Right-click any message, then **Apps → Translate** (on mobile, long-press the 
    - Title: `🌐 Translated from {detected_lang}`
    - Field: Original message (quoted)
    - Field: English translation (bold)
+6. Attaches a **Wrong language?** button (replaces `!t <language>`). Only the requester can press it. It opens a modal where they type the message's real language as a name or code (`hindi` or `hi`, matched by `get_language_code()`); the bot re-translates with that as the source and edits the result, adding a "Manual Language Override" author line. An unknown language is rejected ephemerally. The button stops working after 15 minutes or a bot restart.
 
 The context menu is registered on the command tree in `cog_load` and removed in `cog_unload`, since discord.py does not allow context menus to be declared as cog methods.
 
