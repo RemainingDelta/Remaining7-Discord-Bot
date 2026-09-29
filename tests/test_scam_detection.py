@@ -436,6 +436,7 @@ async def test_cog_load_registers_add_to_blacklist_message_command(scam_cog):
     assert isinstance(menu, app_commands.ContextMenu)
     assert menu.name == "Add to Scam Blacklist"
     assert menu.type is discord.AppCommandType.message
+    assert menu.default_permissions is not None, "hidden from regular members"
 
 
 async def test_cog_unload_removes_add_to_blacklist_message_command(scam_cog):
