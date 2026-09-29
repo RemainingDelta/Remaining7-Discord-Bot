@@ -493,7 +493,7 @@ def test_empty_sections_are_omitted():
     """No 'Screenshots/Logs: none', no empty image list."""
     from features.github_tickets import ReferencedContext, append_context
 
-    ctx = ReferencedContext(text="x", logs=(), attachment_names=(), jump_url="J")
+    ctx = ReferencedContext(text="", logs=(), attachment_names=(), jump_url="J")
     body = append_context("### Overview\nfoo\n", ctx)
 
     assert "<details>" not in body
@@ -699,7 +699,7 @@ async def test_create_issue_menu_opens_a_modal_with_one_optional_field(mock_bot)
     fields = [c for c in modal.children if isinstance(c, discord.ui.TextInput)]
     assert len(fields) == 1
     assert fields[0].required is False
-    assert fields[0].style is discord.TextStyle.paragraph
+    assert fields[0].style == discord.TextStyle.paragraph
 
 
 async def _submit(modal, notes):
