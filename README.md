@@ -227,7 +227,7 @@ Every user always has **4 active quests** — one daily and one weekly per categ
 - **Staff Guide:** `/event-staff-help`.
 
 ### Security Protocol
-- `/hacked <user>` — instantly timeout (7 days), flag in DB, purge messages across all channels.
+- `/hacked <user>` or **Flag as Hacked** (right-click one of their messages → Apps, works even if they left) — instantly timeout (7 days), flag in DB, purge messages across all channels.
 - `/unhacked <user>` — remove flag and timeout.
 - `/hacked-list` — view all currently flagged users.
 - Logs to moderator logs channel. Prevents targeting equal/higher role members.
@@ -236,7 +236,7 @@ Every user always has **4 active quests** — one daily and one weekly per categ
 - Automatically scans every image attachment against a MongoDB blacklist using three matchers: MD5 (identical files), pHash (re-compressed/resized copies), and ORB (cropped variants).
 - On a match: deletes the message, purges other copies of the image across all channels (30-min lookback), applies a 10-minute precautionary timeout, and sends a mod alert with the image and action buttons.
 - **Confirm Hacked** button — upgrades to a 7-day timeout, flags the user in the hacked DB, and DMs them. **False Positive** button — removes the timeout.
-- **Add to Scam Blacklist** (right-click a message → Apps) — add that message's image(s) to the blacklist.
+- **Add to Scam Blacklist** (right-click a message → Apps) — dry-runs that message's image(s) against the blacklist, then **Add** or **Cancel**.
 - `/scam-add <image>` — add an uploaded image to the blacklist.
 - `/scam-remove <md5> [md5 ...]` — remove entries by MD5 prefix.
 - `/scam-list` — view all blacklisted images.

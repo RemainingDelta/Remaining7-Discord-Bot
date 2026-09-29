@@ -341,6 +341,38 @@ class ScamAlertView(discord.ui.View):
         await interaction.response.edit_message(embed=embed, view=self)
 
 
+class ScamAddPreviewView(discord.ui.View):
+    """Add / Cancel under the dry-run preview shown by "Add to Scam Blacklist"."""
+
+    def __init__(self, cog: "ScamDetection", attachments: list, invoker_id: int):
+        super().__init__(timeout=300)
+        self.cog = cog
+        self.attachments = attachments
+        self.invoker_id = invoker_id
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id == self.invoker_id:
+            return True
+        await interaction.response.send_message(
+            "❌ Only the moderator who ran this can confirm it.", ephemeral=True
+        )
+        return False
+
+    @discord.ui.button(label="Add", style=discord.ButtonStyle.danger)
+    async def add(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.stop()
+        await interaction.response.defer()
+        summary = await self.cog._add_images(self.attachments)
+        await interaction.edit_original_response(content=summary, embed=None, view=None)
+
+    @discord.ui.button(label="Cancel", style=discord.ButtonStyle.secondary)
+    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.stop()
+        await interaction.response.edit_message(
+            content="Cancelled. Nothing was added.", embed=None, view=None
+        )
+
+
 class ScamDetection(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
@@ -749,6 +781,45 @@ class ScamDetection(commands.Cog):
             )
         return "\n".join(lines)
 
+    async def _dry_run(self, image_bytes: bytes) -> tuple[bool, str | None, list]:
+        """Check an image against the blacklist without taking any action."""
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            self._executor,
+            _sync_check_image_verbose,
+            image_bytes,
+            set(self._md5_set),
+            list(self._phash_index),
+            list(self._orb_index),
+        )
+
+    async def _dry_run_line(self, attachment) -> str:
+        """One preview line: the dry-run result for this attachment."""
+        if attachment.size > _MAX_BLACKLIST_IMAGE_BYTES:
+            return f"`{attachment.filename}`: ❌ Too large to store (max 15MB)"
+        try:
+            image_bytes = await self._download(attachment.url)
+        except Exception as e:
+            return f"`{attachment.filename}`: ❌ Download failed — {e}"
+        try:
+            matched, method, details = await self._dry_run(image_bytes)
+        except Exception as e:
+            return f"`{attachment.filename}`: ❌ Detection error — {e}"
+        status = f"🚨 **MATCH** via {method}" if matched else "✅ No match"
+        detail_str = "\n  ".join(details)
+        return f"`{attachment.filename}`: {status}\n  {detail_str}"
+
+    def _dry_run_embed(self, lines: list[str], title: str) -> discord.Embed:
+        embed = discord.Embed(
+            title=title,
+            description="\n\n".join(lines),
+            color=discord.Color.orange(),
+        )
+        embed.set_footer(
+            text=f"pHash threshold: {PHASH_MATCH_THRESHOLD}/64 | ORB threshold: {ORB_MATCH_THRESHOLD} keypoints"
+        )
+        return embed
+
     async def scam_add_message(
         self, interaction: discord.Interaction, message: discord.Message
     ):
@@ -762,9 +833,13 @@ class ScamDetection(commands.Cog):
             )
             return
 
+        # Dry-run first, so a mod sees what the blacklist already matches
+        # (this is also how a posted image gets tested) before anything is stored.
         await interaction.response.defer(ephemeral=True)
-        summary = await self._add_images(attachments)
-        await interaction.followup.send(summary, ephemeral=True)
+        lines = [await self._dry_run_line(a) for a in attachments]
+        embed = self._dry_run_embed(lines, "🔍 Add to Scam Blacklist?")
+        view = ScamAddPreviewView(self, attachments, interaction.user.id)
+        await interaction.followup.send(embed=embed, view=view, ephemeral=True)
 
     @app_commands.command(
         name="scam-add", description="MOD: Add an uploaded image to the scam blacklist."
@@ -890,45 +965,8 @@ class ScamDetection(commands.Cog):
             return
 
         await interaction.response.defer(ephemeral=True)
-
-        try:
-            image_bytes = await self._download(image.url)
-        except Exception as e:
-            await interaction.followup.send(
-                f"`{image.filename}`: ❌ Download failed — {e}", ephemeral=True
-            )
-            return
-
-        md5_set = set(self._md5_set)
-        phash_index = list(self._phash_index)
-        orb_index = list(self._orb_index)
-        loop = asyncio.get_running_loop()
-
-        try:
-            matched, method, details = await loop.run_in_executor(
-                self._executor,
-                _sync_check_image_verbose,
-                image_bytes,
-                md5_set,
-                phash_index,
-                orb_index,
-            )
-        except Exception as e:
-            await interaction.followup.send(
-                f"`{image.filename}`: ❌ Detection error — {e}", ephemeral=True
-            )
-            return
-
-        status = f"🚨 **MATCH** via {method}" if matched else "✅ No match"
-        detail_str = "\n  ".join(details)
-
-        embed = discord.Embed(
-            title="🔍 Scam Detection — Dry Run",
-            description=f"`{image.filename}`: {status}\n  {detail_str}",
-            color=discord.Color.orange(),
-        )
-        embed.set_footer(
-            text=f"pHash threshold: {PHASH_MATCH_THRESHOLD}/64 | ORB threshold: {ORB_MATCH_THRESHOLD} keypoints"
+        embed = self._dry_run_embed(
+            [await self._dry_run_line(image)], "🔍 Scam Detection — Dry Run"
         )
         await interaction.followup.send(embed=embed, ephemeral=True)
 

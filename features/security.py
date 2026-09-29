@@ -14,6 +14,23 @@ from features.config import ADMIN_ROLE_ID, MODERATOR_ROLE_ID, MODERATOR_LOGS_CHA
 class Security(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
+        # Context menus can't be declared as cog methods, so the "Flag as
+        # Hacked" message command is built here and registered in cog_load.
+        self.flag_hacked_menu = app_commands.ContextMenu(
+            name="Flag as Hacked", callback=self.flag_hacked_message
+        )
+        # Hidden from regular members; has_security_permission still runs.
+        self.flag_hacked_menu.default_permissions = discord.Permissions(
+            moderate_members=True
+        )
+
+    async def cog_load(self):
+        self.bot.tree.add_command(self.flag_hacked_menu)
+
+    async def cog_unload(self):
+        self.bot.tree.remove_command(
+            self.flag_hacked_menu.name, type=self.flag_hacked_menu.type
+        )
 
     # --- HELPER: Checks permissions (Admins OR Mods) ---
     async def has_security_permission(self, source):
@@ -174,6 +191,32 @@ class Security(commands.Cog):
         await interaction.response.defer()
         result_embed = await self._execute_hacked_action(
             interaction.guild, user, interaction.user
+        )
+        await interaction.followup.send(embed=result_embed)
+
+        # Log to both channels
+        await self._send_security_logs(result_embed)
+
+    # --- COMMAND 2: Message Command (right-click > Apps > Flag as Hacked) ---
+    async def flag_hacked_message(
+        self, interaction: discord.Interaction, message: discord.Message
+    ):
+        if not await self.has_security_permission(interaction):
+            await interaction.response.send_message(
+                "❌ Permission Denied.", ephemeral=True
+            )
+            return
+
+        target_user = message.author
+        if isinstance(target_user, discord.User):
+            try:
+                target_user = await interaction.guild.fetch_member(target_user.id)
+            except discord.HTTPException:
+                pass  # User left — proceed with discord.User to still purge messages and tag DB (#298)
+
+        await interaction.response.defer()
+        result_embed = await self._execute_hacked_action(
+            interaction.guild, target_user, interaction.user
         )
         await interaction.followup.send(embed=result_embed)
 

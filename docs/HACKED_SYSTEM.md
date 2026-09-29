@@ -1,13 +1,13 @@
 # Hacked System
 
 ## Overview
-When a Discord account appears compromised (e.g. sending scam links), moderators can flag it with `/hacked`. This triggers a single shared action method, `_execute_hacked_action()`, that applies a timeout, purges messages, logs to the mod channel, DMs the user, and stores the flag in MongoDB.
+When a Discord account appears compromised (e.g. sending scam links), moderators can flag it with `/hacked` or the **Flag as Hacked** message command. This triggers a single shared action method, `_execute_hacked_action()`, that applies a timeout, purges messages, logs to the mod channel, DMs the user, and stores the flag in MongoDB.
 
 ---
 
 ## `_execute_hacked_action(guild, target_user, moderator)`
 
-This is the shared method `/hacked` calls:
+This is the shared method `/hacked` and Flag as Hacked call:
 
 ### Step 1 — Role Guard
 ```python
@@ -50,6 +50,9 @@ The 12-hour window is a deliberate choice — it covers the realistic spread of 
 
 ### `/hacked <user> [days]`
 Slash command. Takes the target user and optional timeout duration (default 7 days). Calls `_execute_hacked_action()` and sends a summary embed in the channel showing timeout status, messages deleted, and channels affected.
+
+### Flag as Hacked (message command)
+Right-click a message from the compromised account → Apps → **Flag as Hacked** (replaces replying with `!hacked`). Targets the message's author. If the author is only a `discord.User`, it tries `guild.fetch_member()`; if they have left the server it still proceeds with the `User`, so their messages are purged and the DB flag is set (#298). Same result embed and mod-log as `/hacked`. Hidden from members without Moderate Members; `has_security_permission()` still runs.
 
 ### `/unhacked <user>`
 1. Removes timeout if the user is still in the server (`await target_user.timeout(None)`)

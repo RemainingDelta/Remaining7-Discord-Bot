@@ -75,12 +75,12 @@ All commands require the Admin or Moderator role (via Security cog's `has_securi
 
 | Command | Behavior |
 |---|---|
-| **Add to Scam Blacklist** (message command) | Right-click a message → Apps. Adds every PNG/JPG/WEBP attachment on it: downloads, stores in `scam_images` (max 15MB — Mongo doc limit), hot-reloads index. Oversized images are reported and skipped; the rest are still added. Registered on the tree in `cog_load`. |
+| **Add to Scam Blacklist** (message command) | Right-click a message → Apps. First shows an ephemeral dry-run preview for every PNG/JPG/WEBP attachment on it (match/no-match, closest pHash distance, best ORB keypoint count) with **Add** / **Cancel** buttons, so this is also how an image already posted in chat is tested. **Add** downloads and stores each image in `scam_images` (max 15MB, the Mongo doc limit) and hot-reloads the index; oversized images are reported and skipped, the rest are still added. Only the invoking mod can press the buttons. Registered on the tree in `cog_load`, hidden from members without Moderate Members. |
 | `/scam-add <image>` | Same as above for a directly uploaded image. |
 | `/scam-remove <md5_prefixes>` | Removes entries by MD5 prefix. Accepts multiple space-separated prefixes; reports removed vs. not-found per prefix; reloads index once, only if something was removed. |
 | `/scam-list` | Lists `filename — md5[:8]` for every entry (fetches without binary data). |
 | `/scam-rename <md5_prefix> <new_name>` | Renames **one** matching entry (use a unique prefix). Multi-word names allowed. |
-| `/scam-test <image>` | Dry run on an uploaded image. Reports match/no-match plus closest pHash distance and best ORB keypoint count. No action taken. Kept as a slash command (not a message command) because Discord allows only 5 message commands per app. |
+| `/scam-test <image>` | Dry run on an uploaded image (for an image already in chat, use the Add to Scam Blacklist preview and press Cancel). Reports match/no-match plus closest pHash distance and best ORB keypoint count. No action taken. Kept as a slash command (not a message command) because Discord allows only 5 message commands per app. |
 
 ---
 
