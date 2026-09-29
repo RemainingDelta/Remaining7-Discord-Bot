@@ -22,13 +22,13 @@ Threshold tuning history:
 - ORB at loose settings (25 keypoints @ distance 50) matched *everything* and deleted innocent images. The current tight cutoff (distance < 20) keeps only near-exact feature matches.
 - Raise `PHASH_MATCH_THRESHOLD` cautiously — 10 already allows minor edits; much higher starts matching unrelated screenshots with similar layouts.
 
-The pHash/ORB indexes are built in memory at cog load (`_reload_index()`) from the `scam_images` collection and hot-reloaded after every `!scam-add` / `!scam-remove` / `!scam-rename`.
+The pHash/ORB indexes are built in memory at cog load (`_reload_index()`) from the `scam_images` collection and hot-reloaded after every add (message command or `/scam-add`), `/scam-remove`, and `/scam-rename`.
 
 ---
 
 ## `on_message` Flow
 
-1. Skip bots, DMs, messages older than 10s (prevents re-processing on reconnect backfill), and anything starting with `!scam` (otherwise `!scam-add`/`!scam-test` with a blacklisted image attached would delete the mod's own command message and time them out).
+1. Skip bots, DMs, and messages older than 10s (prevents re-processing on reconnect backfill). There is no text-based exemption: the management commands are interactions, so a mod never has to post a blacklisted image as a message.
 2. For each allowed attachment (`.png .jpg .jpeg .webp`): in-memory dedup check on `(author_id, filename, size)`, then download via the shared `aiohttp` session, then run the detection pipeline in the executor.
 3. On match, claim the **atomic detection lock** (see below). The lock loser still **deletes its copy of the message** but skips the alert/timeout/purge.
 4. Lock winner: delete the message → purge other copies across all channels/threads (`_PURGE_LOOKBACK_MINUTES = 30`, newest-first, MD5-verified by size pre-filter then download; see **Crash-Safe Purge** below) → 10-minute timeout → mod alert to `MODERATOR_LOGS_CHANNEL_ID` with the image re-uploaded (so it survives the deletion) and a `ScamAlertView`.
@@ -71,15 +71,16 @@ Both buttons gate on the Security cog's `has_security_permission()` (Admin or Mo
 
 ## Commands
 
-All commands require the Admin or Moderator role (via Security cog's `has_security_permission()`).
+All commands require the Admin or Moderator role (via Security cog's `has_security_permission()`). Denials and results are ephemeral.
 
 | Command | Behavior |
 |---|---|
-| `!scam-add` | Reply to a message with an image, or attach image(s) directly. Downloads, stores in `scam_images` (max 15MB — Mongo doc limit), hot-reloads index. |
-| `!scam-remove <md5> [md5 ...]` | Removes entries by MD5 prefix. Accepts multiple prefixes; reports removed vs. not-found per prefix; reloads index once. |
-| `!scam-list` | Lists `filename — md5[:8]` for every entry (fetches without binary data). |
-| `!scam-rename <md5_prefix> <new name...>` | Renames **one** matching entry (use a unique prefix). Multi-word names allowed. |
-| `!scam-test` | Dry run — reply/attach like `!scam-add`. Reports match/no-match plus closest pHash distance and best ORB keypoint count. No action taken. |
+| **Add to Scam Blacklist** (message command) | Right-click a message → Apps. First shows an ephemeral dry-run preview for every PNG/JPG/WEBP attachment on it (match/no-match, closest pHash distance, best ORB keypoint count) with **Add** / **Cancel** buttons, so this is also how an image already posted in chat is tested. **Add** downloads and stores each image in `scam_images` (max 15MB, the Mongo doc limit) and hot-reloads the index; oversized images are reported and skipped, the rest are still added. Only the invoking mod can press the buttons. Registered on the tree in `cog_load`, hidden from members without Moderate Members. |
+| `/scam-add <image>` | Same as above for a directly uploaded image. |
+| `/scam-remove <md5_prefixes>` | Removes entries by MD5 prefix. Accepts multiple space-separated prefixes; reports removed vs. not-found per prefix; reloads index once, only if something was removed. |
+| `/scam-list` | Lists `filename — md5[:8]` for every entry (fetches without binary data). |
+| `/scam-rename <md5_prefix> <new_name>` | Renames **one** matching entry (use a unique prefix). Multi-word names allowed. |
+| `/scam-test <image>` | Dry run on an uploaded image (for an image already in chat, use the Add to Scam Blacklist preview and press Cancel). Reports match/no-match plus closest pHash distance and best ORB keypoint count. No action taken. Kept as a slash command (not a message command) because Discord allows only 5 message commands per app. |
 
 ---
 

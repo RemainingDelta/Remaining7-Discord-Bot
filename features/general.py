@@ -125,7 +125,7 @@ class General(commands.Cog):
         # Security Protocol
         security_text = (
             "`/hacked <user>` - Times out a user and purges recent messages.\n"
-            "`!hacked` (Prefix) - Reply to a message with this to trigger the protocol.\n"
+            "**Flag as Hacked** - Right-click one of their messages → Apps (works even if they left).\n"
             "`/unhacked <user>` - Removes hacked flag and clears timeout.\n"
             "`/hacked-list` - View all users currently flagged as compromised."
         )
@@ -135,11 +135,12 @@ class General(commands.Cog):
         scam_text = (
             "Images are auto-scanned against the scam blacklist — matches are deleted, "
             "the poster gets a 10-min timeout, and an alert with Confirm/Dismiss buttons is posted in mod-logs.\n"
-            "`!scam-add` - Reply to an image (or attach one) to blacklist it.\n"
-            "`!scam-remove <md5> [md5 ...]` - Remove entries by MD5 prefix.\n"
-            "`!scam-list` - View all blacklisted images.\n"
-            "`!scam-rename <md5> <name>` - Give an entry a readable name.\n"
-            "`!scam-test` - Dry-run detection on an image (no action taken)."
+            "**Add to Scam Blacklist** - Right-click a message → Apps to test its image(s), then Add or Cancel.\n"
+            "`/scam-add <image>` - Blacklist an uploaded image.\n"
+            "`/scam-remove <md5> [md5 ...]` - Remove entries by MD5 prefix.\n"
+            "`/scam-list` - View all blacklisted images.\n"
+            "`/scam-rename <md5> <name>` - Give an entry a readable name.\n"
+            "`/scam-test <image>` - Dry-run detection on an image (no action taken)."
         )
         embed.add_field(name="🖼️ Scam Image Detection", value=scam_text, inline=False)
 
