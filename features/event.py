@@ -912,9 +912,9 @@ class Events(commands.Cog):
             "Members open one private channel each (`「❗」event-username`) to submit "
             "their event answer. **One open ticket per member at a time.**\n\n"
             "**Managing a ticket (inside the ticket channel):**\n"
-            "`!close` - Lock the ticket and mark it 「👍」 (stays in place).\n"
-            "`!reopen` - Unlock it and mark it 「❗」 again.\n"
-            "`!delete` - Save the transcript and up to 25 images from the ticket, "
+            "`/close` - Lock the ticket and mark it 「👍」 (stays in place).\n"
+            "`/reopen` - Unlock it and mark it 「❗」 again.\n"
+            "`/delete` - Save the transcript and up to 25 images from the ticket, "
             "DM them to the opener, log them, then delete."
         )
         embed.add_field(name="🎫 Event Tickets", value=ticket_text, inline=False)

@@ -466,7 +466,7 @@ async def create_pre_tourney_ticket_channel(
 
 async def close_ticket_via_command(ctx: commands.Context):
     """
-    Handle the !close command:
+    Handle the /close command:
     1. Check perms.
     2. Move to CLOSED category.
     3. Rename (background).

@@ -8,7 +8,7 @@ channel topic. Event staff can see and manage every open ticket. On deletion the
 saves a transcript to a dedicated event transcript channel and DMs a copy to the opener.
 
 Implemented in `features/event_tickets.py` (a self-contained cog), wired into the shared
-`!close`/`!delete`/`!reopen` router in `features/ticket_command_router.py`.
+`/close`/`/delete`/`/reopen` router in `features/ticket_command_router.py`.
 
 ---
 
@@ -40,7 +40,7 @@ Implemented in `features/event_tickets.py` (a self-contained cog), wired into th
 ---
 
 ## Closing (in place)
-`!close`/`!c` or the **Delete/Reopen** buttons route through
+`/close` or the **Delete/Reopen** buttons route through
 `route_shared_ticket_command`. Closing:
 - Locks the opener to read-only (`send_messages=False`).
 - **Flips the emoji prefix** `「❗」` → `「👍」` — the channel is **not** moved to another
@@ -52,7 +52,7 @@ Reopening restores the opener's send permission and flips the prefix back.
 ---
 
 ## Deleting (with transcript)
-`!delete`/`!del` or the **Delete Ticket** button:
+`/delete` or the **Delete Ticket** button:
 1. Builds the transcript in a single pass over the channel history: the plain-text
    log, plus the bytes of up to **25 images** posted in the ticket.
 2. Sends that set to `EVENT_TICKET_TRANSCRIPT_CHANNEL_ID` (when configured) and DMs
@@ -101,7 +101,7 @@ Discord answers `413`, halving and retrying until each part is accepted.
 The bot runs on a 256 MB host that typically sits near 87%, leaving roughly 33 MB free
 (`docs/HOSTING.md`). Holding a whole ticket's images before sending would scale peak memory
 with the ticket and OOM the process, which is a SIGKILL: no handler runs, nothing reaches
-`BOT_LOGS_CHANNEL_ID`, and it would look like `!delete` silently doing nothing.
+`BOT_LOGS_CHANNEL_ID`, and it would look like `/delete` silently doing nothing.
 
 `_deliver_transcript()` therefore reads one batch, sends it to the log channel and the
 opener's DM, then drops it before reading the next.
@@ -116,7 +116,7 @@ ticket arrives in roughly nine messages; ordinary tickets stay at one.
 ### If the bot restarts mid-delete
 `channel.delete()` runs **last**, after every send, so a crash at any earlier point loses
 nothing: the ticket channel, its messages and its images all survive and staff can re-run
-`!delete`. There is no resumption — a crash between the sends and the deletion means the
+`/delete`. There is no resumption — a crash between the sends and the deletion means the
 retry posts a second transcript. That duplicate is the accepted cost of never deleting a
 channel whose transcript failed to save. This is
 correct whether the limit is 10 MB or 20 MB, per file or per payload: if it all
@@ -144,7 +144,7 @@ from one branch leaves event tickets silently inert on that server:
 
 Staff access is gated on `EVENT_STAFF_ROLE_ID` **or** `ADMIN_ROLE_ID`. Both come from
 the one `_event_staff_role_ids()` set, so either role grants the panel command, access
-to every ticket channel, and `!close` / `!reopen` / `!delete`. An admin can therefore
+to every ticket channel, and `/close` / `/reopen` / `/delete`. An admin can therefore
 read every event submission.
 
 ---
@@ -192,5 +192,5 @@ never changes permissions, so a restart mid-tourney leaves the panel hidden.
 
 ## Source Files
 - `features/event_tickets.py` — all event-ticket logic, UI, and the cog.
-- `features/ticket_command_router.py` — routes `!close`/`!delete`/`!reopen` to it.
+- `features/ticket_command_router.py` — routes `/close`/`/delete`/`/reopen` to it.
 - `main.py` — loads the extension.

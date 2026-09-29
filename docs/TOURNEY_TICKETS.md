@@ -103,7 +103,7 @@ This is non-blocking — the ticket opens regardless.
 
 ## Closing a Ticket
 
-`close_ticket_via_command()` (triggered by `!close` or `!c`):
+`close_ticket_via_command()` (triggered by `/close`):
 
 1. Checks the caller has a staff role
 2. Determines destination category (Closed) based on current category (Active)
@@ -183,4 +183,4 @@ Both wrap back to 1 after 999. `reset_ticket_counter()` is called during `/start
 ## Source Files
 - `features/tourney/tourney_utils.py` — all ticket lifecycle logic
 - `features/tourney/tourney_views.py` — UI components (buttons, modals)
-- `features/tourney/tourney_commands.py` — `!close`, `!delete`, `!reopen`
+- `features/tourney/tourney_commands.py` — `/close`, `/delete`, `/reopen`

@@ -12,7 +12,7 @@ Panel button clicked
     └── TourneyOpenTicketView (button) → TourneyReportModal (modal) → create_tourney_ticket_channel()
     └── PreTourneyOpenTicketView (button) → PreTourneyReportModal (modal) → create_pre_tourney_ticket_channel()
 
-Ticket closed (!close)
+Ticket closed (/close)
     └── DeleteTicketView (2 buttons: Delete / Reopen)
 ```
 
@@ -103,7 +103,7 @@ async def open_ticket(self, interaction, button):
 
 ## `DeleteTicketView`
 
-Attached to the close message sent by `!close`. Gives staff two post-close actions without needing to type a command.
+Attached to the close message sent by `/close`. Gives staff two post-close actions without needing to type a command.
 
 **Buttons**:
 
