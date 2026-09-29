@@ -162,7 +162,60 @@ async def test_every_scam_command_denies_non_moderators(scam_cog, db, mock_inter
     scam_cog._download.assert_not_awaited()
 
 
-# "Add to Scam Blacklist" message command
+# "Add to Scam Blacklist" message command: dry-run preview, then Add / Cancel
+
+
+def verbose_result(matched=False):
+    if matched:
+        return (True, "MD5", ["MD5 exact match: `abcd1234`"])
+    return (False, None, ["pHash closest: `x.png` distance **30**/64"])
+
+
+def make_button_interaction(user_id=987654321):
+    interaction = MagicMock(spec=discord.Interaction)
+    interaction.user = MagicMock(spec=discord.Member)
+    interaction.user.id = user_id
+    interaction.response = AsyncMock()
+    interaction.followup = AsyncMock()
+    interaction.edit_original_response = AsyncMock()
+    return interaction
+
+
+async def preview(scam_cog, interaction, target, matched=False):
+    """Run the message command and return the preview's Add/Cancel view."""
+    with patch(
+        "features.scam_detection._sync_check_image_verbose",
+        return_value=verbose_result(matched),
+    ):
+        await scam_cog.scam_add_message(interaction, target)
+    return interaction.followup.send.call_args.kwargs["view"]
+
+
+async def press_add(view):
+    interaction = make_button_interaction()
+    await view.add.callback(interaction)
+    return interaction
+
+
+def edited_text(interaction):
+    return str(interaction.edit_original_response.call_args.kwargs.get("content"))
+
+
+async def test_add_message_preview_shows_results_and_stores_nothing(
+    scam_cog, db, mock_interaction
+):
+    target = make_target(make_image("a.png"), make_image("b.jpg"))
+
+    view = await preview(scam_cog, mock_interaction, target, matched=True)
+
+    db.add.assert_not_awaited()
+    scam_cog._reload_index.assert_not_awaited()
+    text = response_text(mock_interaction)
+    assert "a.png" in text and "b.jpg" in text
+    assert "MATCH" in text
+    labels = [c.label for c in view.children if isinstance(c, discord.ui.Button)]
+    assert labels == ["Add", "Cancel"]
+    assert all_ephemeral(mock_interaction)
 
 
 async def test_add_message_stores_each_allowed_image_and_reloads(
@@ -170,18 +223,36 @@ async def test_add_message_stores_each_allowed_image_and_reloads(
 ):
     target = make_target(make_image("a.png"), make_image("b.jpg"))
 
-    await scam_cog.scam_add_message(mock_interaction, target)
+    await press_add(await preview(scam_cog, mock_interaction, target))
 
     stored = [c.args[0] for c in db.add.call_args_list]
     assert stored == ["a.png", "b.jpg"]
     scam_cog._reload_index.assert_awaited_once()
-    assert all_ephemeral(mock_interaction)
+
+
+async def test_cancel_stores_nothing(scam_cog, db, mock_interaction):
+    view = await preview(scam_cog, mock_interaction, make_target(make_image()))
+    interaction = make_button_interaction()
+
+    await view.cancel.callback(interaction)
+
+    db.add.assert_not_awaited()
+    scam_cog._reload_index.assert_not_awaited()
+
+
+async def test_only_the_invoker_can_press_add_or_cancel(scam_cog, db, mock_interaction):
+    view = await preview(scam_cog, mock_interaction, make_target(make_image()))
+
+    assert await view.interaction_check(make_button_interaction()) is True
+    other = make_button_interaction(user_id=1)
+    assert await view.interaction_check(other) is False
+    assert other.response.send_message.call_args.kwargs["ephemeral"]
 
 
 async def test_add_message_skips_non_image_attachments(scam_cog, db, mock_interaction):
     target = make_target(make_image("notes.txt"), make_image("a.png"))
 
-    await scam_cog.scam_add_message(mock_interaction, target)
+    await press_add(await preview(scam_cog, mock_interaction, target))
 
     assert [c.args[0] for c in db.add.call_args_list] == ["a.png"]
 
@@ -202,10 +273,10 @@ async def test_add_message_rejects_oversized_image_but_keeps_others(
     big = make_image("big.png", size=16 * 1024 * 1024)
     target = make_target(big, make_image("ok.png"))
 
-    await scam_cog.scam_add_message(mock_interaction, target)
+    added = await press_add(await preview(scam_cog, mock_interaction, target))
 
     assert [c.args[0] for c in db.add.call_args_list] == ["ok.png"]
-    assert "big.png" in response_text(mock_interaction)
+    assert "big.png" in edited_text(added)
 
 
 async def test_add_message_accepts_image_at_exact_size_limit(
@@ -213,7 +284,7 @@ async def test_add_message_accepts_image_at_exact_size_limit(
 ):
     edge = make_image("edge.png", size=15 * 1024 * 1024)
 
-    await scam_cog.scam_add_message(mock_interaction, make_target(edge))
+    await press_add(await preview(scam_cog, mock_interaction, make_target(edge)))
 
     assert [c.args[0] for c in db.add.call_args_list] == ["edge.png"]
 
@@ -382,3 +453,109 @@ def test_hacked_prefix_command_is_removed_and_slash_kept():
     security = Security(MagicMock())
     assert "hacked" not in {c.name for c in security.get_commands()}
     assert "hacked" in {c.name for c in security.get_app_commands()}
+
+
+# --- "Flag as Hacked" message command (replaces replying with !hacked) ---
+
+
+def make_security(allowed=True):
+    bot = MagicMock()
+    bot.tree = MagicMock()
+    security = Security(bot)
+    security.has_security_permission = AsyncMock(return_value=allowed)
+    security._execute_hacked_action = AsyncMock(
+        return_value=discord.Embed(title="done")
+    )
+    security._send_security_logs = AsyncMock()
+    return security
+
+
+def make_flag_target(author):
+    msg = MagicMock(spec=discord.Message)
+    msg.author = author
+    return msg
+
+
+def flag_interaction():
+    interaction = make_button_interaction()
+    interaction.guild = MagicMock(spec=discord.Guild)
+    interaction.guild.fetch_member = AsyncMock()
+    return interaction
+
+
+async def test_flag_as_hacked_denies_non_moderators():
+    security = make_security(allowed=False)
+    interaction = flag_interaction()
+
+    await security.flag_hacked_message(
+        interaction, make_flag_target(MagicMock(spec=discord.Member))
+    )
+
+    security._execute_hacked_action.assert_not_awaited()
+    assert interaction.response.send_message.call_args.kwargs["ephemeral"]
+
+
+async def test_flag_as_hacked_targets_the_message_author():
+    security = make_security()
+    interaction = flag_interaction()
+    author = MagicMock(spec=discord.Member)
+
+    await security.flag_hacked_message(interaction, make_flag_target(author))
+
+    security._execute_hacked_action.assert_awaited_once_with(
+        interaction.guild, author, interaction.user
+    )
+    security._send_security_logs.assert_awaited_once()
+    assert interaction.followup.send.call_args.kwargs["embed"].title == "done"
+
+
+async def test_flag_as_hacked_resolves_a_user_object_to_a_member():
+    security = make_security()
+    interaction = flag_interaction()
+    member = MagicMock(spec=discord.Member)
+    interaction.guild.fetch_member.return_value = member
+    user = MagicMock(spec=discord.User)
+    user.id = 42
+
+    await security.flag_hacked_message(interaction, make_flag_target(user))
+
+    interaction.guild.fetch_member.assert_awaited_once_with(42)
+    assert security._execute_hacked_action.await_args.args[1] is member
+
+
+async def test_flag_as_hacked_still_works_on_a_user_who_left():
+    """#298: the account is often gone by the time a mod acts."""
+    security = make_security()
+    interaction = flag_interaction()
+    interaction.guild.fetch_member.side_effect = discord.NotFound(
+        MagicMock(status=404), "gone"
+    )
+    user = MagicMock(spec=discord.User)
+    user.id = 42
+
+    await security.flag_hacked_message(interaction, make_flag_target(user))
+
+    assert security._execute_hacked_action.await_args.args[1] is user
+    security._send_security_logs.assert_awaited_once()
+
+
+async def test_cog_load_registers_flag_as_hacked_message_command():
+    security = make_security()
+
+    await security.cog_load()
+
+    menu = security.bot.tree.add_command.call_args.args[0]
+    assert isinstance(menu, app_commands.ContextMenu)
+    assert menu.name == "Flag as Hacked"
+    assert menu.type is discord.AppCommandType.message
+    assert menu.default_permissions is not None, "hidden from regular members"
+
+
+async def test_cog_unload_removes_flag_as_hacked_message_command():
+    security = make_security()
+
+    await security.cog_unload()
+
+    security.bot.tree.remove_command.assert_called_once_with(
+        "Flag as Hacked", type=discord.AppCommandType.message
+    )
