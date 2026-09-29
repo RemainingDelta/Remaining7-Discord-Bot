@@ -266,15 +266,10 @@ async def test_concurrent_calls_are_spaced_by_min_interval(monkeypatch):
 # --- Callers ---
 
 
-def _prefix_ctx(text="hola amigos"):
-    original = MagicMock()
-    original.content = text
-    ctx = MagicMock()
-    ctx.message.reference.message_id = 42
-    ctx.channel.fetch_message = AsyncMock(return_value=original)
-    ctx.reply = AsyncMock()
-    ctx.author.display_name = "TestUser"
-    return ctx
+def _target_message(text="hola amigos"):
+    message = MagicMock()
+    message.content = text
+    return message
 
 
 def _sent_text(mock_send):
@@ -284,11 +279,12 @@ def _sent_text(mock_send):
     )
 
 
-async def test_prefix_translate_shows_friendly_message_when_unavailable():
+async def test_message_translate_shows_friendly_message_when_unavailable(
+    mock_interaction,
+):
     from features.translation import Translation
 
     cog = Translation(MagicMock())
-    ctx = _prefix_ctx()
     with (
         patch("features.translation.detect", return_value="es"),
         patch.object(
@@ -297,10 +293,10 @@ async def test_prefix_translate_shows_friendly_message_when_unavailable():
             AsyncMock(side_effect=translate_client.TranslationUnavailable()),
         ),
     ):
-        await cog.translate_prefix.callback(cog, ctx, None)
+        await cog.translate_message(mock_interaction, _target_message())
 
-    ctx.reply.assert_awaited_once()
-    text = _sent_text(ctx.reply)
+    mock_interaction.followup.send.assert_awaited_once()
+    text = _sent_text(mock_interaction.followup.send)
     assert RAW_LIBRARY_TEXT not in text.lower()
     assert "busy" in text.lower()
 
@@ -324,20 +320,19 @@ async def test_slash_translate_shows_friendly_message_when_unavailable(
     assert "busy" in text.lower()
 
 
-async def test_prefix_translate_goes_through_shared_client():
+async def test_message_translate_goes_through_shared_client(mock_interaction):
     from features.translation import Translation
 
     cog = Translation(MagicMock())
-    ctx = _prefix_ctx()
     client = AsyncMock(return_value="hello friends")
     with (
         patch("features.translation.detect", return_value="es"),
         patch.object(translate_client, "translate", client),
     ):
-        await cog.translate_prefix.callback(cog, ctx, None)
+        await cog.translate_message(mock_interaction, _target_message())
 
     client.assert_awaited_once()
-    embed = ctx.reply.await_args.kwargs["embed"]
+    embed = mock_interaction.followup.send.await_args.kwargs["embed"]
     assert any("hello friends" in f.value for f in embed.fields)
 
 

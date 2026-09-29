@@ -1,7 +1,7 @@
 # Translation
 
 ## Overview
-The translation system wraps Google Translate (via `deep-translator`) and `langdetect`. It exposes a reply-based prefix command and a slash command for manual translations. It is also used internally by `tourney_utils.py` to auto-translate ticket issue descriptions. Every caller goes through one shared client, `features/translate_client.py`.
+The translation system wraps Google Translate (via `deep-translator`) and `langdetect`. It exposes a "Translate" message command and a slash command for manual translations. It is also used internally by `tourney_utils.py` to auto-translate ticket issue descriptions. Every caller goes through one shared client, `features/translate_client.py`.
 
 ---
 
@@ -38,17 +38,21 @@ Returns `None` if the text is already English or if detection/translation fails,
 
 ---
 
-## Prefix Command: `!translate [language]` / `!t [language]`
+## Message Command: "Translate"
 
-Must be used as a **reply** to an existing message:
+Right-click any message, then **Apps → Translate** (on mobile, long-press the message → Apps):
 
-1. Reads the referenced message's content
-2. If a language is given (e.g. `!t spanish` or `!t es`), uses it as the **source** language override; an unknown language is rejected. Otherwise calls `langdetect.detect()` to identify the source language
-3. Always translates to English
-4. Posts a response embed with:
-   - Title: `🌐 Translated from {source_lang}` (plus a "Manual Language Override" author line when a language was given)
+1. Reads the target message's content from the interaction (no reply or command text needed)
+2. Replies with an ephemeral error if the message has no text (image-only or embed-only)
+3. Calls `langdetect.detect()` to identify the source language
+4. Translates to English through the shared client; if every provider is unavailable, replies with an ephemeral "busy" message
+5. Posts a response embed with:
+   - Title: `🌐 Translated from {detected_lang}`
    - Field: Original message (quoted)
    - Field: English translation (bold)
+6. Attaches a **Wrong language?** button (replaces `!t <language>`). Only the requester can press it. It opens a modal where they type the message's real language as a name or code (`hindi` or `hi`, matched by `get_language_code()`); the bot re-translates with that as the source and edits the result, adding a "Manual Language Override" author line. An unknown language is rejected ephemerally. The button stops working after 15 minutes or a bot restart.
+
+The context menu is registered on the command tree in `cog_load` and removed in `cog_unload`, since discord.py does not allow context menus to be declared as cog methods.
 
 ---
 
@@ -66,7 +70,7 @@ Afrikaans, Arabic, Bengali, Bulgarian, Catalan, Chinese (Simplified), Chinese (T
 
 ## Notes
 - `deep-translator` uses Google Translate under the hood, with no API key. Google rate limits it per IP; see the shared client section for how the bot copes
-- If both providers fail, `!t` replies and `/translate` responds (ephemeral) with "⚠️ The translation service is busy right now. Please try again in a minute." instead of the raw library error. Other unexpected errors still show their error text
+- If both providers fail, the Translate message command and `/translate` respond (ephemeral) with "⚠️ The translation service is busy right now. Please try again in a minute." instead of the raw library error. Other unexpected errors still show their error text
 - `langdetect` is non-deterministic for short strings (it can misdetect very short text); this is a known limitation
 - `translate_client.py` imports nothing from the bot, so both the cog and `tourney_utils.py` can import it without import cycles
 

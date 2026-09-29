@@ -46,7 +46,7 @@ Remaining7-Discord-Bot/
 │   ├── event.py                     # Event channel cleanup & reward payouts
 │   ├── general.py                   # /help, /mod-help, /admin-help, /version, /convert-time
 │   ├── privacy_policy.py            # Policy content, /privacy-policy, startup repost
-│   ├── translation.py               # !t prefix & /translate slash command (54 languages)
+│   ├── translation.py               # "Translate" message command & /translate slash command (54 languages)
 │   ├── counting.py                  # Sequential counting game with /set-count
 │   ├── story.py                     # Collaborative one-word story game (staff-run, moderated)
 │   ├── sticky.py                    # !sticky / !unsticky persistent channel messages
@@ -246,7 +246,7 @@ Every user always has **4 active quests** — one daily and one weekly per categ
 - Moderators can repost any message by pasting its Discord link alone in a message — the bot mirrors it via a temporary webhook using the original author's name and avatar in the current channel.
 
 ### Translation
-- `!t [language]` / `!translate [language]` — reply to a message to translate it to English.
+- **Translate** (right-click a message → Apps → Translate) — translates that message to English. If the language was detected wrong, press **Wrong language?** on the result and type the right one (e.g. `hindi`).
 - `/translate <language> <phrase>` — translate English text into any of 55 supported languages.
 - Auto-detects source language. Google Translate backend, throttled bot-wide with retry on rate limits and a MyMemory fallback; if both refuse, the user gets a "service is busy" message instead of a raw error.
 

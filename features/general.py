@@ -64,7 +64,7 @@ class General(commands.Cog):
         embed.add_field(name="🎟️ Tournaments", value=tourney_text, inline=False)
 
         translation_text = (
-            "`!t [language]` - Reply to a message to translate it into English (e.g., `!t spanish`)\n"
+            "**Translate** - Right-click a message → Apps → Translate to translate it into English (press **Wrong language?** to pick the source language)\n"
             "`/translate` - Translate your English text into 53 other languages"
         )
         embed.add_field(name="🌐 Translation", value=translation_text, inline=False)
