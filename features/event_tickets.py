@@ -5,7 +5,7 @@ event staff access to every open ticket, and on deletion saves a transcript to a
 dedicated event transcript channel while DMing a copy to the opener.
 
 Modelled on ``features/support_tickets.py`` (self-contained cog, close-in-place,
-shared prefix-command router) rather than the tourney system, which moves channels
+shared ticket-command router) rather than the tourney system, which moves channels
 between categories. Namespaced ``event_ticket*`` to avoid colliding with
 ``features/event.py`` (the token-reward events cog).
 """
@@ -616,7 +616,7 @@ async def delete_event_ticket_channel(
 
 
 # ---------------------------------------------------------------------------
-# Prefix-command wrappers (dispatched via features/ticket_command_router.py)
+# /close, /delete, /reopen handlers (dispatched via features/ticket_command_router.py)
 # ---------------------------------------------------------------------------
 
 

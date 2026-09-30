@@ -1875,7 +1875,7 @@ async def unlock_command(ctx: commands.Context):
 
 
 # on_ready re-fires on every gateway reconnect, and this registers top-level
-# prefix commands, so a second run raises CommandRegistrationError. The
+# slash commands, so a second run raises CommandAlreadyRegistered. The
 # function owns its own re-entrancy the way load_extension owns
 # ExtensionAlreadyLoaded (#548).
 _TOURNEY_COMMANDS_REGISTERED = False

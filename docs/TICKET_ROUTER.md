@@ -7,7 +7,7 @@ The ticket command router (`features/ticket_command_router.py`) is a dispatcher 
 
 ## How It Works
 
-`route_shared_ticket_command(ctx, action)` is called at the top of every prefix ticket command before any tourney-specific logic:
+`route_shared_ticket_command(ctx, action)` is called at the top of every ticket command (`/close`, `/delete`, `/reopen`) before any tourney-specific logic:
 
 ```python
 @bot.command(name="close", aliases=["c"])

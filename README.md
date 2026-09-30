@@ -12,7 +12,7 @@
 
 ## Tech Stack
 - **Language:** Python 3.10+
-- **Framework:** `discord.py` (slash commands + prefix commands)
+- **Framework:** `discord.py` (slash commands + message context-menu commands)
 - **Database:** MongoDB Atlas via `motor` (async)
 - **Translation:** `deep-translator` (Google, MyMemory fallback) + `langdetect`
 - **External API:** Matcherino (tournament brackets, payouts)
@@ -47,13 +47,15 @@ Remaining7-Discord-Bot/
 │   ├── general.py                   # /help, /mod-help, /admin-help, /version, /convert-time
 │   ├── privacy_policy.py            # Policy content, /privacy-policy, startup repost
 │   ├── translation.py               # "Translate" message command & /translate slash command (54 languages)
+│   ├── translate_client.py          # Shared throttled, cached translation client (Google + MyMemory fallback)
 │   ├── counting.py                  # Sequential counting game with /set-count
 │   ├── story.py                     # Collaborative one-word story game (staff-run, moderated)
 │   ├── sticky.py                    # "Set Sticky" message command / /unsticky persistent channel messages
 │   ├── support_tickets.py           # General support tickets (issues, support, apps, partnership)
-│   ├── github_tickets.py            # AI-powered GitHub issue creation from tickets (Gemini)
+│   ├── github_tickets.py            # "Create GitHub Issue" message command & @mention issue creation (Gemini)
 │   ├── event_tickets.py             # Private event answer-submission tickets
-│   ├── ticket_command_router.py     # Shared routing for tourney & support ticket commands
+│   ├── ticket_command_router.py     # Routes /close, /delete, /reopen to every ticket type
+│   ├── interaction_context.py       # Runs ctx-based flows from slash commands (tourney, tickets)
 │   ├── booster_shoutout.py          # Auto-opened booster shoutout tickets
 │   ├── message_mirror.py            # Moderator message link mirror via webhook
 │   ├── brawl/
@@ -62,7 +64,7 @@ Remaining7-Discord-Bot/
 │   │   ├── commands.py              # /megabox, /starrdrop, /profile, /upgrade, etc.
 │   │   └── drops.py                 # Weighted RNG drop logic
 │   └── tourney/
-│       ├── tourney_commands.py      # All tournament slash & prefix commands
+│       ├── tourney_commands.py      # All tournament slash commands
 │       ├── tourney_utils.py         # Ticket lifecycle helpers, auto-translation
 │       ├── tourney_views.py         # discord.ui.View classes for ticket buttons
 │       ├── tourney_reports.py       # Monthly tournament report generation
@@ -214,7 +216,7 @@ Every user always has **4 active quests** — one daily and one weekly per categ
 ### Error Reporting
 - Reports the bot's own failures to a dedicated logs channel, because the host drops console output — a failing feature or a dead background task was previously invisible.
 - **On startup:** version, features loaded, commands synced, and any failure with its traceback attached as a file.
-- **At runtime:** unhandled errors in listeners, prefix commands, slash commands, and all 19 background tasks, each with a plain-English explanation and a severity colour.
+- **At runtime:** unhandled errors in listeners, slash and message commands, and all 19 background tasks, each with a plain-English explanation and a severity colour.
 - User mistakes are not reported — unknown commands, failed permission checks, and bad arguments are not bugs.
 - Rate limited so a repeating failure cannot flood the channel. See [`docs/ERROR_REPORTING.md`](docs/ERROR_REPORTING.md).
 
