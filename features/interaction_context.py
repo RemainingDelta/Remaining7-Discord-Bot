@@ -6,8 +6,9 @@ every ``ctx.send`` in several hundred lines, so this adapter exposes just the
 parts they use:
 
 - ``author``, ``channel``, ``guild``, ``bot`` map onto the interaction.
-- The first ``reply`` answers the invoker privately. Those replies are the
-  gate messages (no permission, wrong channel, already running).
+- The first ``reply`` answers the interaction, publicly, as the prefix
+  commands' replies were. Those replies are the gate messages (no permission,
+  wrong channel, already running).
 - ``send`` and later replies post in the channel, where the progress messages
   always went. Posting through the channel rather than the interaction
   followup keeps a long run from failing once the 15-minute token expires.
@@ -27,12 +28,12 @@ class InteractionContext:
 
     async def start(self) -> None:
         """Acknowledge within Discord's 3-second window before any slow work."""
-        await self.interaction.response.defer(ephemeral=True, thinking=True)
+        await self.interaction.response.defer(ephemeral=False, thinking=True)
 
     async def reply(self, content=None, **kwargs):
         if not self._answered:
             self._answered = True
-            return await self.interaction.followup.send(content, ephemeral=True)
+            return await self.interaction.followup.send(content, ephemeral=False)
         return await self.send(content, **kwargs)
 
     async def send(self, content=None, **kwargs):
@@ -46,6 +47,6 @@ class InteractionContext:
             return
         self._answered = True
         try:
-            await self.interaction.followup.send(content, ephemeral=True)
+            await self.interaction.followup.send(content, ephemeral=False)
         except discord.HTTPException:
             pass  # the token expired during a long run; the channel has the result

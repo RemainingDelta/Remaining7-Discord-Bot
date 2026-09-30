@@ -136,11 +136,12 @@ def _slash_interaction(channel_id=ADMIN_CHANNEL):
     return interaction
 
 
-def _private_text(interaction):
+def _reply_text(interaction):
+    """Text the command answered with, which everyone in the channel can see."""
     return " ".join(
         str(c.args[0])
         for c in interaction.followup.send.call_args_list
-        if c.args and c.kwargs.get("ephemeral")
+        if c.args and c.kwargs.get("ephemeral") is False
     )
 
 
@@ -199,7 +200,7 @@ async def test_starttourney_denies_non_staff(tourney, monkeypatch):
 
     await _start(tourney, interaction)
 
-    assert "permission" in _private_text(interaction)
+    assert "permission" in _reply_text(interaction)
     tourney.create_tourney_session.assert_not_awaited()
     tourney.reset_ticket_counter.assert_not_called()
 
@@ -209,7 +210,7 @@ async def test_starttourney_denies_outside_the_admin_channel(tourney):
 
     await _start(tourney, interaction)
 
-    assert f"<#{ADMIN_CHANNEL}>" in _private_text(interaction)
+    assert f"<#{ADMIN_CHANNEL}>" in _reply_text(interaction)
     tourney.create_tourney_session.assert_not_awaited()
 
 
@@ -219,7 +220,7 @@ async def test_starttourney_refuses_an_active_session_without_force(tourney):
 
     await _start(tourney, interaction)
 
-    text = _private_text(interaction)
+    text = _reply_text(interaction)
     assert "already" in text and "force" in text
     assert "/start-tourney" in text, "the warning must name the slash command"
     tourney.reset_ticket_counter.assert_not_called()
@@ -257,7 +258,7 @@ async def test_starttourney_defers_before_any_work(tourney):
     with pytest.raises(_StopHere):
         await _start(tourney, interaction)
 
-    interaction.response.defer.assert_awaited_once_with(ephemeral=True, thinking=True)
+    interaction.response.defer.assert_awaited_once_with(ephemeral=False, thinking=True)
 
 
 async def test_endtourney_denies_non_staff(tourney, monkeypatch):
@@ -269,7 +270,7 @@ async def test_endtourney_denies_non_staff(tourney, monkeypatch):
 
     await tourney.bot.tree.get_command("end-tourney").callback(interaction)
 
-    assert "permission" in _private_text(interaction)
+    assert "permission" in _reply_text(interaction)
     assert tourney.get_active_tourney_session.await_count == checks_before
     interaction.channel.send.assert_not_awaited()
 
@@ -282,7 +283,7 @@ async def test_endtourney_denies_outside_the_admin_channel(tourney):
 
     await tourney.bot.tree.get_command("end-tourney").callback(interaction)
 
-    assert f"<#{ADMIN_CHANNEL}>" in _private_text(interaction)
+    assert f"<#{ADMIN_CHANNEL}>" in _reply_text(interaction)
     assert tourney.get_active_tourney_session.await_count == checks_before
     interaction.channel.send.assert_not_awaited()
 
