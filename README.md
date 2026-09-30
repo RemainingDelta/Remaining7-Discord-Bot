@@ -152,8 +152,8 @@ Every user always has **4 active quests** — one daily and one weekly per categ
 
 ### Tournament System
 - **Phase Management:**
-  - `/starttourney [region] [force]` — start live tournament, reset counters, init queue dashboard. Pick `region: SA` for South America mode. The bot auto-resumes tourney state (dashboards, slow-mode/lock timers, region, ticket counter) after a restart; set `force: True` to restart setup over an already-active session.
-  - `/endtourney` — end tournament, clean up dashboards and tickets, auto-post Hall of Fame.
+  - `/start-tourney [region] [force]` — start live tournament, reset counters, init queue dashboard. Pick `region: SA` for South America mode. The bot auto-resumes tourney state (dashboards, slow-mode/lock timers, region, ticket counter) after a restart; set `force: True` to restart setup over an already-active session.
+  - `/end-tourney` — end tournament, clean up dashboards and tickets, auto-post Hall of Fame.
 - **Ticket Panels:** `/tourney-panel` (live) and `/pre-tourney-panel` (pre-tourney) post interactive open buttons.
 - **Ticket Operations:**
   - `/close` — close a ticket.
@@ -168,14 +168,14 @@ Every user always has **4 active quests** — one daily and one weekly per categ
   - `/match-history <team>` — view match history.
   - `/set-ticket-match <team1> <team2>` — assign match context to a ticket.
   - `/tourney-progress` — bracket progress dashboard with semi-final/final announcements.
-- **Hall of Fame:** `/hall-of-fame` — post winning teams with prize distribution; also auto-triggered by `/endtourney` using the session's Matcherino ID.
+- **Hall of Fame:** `/hall-of-fame` — post winning teams with prize distribution; also auto-triggered by `/end-tourney` using the session's Matcherino ID.
 - **Blacklist:** `/blacklist add/remove/list` — manage banned users (Discord ID, Matcherino profile, reason, alts).
 - **Rate Limits:** Max 3 open tickets per user, 180s cooldown. Auto-reopen after 6-hour lock.
 - **Auto-translation:** Ticket messages auto-translated via `deep-translator` + `langdetect`.
 - **Test Mode:** `/tourney-test-mode` — toggle 100-ticket limit and 0.1s cooldown for testing.
 - **Active Matches:** `/active-matches` — display all active match scores grouped by round.
-- **Monthly Reports:** Auto-generated monthly tournament reports posted to a dedicated archive channel. Matcherino ID is auto-detected on `/starttourney`. `/monthly-report [month] [year]` (Staff) generates or re-generates a report on demand.
-- **Slow Mode:** `/starttourney` enables 60s slow mode in general chat with a public notice; auto-removed after 1 hour (or immediately on `/endtourney`).
+- **Monthly Reports:** Auto-generated monthly tournament reports posted to a dedicated archive channel. Matcherino ID is auto-detected on `/start-tourney`. `/monthly-report [month] [year]` (Staff) generates or re-generates a report on demand.
+- **Slow Mode:** `/start-tourney` enables 60s slow mode in general chat with a public notice; auto-removed after 1 hour (or immediately on `/end-tourney`).
 - **Staff Guide:** `/tourney-admin-help`.
 - **SA Mode:** South America region variant with separate ticket categories and region-specific workflow.
 

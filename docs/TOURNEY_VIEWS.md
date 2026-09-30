@@ -50,7 +50,7 @@ The modal that appears when a member clicks "Open Tourney Ticket" during a live 
 
 ## `TourneyOpenTicketView`
 
-The panel button that triggers `TourneyReportModal`. Posted to `TOURNEY_SUPPORT_CHANNEL_ID` by `/starttourney`.
+The panel button that triggers `TourneyReportModal`. Posted to `TOURNEY_SUPPORT_CHANNEL_ID` by `/start-tourney`.
 
 ```python
 class TourneyOpenTicketView(discord.ui.View):
