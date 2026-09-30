@@ -52,7 +52,7 @@ Remaining7-Discord-Bot/
 │   ├── story.py                     # Collaborative one-word story game (staff-run, moderated)
 │   ├── sticky.py                    # "Set Sticky" message command / /unsticky persistent channel messages
 │   ├── support_tickets.py           # General support tickets (issues, support, apps, partnership)
-│   ├── github_tickets.py            # "Create GitHub Issue" message command & @mention issue creation (Gemini)
+│   ├── github_tickets.py            # "GitHub Issue" message command & @mention: create or edit issues (Gemini)
 │   ├── event_tickets.py             # Private event answer-submission tickets
 │   ├── ticket_command_router.py     # Routes /close, /delete, /reopen to every ticket type
 │   ├── interaction_context.py       # Runs ctx-based flows from slash commands (tourney, tickets)
@@ -208,9 +208,11 @@ Every user always has **4 active quests** — one daily and one weekly per categ
 - Deleting saves a transcript to the event transcript channel and DMs a copy to the opener, re-uploading up to 25 images from the ticket so submissions survive the channel being deleted.
 
 ### GitHub Ticket Integration
-- AI-powered GitHub issue creation for one authorized staff member. Gemini classifies the description as a bug, enhancement, or feature and fills in the matching template.
-- **Create GitHub Issue** (right-click a message → Apps) — opens a modal for optional notes, then a Yes/No prompt. The message's text, embed contents, attached `.txt`/`.log` files (copied in verbatim), attachment filenames, and a permanent link back to it are attached to the issue. Turns a member's bug report or an error post in the bot logs channel into a filed issue in one step.
-- **@mention** the bot with a description as a fallback. Replying to a message while mentioning no longer pulls that message in; right-click it instead.
+- AI-powered GitHub issue management for one authorized staff member. After a mention or right-click the bot offers **Create new issue**, **Edit existing issue**, or **Cancel**, and each choice runs its own Gemini prompt.
+- **Create:** Gemini classifies the description as a bug, enhancement, or feature and fills in the matching template. Any `#N` in the text (e.g. "like #512") is read as a reference for the new issue and left unchanged.
+- **Edit:** needs an issue number (`#540` or an issue URL); the first one is the target. Gemini proposes a comment, labels to add or remove, and close (completed / not planned) or reopen. The bot previews every change with **Apply** / **Cancel** before touching GitHub. Unknown labels and changes that would do nothing are dropped. Title and description are never rewritten.
+- **GitHub Issue** (right-click a message → Apps): opens a modal for optional notes, then the choice. The message's text, embed contents, attached `.txt`/`.log` files (copied in verbatim), attachment filenames, and a permanent link back to it go into the new issue, or into a comment on the edited one. Turns a member's bug report or an error post in the bot logs channel into an issue or an update in one step.
+- **@mention** the bot with a description, e.g. `@bot close #540, fixed in v2.3`. Replying to a message while mentioning does not pull that message in; right-click it instead.
 - Requires `GEMINI_TOKEN` and `GITHUB_TOKEN` environment variables. See [`docs/GITHUB_TICKETS.md`](docs/GITHUB_TICKETS.md).
 
 ### Error Reporting

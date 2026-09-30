@@ -225,7 +225,7 @@ class General(commands.Cog):
         # --- Quest Management ---
         tools_text = (
             "`/support-panel` - Post the support ticket panel.\n"
-            "**Create GitHub Issue** - Right-click a message → Apps to file it as a GitHub issue (ticket creator only)."
+            "**GitHub Issue** - Right-click a message → Apps, or @mention the bot, to create a GitHub issue or edit an existing one by its #number (ticket creator only)."
         )
         embed.add_field(name="🛠️ Server & Dev Tools", value=tools_text, inline=False)
 
