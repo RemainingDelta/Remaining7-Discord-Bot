@@ -161,7 +161,7 @@ def test_last_embed_carries_the_last_updated_date():
 
 
 def test_last_updated_matches_the_filed_date():
-    assert LAST_UPDATED == "September 19, 2026"
+    assert LAST_UPDATED == "September 30, 2026"
 
 
 def test_transcript_disclosure_names_every_kind_of_ticket():
@@ -189,6 +189,48 @@ def test_deletion_carve_out_covers_transcript_images():
     # member to infer it from the transcript paragraph two sections earlier.
     body = _section("Opt-out and your choices").body.lower()
     assert "image" in body
+
+
+# --- v1.15.0 corrections (#581) ---
+
+
+def _markdown():
+    return (REPO_ROOT / "PRIVACY_POLICY.md").read_text(encoding="utf-8")
+
+
+def test_message_content_is_not_said_to_power_commands():
+    # #563 removed every prefix command, so "read live to power features like
+    # commands" stopped being true. The remaining reasons are the ones Discord
+    # is told about in the Message Content Intent application.
+    body = _section("What we do not collect or store").body.lower()
+    assert "commands" not in body
+    for use in ("moderation", "game", "transcript"):
+        assert use in body, f"{use} is not named as a reason content is read"
+
+
+def test_github_issue_disclosure_describes_the_right_click_command():
+    # #575 replaced reply + @mention with a message command, and stopped
+    # reading replied-to messages.
+    body = _section("When information leaves Discord").body
+    assert "Create GitHub Issue" in body
+    assert "as a reply" not in body
+    assert "gemini" in body.lower() and "github" in body.lower()
+
+
+def test_translation_providers_are_disclosed():
+    # Translate and /translate send the text to Google Translate, with MyMemory
+    # as the #573 fallback. Neither was mentioned.
+    body = _section("When information leaves Discord").body
+    assert "Google Translate" in body
+    assert "MyMemory" in body
+
+
+def test_markdown_copy_carries_the_same_corrections():
+    text = _markdown()
+    assert "Create GitHub Issue" in text
+    assert "MyMemory" in text
+    assert "as a reply" not in text
+    assert "features like commands" not in text
 
 
 def test_last_embed_mentions_the_tickets_channel():

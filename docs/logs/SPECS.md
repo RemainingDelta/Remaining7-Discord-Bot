@@ -4447,3 +4447,180 @@ Implemented in `1ca4a81`. Files: `docs/logs/SPECS.md`, `docs/logs/CHANGELOG.md`
 ✅ Reviewed against the diff: implementation matches the filed spec.
 
 📝 Review note: Self-referential. This is the release-doc pass that wrote this v1.14.0 SPECS section, along with the v1.14.0 CHANGELOG release notes and PR descriptions. The release notes drop `📊 Data Model`, `⚡ Integrations`, `🎨 Embeds & UI` and `🤖 GitHub Actions`, none of which this release touches, and drop `🔄 Future Enhancements` as agreed in v1.13.2 — so the open items recorded above live only in this file: the unreachable high levels from #461, the untested `/daily` payout and its pre-existing doc drift from #552, and the 42 characters of privacy-policy headroom from #551. The sha above is filled in by the commit after it, since a commit cannot contain its own hash.
+
+### v1.15.0 — 2026-09-30
+
+#### #559 — Enhancement: Hide event support during tourneys (Enhancement)
+
+> ### Overview
+> Hide event support during tourneys, like the OTHER ticket channel.
+>
+> ### Technical Requirements
+> - [ ] Add `EVENT_TICKET_PANEL_CHANNEL_ID` to the tourney lock/unlock
+>
+> ### Acceptance Criteria
+> - [ ] `!starttourney` hides event support from members
+> - [ ] `!endtourney` (or the auto-reopen timer) shows it again
+
+Implemented in `8dbf9af`, `67a7ec1`. Files: `features/tourney/tourney_commands.py`, `tests/test_tourney_lock.py`, `docs/EVENT_TICKETS.md`, `docs/TOURNEY_OVERVIEW.md`
+
+✅ Reviewed against the diff: implementation matches the filed spec.
+
+📝 Review note: To make the lock testable, `lock_command` and `unlock_command` moved out of the `setup_tourney_commands` closure to module level, with a new `set_event_panel_visibility()` that never raises, so a missing panel cannot block a tourney start or end. #567 later changed both functions' success notices from `ctx.reply` to `ctx.send`, and the lock notice's "when `!reopen` is used" (never true: the timer is cancelled by the end command) to `/end-tourney`.
+
+#### #560 — Bug: Hall of Fame prizepool scraper broken (Bug)
+
+> ### Overview
+> The Hall of Fame feature is currently broken because the scraper script that pulls prizepool values from Matcherino is no longer functioning. This is due to a recent revamp of the Matcherino website, which changed its UI and underlying HTML structure.
+>
+> ### Acceptance Criteria
+> - [ ] The scraper script successfully fetches correct prizepool values from the updated Matcherino site.
+> - [ ] The Hall of Fame feature displays accurate prizepool information.
+> - [ ] All related bot commands leveraging prizepool data function correctly…(truncated)
+
+Implemented in `d35000b`, `c114ab8`, `1e60a13`. Files: `features/tourney/matcherino.py`, `features/tourney/tourney_commands.py`, `tests/test_matcherino.py`, `docs/TOURNEY_MATCHERINO.md`
+
+⚠️ as-implemented differs from #560: two unrelated changes shipped with the prize pool fix. The tournament name scrape gained an `og:title` / `<title>` fallback that strips " | Supercell" and " | Matcherino" suffixes, and the duplicate Hall of Fame reply changed from ℹ️ to ⚠️. Neither was filed.
+
+📝 Review note: The scraper now tries `section#prize-pool`, then `div.prize-pool-card`, then the legacy `div.prize-pool-amt`, and matches only ids and semantic classes, never the `tw:` utility classes, so the next restyle is less likely to break it. The 18 new tests are built from the live page markup for tournament 221477.
+
+#### #564 — Enhancement: Replace !translate with a "Translate" message command (Enhancement)
+
+> ### Proposed Behavior
+> Right-click a message, then Apps, then "Translate". The handler reads `message.content` from the interaction's target message and returns the same embed (detected language, original text, English translation, requester footer). Message commands take no arguments, so the source-language override moves to a **Wrong language?** button on the result: it opens a modal where the requester types the real language (`hindi` or `hi`), and the result is re-translated with a "Manual Language Override" author line…(truncated)
+
+Implemented in `c360155`, `0999dd7`, `243f873`, `dfabb08`. Files: `features/translation.py`, `features/general.py`, `tests/test_translation.py`, `tests/test_translate_client.py`, `docs/TRANSLATION.md`, `README.md`
+
+⚠️ as-implemented differs from #564 as filed: the original ticket dropped the `!t <language>` source override ("message commands take no arguments"), and the first PR shipped that way. After review found it was a lost feature, the override was restored as the **Wrong language?** button and the ticket body was edited during development to describe it. The quote above is the edited body.
+
+📝 Review note: #573 merged first and routed all translation through `features/translate_client.py`, so this branch merged `dev` and moved the message command onto the shared client, showing its busy message when every provider fails. Two #573 tests that called the removed prefix command were rewritten against the message command. The Wrong language? button is a non-persistent view: it stops working after 15 minutes or a restart. Error replies are ephemeral, where `!t` answered publicly.
+
+#### #565 — Enhancement: Replace !sticky/!unsticky with a "Set Sticky" message command and /unsticky (Enhancement)
+
+> ### Proposed Behavior
+> - Right-click, then Apps, then "Set Sticky" captures the target message's content and attachments at invocation time, using the same data model, and replaces any existing sticky in that channel.
+> - `/unsticky` clears the current channel's sticky.
+> - Both use the same `_has_permission` gate. Confirmations and errors are ephemeral…(truncated)
+
+Implemented in `fd8c56b`, `f4020da`. Files: `features/sticky.py`, `features/general.py`, `tests/test_sticky.py`, `docs/STICKY_MESSAGES.md`, `docs/DATABASE.md`, `README.md`
+
+✅ Reviewed against the diff: implementation matches the filed spec.
+
+📝 Review note: Unlike the other staff right-click commands, Set Sticky sets no `default_permissions`, so it appears in every member's Apps menu and non-staff get a permission error. The Discord permission Event Staff hold was not known, and hiding it behind the wrong one would lock them out. The replies are ephemeral as filed, which differs from the old commands: `!unsticky`'s "removed" was public, and `!sticky` errors were public but deleted after 5 seconds. The docs pass also corrected `docs/STICKY_MESSAGES.md`, which described a stored attachment URL and `message_id` field that never existed; the document stores attachment bytes and `bot_message_id`.
+
+#### #566 — Enhancement: Replace !close/!delete/!reopen with /close, /delete, /reopen across all ticket types (Enhancement)
+
+> ### Proposed Behavior
+> `/close`, `/delete`, `/reopen` give the same routing and side effects for every ticket type. Permission and wrong-channel errors are ephemeral.
+>
+> ### Technical Requirements
+> - [ ] Add one small adapter so the existing `*_via_command` helpers can be driven by an `Interaction` (reply, channel, author). Do not fork each helper, and keep #467 out of scope…(truncated)
+
+Implemented in `fef10d7`, `807f2c5`, `1028258`. Files: `features/tourney/tourney_commands.py`, `features/ticket_command_router.py`, `features/tourney/tourney_utils.py`, `features/economy.py`, `features/event.py`, `tests/test_tourney_startup.py`, `docs/TICKET_ROUTER.md`, `docs/SUPPORT_TICKETS.md`, `docs/EVENT_TICKETS.md`, `docs/BOOSTER_SHOUTOUT.md`, `docs/ECONOMY_SHOP.md`, `docs/TOURNEY_TICKETS.md`, `docs/TOURNEY_VIEWS.md`, `README.md`
+
+⚠️ as-implemented differs from #566: the filed spec made permission and wrong-channel errors ephemeral. They shipped public, like the prefix commands' replies, at the author's request after the first push. The adapter the ticket asked for is `InteractionContext` from #567, so this branch was stacked on #567 rather than cut from `dev`.
+
+📝 Review note: The commands are `guild_only`. The 14 `*_via_command(ctx)` helpers run unchanged through the adapter; tourney reopen's `ctx.message.add_reaction("✅")` is silently skipped (it was already inside `try/except`) and the adapter's final "✅ Done." confirms instead. An existing bug carries over unchanged: `/close` outside a ticket channel during an active tourney still increments the staff closure count and decrements the queue before the handler rejects the channel, exactly as `!close` did.
+
+#### #567 — Enhancement: Replace !starttourney/!endtourney with slash commands (Enhancement)
+
+> ### Proposed Behavior
+> - `/starttourney region:<choice> force:<bool, default false>`, with region as a fixed choice list built from the regions the command accepts today.
+> - `/endtourney`.
+> - Same staff and channel gates, with ephemeral denials. Both defer immediately and report progress by editing the followup…(truncated)
+
+Implemented in `9832991`, `113c6bd`, `b923e80`, `4cf689a`, `aac89e1`, `0b23d7a`, `83c7807`, `0292110`, `c605342`, `3ee6088`. Files: `features/interaction_context.py`, `features/tourney/tourney_commands.py`, `tests/test_interaction_context.py`, `tests/test_tourney_startup.py`, `tests/test_tourney_lock.py`, `docs/TOURNEY_OVERVIEW.md`, `docs/DATABASE.md`, `docs/SETUP.md`, `docs/CONFIG_SYSTEM.md`, `docs/EVENT_TICKETS.md`, `docs/TOURNEY_MATCHERINO.md`, `docs/TOURNEY_PROGRESS.md`, `docs/TOURNEY_REPORTS.md`, `docs/TOURNEY_TICKETS.md`, `docs/TOURNEY_VIEWS.md`, `README.md`
+
+⚠️ as-implemented differs from #567 in five ways. The commands are named `/start-tourney` and `/end-tourney`, renamed after the first push to match the other hyphenated commands. Denials are public, not ephemeral. Progress is posted to the channel by `InteractionContext`, not by editing the followup, so a run longer than the 15-minute interaction token cannot fail. The ticket's "`/endtourney` with no active session gives the existing message" was not built, because `!endtourney` never had such a check. And restart safety was added unfiled: `setup_complete` is written `false` when setup begins and `true` after its last step, a boot-time `warn_if_setup_interrupted()` posts in the admin channel if it is still `false`, and `post_session_report()` records `report_posted` so re-running `/end-tourney` after a restart never posts a second stats report (the monthly report sums every report embed, so a duplicate would count the tourney twice).
+
+📝 Review note: Region choices contain only `SA`: the old parser accepted any string, but `SA` is the only value with behavior. The lock and unlock success notices moved from `ctx.reply` to `ctx.send` so they stay in the channel under the adapter. The Matcherino ID auto-detect still scans staff posts in the schedule channel, which is one of the Message Content Intent uses #569 kept. Interrupted setup is flagged, not repaired: staff re-run `/start-tourney force:True`, and a restart mid-delete can still give one ticket a second transcript.
+
+#### #568 — Enhancement: Move scam blacklist commands to slash/message commands and remove !hacked (Enhancement)
+
+> ### Proposed Behavior
+> - "Add to Scam Blacklist" message command: shows an ephemeral dry-run preview of the target message's images with **Add** / **Cancel** buttons. This also covers testing an image already posted in chat.
+> - "Flag as Hacked" message command: runs the hacked protocol on the message's author, even if they left the server…(truncated)
+
+Implemented in `7e7f6d5`, `7389923`, `a1dcb65`, `df5d8c3`, `751977b`, `34a0c61`. Files: `features/scam_detection.py`, `features/security.py`, `features/general.py`, `tests/test_scam_detection.py`, `docs/SCAM_DETECTION.md`, `docs/HACKED_SYSTEM.md`, `README.md`
+
+⚠️ as-implemented differs from #568 as filed: the original ticket only removed `!hacked` and had Add to Scam Blacklist store images immediately. After review found the reply-based workflows were lost (`!hacked` on a user who left, per #298; `!scam-test` on a posted image), the Flag as Hacked message command and the preview-then-Add flow were added, and the ticket body was edited during development to describe them. The quote above is the edited body. `/scam-test` also takes a single uploaded image, where `!scam-test` tested every image on a replied-to message.
+
+📝 Review note: Removing the `!scam` exemption closed a loophole: any message starting with `!scam` skipped the scanner. A consequence is that a mod posting a blacklisted image is now caught too. Both message commands set `default_permissions` (Moderate Members). All scam replies are ephemeral, where every `!scam-*` reply was public.
+
+#### #569 — Enhancement: Audit remaining Message Content Intent usage and decide keep vs drop (Enhancement)
+
+> ### Overview
+> Once #564 to #568 and #575 are done, work out exactly which features still need Message Content Intent, and decide whether to keep it with a narrow justification or redesign the survivors and drop it…(truncated)
+
+Implemented in (none). Files: (none)
+
+⚠️ as-implemented differs from #569: the characterization tests, the economy `startswith("!")` cleanup and the `command_prefix` simplification in the Technical Requirements were not done. The ticket was closed with an audit comment deciding to keep the intent, justified by scam image moderation, the counting and story games, ticket transcripts, and staff tools that read staff posts (`/event-rewards`, `/poll-rewards`, the Matcherino auto-detect, the message mirror). The `!` check and `command_prefix="!"` stay as harmless leftovers.
+
+📝 Review note: The audit found the story word game (`features/story.py`), which the #563 punch list had missed, and showed the issue creator no longer needs the intent after #575. This closes the code side of epic #563; the intent resubmission itself is tracked on the epic.
+
+#### #573 — Bug: Frequent server error indicating too many requests to an external API (Bug)
+
+> ### Acceptance Criteria
+> - [ ] The bot no longer consistently triggers the "Too many requests" server error.
+> - [ ] Request frequency to the external API adheres to documented rate limits (e.g., 5 requests/sec, 200k/day).
+> - [ ] Consider fallback/retry mechanisms or batch processing to manage API calls…(truncated)
+
+Implemented in `54113c7`, `ddd3dd9`, `6d6425e`, `dea2c8c`. Files: `features/translate_client.py`, `features/translation.py`, `features/tourney/tourney_utils.py`, `tests/test_translate_client.py`, `docs/TRANSLATION.md`, `docs/TOURNEY_TICKETS.md`, `docs/SETUP.md`, `README.md`
+
+✅ Reviewed against the diff: implementation matches the filed spec.
+
+📝 Review note: Every caller, including tourney ticket auto-translation, goes through one client that spaces calls at least 0.25 s apart bot-wide, caches 256 results, retries a 429 after 1 s and 2 s, then falls back to MyMemory. The cache and throttle are in memory and reset on restart. MyMemory is a second third party receiving message text, which the privacy policy did not disclose until #581. `test_concurrent_calls_are_spaced_by_min_interval` asserts wall-clock gaps and failed once on a loaded machine during this release; it has not failed in CI.
+
+#### #575 — Enhancement: Create GitHub issues from a "Create GitHub Issue" message command (Enhancement)
+
+> ### Proposed Behavior
+> - Right-click the original message, then Apps, then "Create GitHub Issue". Discord delivers the target message's full content in the interaction payload, so no intent is needed.
+> - A modal opens with one optional field for extra context. This replaces typing notes in the reply.
+> - On submit, the existing Yes/No confirmation appears. Gemini receives the original message plus the modal notes, as the reply flow does today…(truncated)
+
+Implemented in `f3903dd`, `f4301c4`, `c311f00`, `cc0b06e`. Files: `features/github_tickets.py`, `tests/test_github_tickets.py`, `docs/GITHUB_TICKETS.md`, `README.md`
+
+✅ Reviewed against the diff: implementation matches the filed spec.
+
+📝 Review note: The ticket did not specify visibility. The Yes/No prompt and result were first ephemeral and were made public in a follow-up commit, so the whole flow edits one public message; only `TICKET_CREATOR_ID` can press the buttons. The command sets `default_permissions` (Administrator). `collect_referenced_context` became `context_from_message`, the bug-only log gate was removed, and for enhancement and feature tickets (whose templates lack the section) the `### Screenshots/Logs` section is inserted before `### Branch`. The #522 reply path was removed, so its three reference-resolution tests were deleted.
+
+#### #580 — Enhancement: Bump project version to v1.15.0 in pyproject.toml (Enhancement)
+
+Version bump only. Implemented in `6d0cb7c`.
+
+#### #581 — Enhancement: Correct the privacy policy for v1.15.0 (Enhancement)
+
+> ### Current Behavior
+> - It says message content is read "to power features like commands". There are no prefix commands anymore (#563).
+> - The GitHub issue section describes @mention replies. #575 replaced that with the Create GitHub Issue right-click command.
+> - It doesn't mention that Translate sends text to Google Translate, or to MyMemory as a fallback (#573)…(truncated)
+
+Implemented in `969a3dc`, `a4dbb22`. Files: `features/privacy_policy.py`, `PRIVACY_POLICY.md`, `tests/test_privacy_policy.py`
+
+✅ Reviewed against the diff: implementation matches the filed spec.
+
+📝 Review note: The first draft pushed the embed sequence to 6333 characters, over Discord's 6000-per-message limit, which `test_embed_sequence_fits_in_one_message` caught. The new wording was tightened to 5868 rather than splitting the policy across two messages; the next disclosure will likely force the split #551 predicted. The copy at `remaining7.netlify.app/privacy` still has to be updated by hand.
+
+#### #582 — Enhancement: Full documentation & help-command audit for v1.15.0 (Enhancement)
+
+> ### Technical Requirements
+> - [ ] README command lists and project tree match the code
+> - [ ] `/help`, `/mod-help`, `/admin-help`, `/event-staff-help`, `/tourney-admin-help` list every new slash and right-click command
+> - [ ] No `!` commands left outside `docs/logs/` and "replaces `!x`" notes…(truncated)
+
+Implemented in `6398221`, `13fa848`. Files: `features/general.py`, `tests/test_general.py`, `README.md`, `docs/BOOSTER_SHOUTOUT.md`, `docs/ERROR_REPORTING.md`, `docs/SETUP.md`, `docs/TICKET_ROUTER.md`, `features/event_tickets.py`, `features/tourney/tourney_commands.py`
+
+✅ Reviewed against the diff: implementation matches the filed spec.
+
+📝 Review note: Of 88 registered commands, only `/support-panel` and Create GitHub Issue were missing from every help embed; both went into `/admin-help`. A new test fails if any help embed names a `!` command. The README gained `translate_client.py` (#573) and `interaction_context.py` (#567) in its project tree.
+
+#### #583 — Enhancement: Update documentation for v1.15.0 release (Enhancement)
+
+> ### Proposed Behavior
+> Both cover everything since `v1.14.0`: #559, #560, #563 (#564 to #569, #575), #573, and the release tickets…(truncated)
+
+Implemented in `3aeef91`. Files: `docs/logs/SPECS.md`, `docs/logs/CHANGELOG.md`
+
+✅ Reviewed against the diff: implementation matches the filed spec.
+
+📝 Review note: Self-referential. This is the release-doc pass that wrote this v1.15.0 SPECS section, along with the v1.15.0 CHANGELOG release notes and PR descriptions. Epic #563 has no branch or commits of its own and is covered through its sub-issues.

@@ -2,6 +2,7 @@ import asyncio
 import io
 
 import discord
+from discord import app_commands
 from discord.ext import commands
 
 from database.mongo import (
@@ -20,6 +21,19 @@ class StickyMessages(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self._pending: dict[int, asyncio.Task] = {}
+        # Context menus can't be declared as cog methods, so the "Set Sticky"
+        # message command is built here and registered on the tree in cog_load.
+        self.set_sticky_menu = app_commands.ContextMenu(
+            name="Set Sticky", callback=self.set_sticky_message
+        )
+
+    async def cog_load(self):
+        self.bot.tree.add_command(self.set_sticky_menu)
+
+    async def cog_unload(self):
+        self.bot.tree.remove_command(
+            self.set_sticky_menu.name, type=self.set_sticky_menu.type
+        )
 
     def _has_permission(self, member: discord.Member) -> bool:
         return bool(
@@ -45,83 +59,76 @@ class StickyMessages(commands.Cog):
         except (discord.NotFound, discord.HTTPException):
             pass
 
-    @commands.command(name="sticky")
-    async def sticky(self, ctx: commands.Context):
-        if not self._has_permission(ctx.author):
-            await ctx.send(
+    async def set_sticky_message(
+        self, interaction: discord.Interaction, message: discord.Message
+    ):
+        if not self._has_permission(interaction.user):
+            await interaction.response.send_message(
                 "❌ You need Administrator or Event Staff permissions to use this command.",
-                delete_after=5,
+                ephemeral=True,
             )
             return
 
-        if ctx.message.reference is None:
-            await ctx.send(
-                "❌ Please reply to a message to make it sticky.", delete_after=5
-            )
-            return
+        # Reading attachments can outlast the 3-second response window.
+        await interaction.response.defer(ephemeral=True)
 
-        try:
-            ref_message = await ctx.channel.fetch_message(
-                ctx.message.reference.message_id
-            )
-        except discord.NotFound:
-            await ctx.send("❌ Could not find the referenced message.", delete_after=5)
-            return
-
-        content = ref_message.content or ""
+        content = message.content or ""
         attachments = []
-        for attachment in ref_message.attachments:
+        for attachment in message.attachments:
             data = await attachment.read()
             attachments.append({"filename": attachment.filename, "data": data})
 
         if not content and not attachments:
-            await ctx.send(
-                "❌ The referenced message has no content or attachments.",
-                delete_after=5,
+            await interaction.followup.send(
+                "❌ That message has no content or attachments.", ephemeral=True
             )
             return
+
+        channel = interaction.channel
 
         # Remove any existing sticky bot message
-        existing = await get_sticky(ctx.channel.id)
+        existing = await get_sticky(channel.id)
         if existing and existing.get("bot_message_id"):
-            await self._delete_bot_message(ctx.channel, existing["bot_message_id"])
+            await self._delete_bot_message(channel, existing["bot_message_id"])
 
         sticky_msg = await self._post_sticky(
-            ctx.channel,
+            channel,
             {"content": content, "attachments": attachments},
         )
-        await set_sticky(ctx.channel.id, content, attachments, sticky_msg.id)
+        await set_sticky(channel.id, content, attachments, sticky_msg.id)
 
-        try:
-            await ctx.message.delete()
-        except discord.HTTPException:
-            pass
+        await interaction.followup.send("✅ Sticky message set.", ephemeral=True)
 
-    @commands.command(name="unsticky")
-    async def unsticky(self, ctx: commands.Context):
-        if not self._has_permission(ctx.author):
-            await ctx.send(
+    @app_commands.command(
+        name="unsticky", description="Remove the sticky message from this channel."
+    )
+    async def unsticky(self, interaction: discord.Interaction):
+        if not self._has_permission(interaction.user):
+            await interaction.response.send_message(
                 "❌ You need Administrator or Event Staff permissions to use this command.",
-                delete_after=5,
+                ephemeral=True,
             )
             return
 
-        existing = await get_sticky(ctx.channel.id)
+        channel = interaction.channel
+        existing = await get_sticky(channel.id)
         if not existing:
-            await ctx.send(
-                "❌ There is no sticky message in this channel.", delete_after=5
+            await interaction.response.send_message(
+                "❌ There is no sticky message in this channel.", ephemeral=True
             )
             return
 
         if existing.get("bot_message_id"):
-            await self._delete_bot_message(ctx.channel, existing["bot_message_id"])
+            await self._delete_bot_message(channel, existing["bot_message_id"])
 
-        await delete_sticky(ctx.channel.id)
-        pending = self._pending.pop(ctx.channel.id, None)
+        await delete_sticky(channel.id)
+        pending = self._pending.pop(channel.id, None)
         if pending:
             pending.cancel()
 
-        await ctx.send("✅ Sticky message removed.")
+        await interaction.response.send_message(
+            "✅ Sticky message removed.", ephemeral=True
+        )
 
     async def _repost_sticky(self, channel: discord.TextChannel):
         await asyncio.sleep(DEBOUNCE_SECONDS)

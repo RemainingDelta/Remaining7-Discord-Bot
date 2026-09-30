@@ -5,6 +5,7 @@ from typing import NamedTuple
 
 import aiohttp
 import discord
+from discord import app_commands
 from discord.ext import commands
 
 from features.config import GITHUB_REPO, TICKET_CREATOR_ID
@@ -129,7 +130,7 @@ USER DESCRIPTION:
 {description}"""
 
 
-# --- CONTEXT FROM A REPLIED-TO MESSAGE (#522) ---
+# --- CONTEXT FROM THE RIGHT-CLICKED MESSAGE (#522, #575) ---
 
 # GitHub rejects an issue body over this length, and the body is written in a
 # second call after the issue already exists — so overshooting leaves the issue
@@ -146,7 +147,7 @@ LOG_SECTION_HEADING = "### Screenshots/Logs"
 
 
 class ReferencedContext(NamedTuple):
-    """What the message being replied to contributes to a ticket."""
+    """What the right-clicked message contributes to a ticket."""
 
     text: str
     logs: tuple[str, ...]
@@ -181,38 +182,25 @@ async def _read_log_attachment(attachment: discord.Attachment) -> str | None:
     return raw.decode("utf-8", errors="replace")
 
 
-async def collect_referenced_context(
-    message: discord.Message,
-) -> ReferencedContext | None:
-    """Read the message this one is replying to, if it is a reply at all.
+async def context_from_message(message: discord.Message) -> ReferencedContext:
+    """Read the message a ticket is being filed from.
+
+    The message comes from a "Create GitHub Issue" interaction, whose payload
+    carries its full content without Message Content Intent (#575). A message
+    replied to by an @mention does not: the mention exemption covers only the
+    mentioning message, so the replied-to one would arrive empty.
 
     Logs are inlined rather than linked: Discord attachment URLs are signed and
     expire within about a day, so a linked log is dead by the time anyone reads
     the issue. Images cannot be inlined, so only their names are kept.
     """
-    reference = message.reference
-    if reference is None:
-        return None
-
-    referenced = reference.resolved
-    if not isinstance(referenced, discord.Message):
-        if reference.message_id is None:
-            return None
-        try:
-            referenced = await message.channel.fetch_message(reference.message_id)
-        except discord.HTTPException:
-            # NotFound and Forbidden both subclass this. AttributeError is
-            # deliberately not caught: it would mean a bug here, not a deleted
-            # message, and swallowing it is how #517 stayed invisible.
-            return None
-
-    parts = [referenced.content] if referenced.content else []
-    parts += [embed_to_text(embed) for embed in referenced.embeds]
+    parts = [message.content] if message.content else []
+    parts += [embed_to_text(embed) for embed in message.embeds]
 
     logs: list[str] = []
     attachment_names: list[str] = []
     budget = MAX_TOTAL_LOG_BYTES
-    for attachment in referenced.attachments:
+    for attachment in message.attachments:
         if _is_inlinable_log(attachment) and attachment.size <= budget:
             log = await _read_log_attachment(attachment)
             if log is not None:
@@ -225,7 +213,7 @@ async def collect_referenced_context(
         text="\n".join(part for part in parts if part),
         logs=tuple(logs),
         attachment_names=tuple(attachment_names),
-        jump_url=referenced.jump_url,
+        jump_url=message.jump_url,
     )
 
 
@@ -236,37 +224,54 @@ def build_description(notes: str, context: ReferencedContext | None) -> str:
     quoted = context.text
     if not notes:
         return quoted
-    return f"{notes}\n\nContext from the message being replied to:\n{quoted}"
+    return f"{notes}\n\nContext from the original message:\n{quoted}"
 
 
-def _render_artifacts(context: ReferencedContext | None, kind: str) -> str | None:
-    """The Screenshots/Logs body for this ticket, or None if there is nothing."""
+def _code_block(text: str) -> str:
+    """Fence text verbatim, with a fence longer than any backtick run inside it."""
+    longest = max((len(run) for run in re.findall(r"`+", text)), default=0)
+    fence = "`" * max(3, longest + 1)
+    return f"{fence}\n{text}\n{fence}"
+
+
+def _collapsible(summary: str, text: str) -> str:
+    return (
+        f"<details>\n<summary>{summary}</summary>\n\n{_code_block(text)}\n\n</details>"
+    )
+
+
+def _render_artifacts(context: ReferencedContext | None) -> str | None:
+    """The Screenshots/Logs body for this ticket, or None if there is nothing.
+
+    Attached for every ticket type (#575): the message the ticket was filed
+    from is its log, whether Gemini calls it a bug, enhancement, or feature.
+    """
     if context is None:
         return None
 
     parts: list[str] = []
-    if kind == "bug":
-        for log in context.logs:
-            parts.append(
-                "<details>\n<summary>Attached log</summary>\n\n"
-                f"```\n{log}\n```\n\n</details>"
-            )
+    if context.text:
+        parts.append(_collapsible("Original message", context.text))
+    for log in context.logs:
+        parts.append(_collapsible("Attached log", log))
     if context.attachment_names:
         parts.append("Attached in Discord: " + ", ".join(context.attachment_names))
     parts.append(f"[Original Discord message]({context.jump_url})")
     return "\n\n".join(parts)
 
 
-def append_context(body: str, context: ReferencedContext | None, kind: str) -> str:
+def append_context(body: str, context: ReferencedContext | None) -> str:
     """Put the real artifacts in the Screenshots/Logs section of a Gemini body.
 
     Written in after ``call_gemini`` rather than passed through it: Gemini
     authors the whole body, so a traceback routed through it comes back
     paraphrased instead of verbatim. The section is replaced rather than
     appended to, so its placeholder prose cannot survive alongside the real
-    thing, and it is removed outright when there is nothing to put there.
+    thing, and it is removed outright when there is nothing to put there. The
+    enhancement and feature templates have no such section, so it is added
+    just above ``### Branch``.
     """
-    artifacts = _render_artifacts(context, kind)
+    artifacts = _render_artifacts(context)
     section = re.compile(
         rf"^{re.escape(LOG_SECTION_HEADING)}[^\n]*\n.*?(?=^### |\Z)",
         re.MULTILINE | re.DOTALL,
@@ -276,6 +281,9 @@ def append_context(body: str, context: ReferencedContext | None, kind: str) -> s
     replacement = f"{LOG_SECTION_HEADING}\n{artifacts}\n\n"
     if section.search(body):
         return section.sub(lambda _: replacement, body, count=1)
+    branch = re.search(r"^### Branch", body, re.MULTILINE)
+    if branch:
+        return body[: branch.start()] + replacement + body[branch.start() :]
     return f"{body.rstrip()}\n\n{replacement}"
 
 
@@ -442,7 +450,7 @@ class ConfirmView(discord.ui.View):
             # Rename the branch placeholder before appending artifacts, so a log
             # that happens to contain "-Bug" cannot be rewritten by the replace.
             updated_body = ticket["body"].replace(f"-{label}", branch)
-            updated_body = append_context(updated_body, self.context, ticket["type"])
+            updated_body = append_context(updated_body, self.context)
             await update_github_issue(issue["number"], updated_body)
 
             await interaction.edit_original_response(
@@ -472,9 +480,68 @@ class ConfirmView(discord.ui.View):
         await interaction.response.edit_message(content="Cancelled", view=None)
 
 
+class IssueNotesModal(discord.ui.Modal, title="Create GitHub Issue"):
+    notes = discord.ui.TextInput(
+        label="Extra context (optional)",
+        style=discord.TextStyle.paragraph,
+        required=False,
+        max_length=2000,
+        placeholder="Anything to add to the message you right-clicked",
+    )
+
+    def __init__(self, target: discord.Message):
+        super().__init__()
+        self.target = target
+
+    async def on_submit(self, interaction: discord.Interaction):
+        # Reading log attachments can outlast the 3-second response window.
+        await interaction.response.defer(ephemeral=False, thinking=True)
+
+        context = await context_from_message(self.target)
+        raw_text = build_description(self.notes.value.strip(), context)
+        if not raw_text:
+            await interaction.followup.send(
+                "That message has no text to file, and no notes were added.",
+                ephemeral=False,
+            )
+            return
+
+        view = ConfirmView(raw_text, interaction.user.id, context)
+        view.message = await interaction.followup.send(
+            "Create a GitHub issue?", view=view, ephemeral=False, wait=True
+        )
+
+
 class GitHubTickets(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
+        # Context menus can't be declared as cog methods, so the "Create GitHub
+        # Issue" message command is built here and registered in cog_load.
+        self.create_issue_menu = app_commands.ContextMenu(
+            name="Create GitHub Issue", callback=self.create_issue_from_message
+        )
+        # Hidden from regular members; TICKET_CREATOR_ID is still enforced below.
+        self.create_issue_menu.default_permissions = discord.Permissions(
+            administrator=True
+        )
+
+    async def cog_load(self):
+        self.bot.tree.add_command(self.create_issue_menu)
+
+    async def cog_unload(self):
+        self.bot.tree.remove_command(
+            self.create_issue_menu.name, type=self.create_issue_menu.type
+        )
+
+    async def create_issue_from_message(
+        self, interaction: discord.Interaction, message: discord.Message
+    ):
+        if interaction.user.id != TICKET_CREATOR_ID:
+            await interaction.response.send_message(
+                "❌ You can't create GitHub issues.", ephemeral=False
+            )
+            return
+        await interaction.response.send_modal(IssueNotesModal(message))
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
@@ -487,21 +554,20 @@ class GitHubTickets(commands.Cog):
         if message.author.id != TICKET_CREATOR_ID:
             return
 
+        # A replied-to message is deliberately not read: without Message
+        # Content Intent it arrives empty (#575). Right-click it instead.
         raw_text = re.sub(rf"<@!?{self.bot.user.id}>", "", message.content).strip()
-        context = await collect_referenced_context(message)
 
-        if not raw_text and context is None:
+        if not raw_text:
             await message.reply(
                 "@ me with a description of your bug, enhancement, or feature"
-                " and I'll create a GitHub issue. Reply to a message and I'll"
-                " pull its contents in too.",
+                " and I'll create a GitHub issue. To file one from someone"
+                " else's message, right-click it → Apps → Create GitHub Issue.",
                 mention_author=True,
             )
             return
 
-        view = ConfirmView(
-            build_description(raw_text, context), message.author.id, context
-        )
+        view = ConfirmView(raw_text, message.author.id)
         reply = await message.reply(
             "Create a GitHub issue?", view=view, mention_author=True
         )

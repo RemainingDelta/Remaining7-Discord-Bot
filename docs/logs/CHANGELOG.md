@@ -1718,3 +1718,167 @@ Closes #552
 * Added the v1.14.0 section to `docs/logs/CHANGELOG.md` — the release notes and every PR description
 
 Closes #553
+
+## v1.15.0 — 2026-09-30
+
+# 🚀 Release Notes v1.15.0
+
+## 🎯 Features
+### All `!` commands are now slash or right-click commands
+- Right-click a message → **Apps**: Translate, Set Sticky, Add to Scam Blacklist, Flag as Hacked, Create GitHub Issue
+- New slash commands: `/unsticky`, `/scam-*`, `/start-tourney`, `/end-tourney`, `/close`, `/delete`, `/reopen`
+- Translate has a **Wrong language?** button for picking the source language
+
+### Other changes
+- Event support is hidden during tourneys
+- The bot flags an interrupted `/start-tourney` after a restart, and `/end-tourney` won't post its report twice
+
+## 🔒 Security & Monitoring
+- The scam scanner no longer skips messages starting with `!scam`
+- Privacy policy updated for this release (dated September 30, 2026)
+
+## 🐛 Bug Fixes & Improvements
+- **Translations failed with "too many requests":** requests are now throttled and cached, with MyMemory as a fallback
+
+## 📝 Documentation
+- README, docs and help commands updated for the new commands
+
+**Full Changelog**: https://github.com/RemainingDelta/Remaining7-Discord-Bot/compare/v1.14.0...v1.15.0
+
+
+### PR Descriptions
+
+#### PR #561 — 559-Enhancement hide event support during tourneys
+
+### Changes
+* `!starttourney` hides event support from members, and `!endtourney` (or the auto-reopen) shows it again
+* Added tests and updated the docs
+
+Closes #559
+
+#### PR #562 — 560-Bug read the prize pool from the redesigned Matcherino page
+
+### Changes
+* Fixed the Hall of Fame prize pool scrape in `features/tourney/matcherino.py`, which read `div.prize-pool-amt` that Matcherino's redesign removed. It now reads the first dollar figure in `section#prize-pool`, then `div.prize-pool-card`, then the legacy div, matching only ids and semantic classes, never the `tw:` utility classes
+* Added an `og:title` / `<title>` fallback for the tournament name, stripping trailing " | Supercell" and " | Matcherino" suffixes while keeping a "|" that is part of the name
+* Updated the duplicate Hall of Fame reply from ℹ️ to ⚠️
+* Added 18 tests to `tests/test_matcherino.py` built from the live page markup for tournament 221477, and updated the selectors in `docs/TOURNEY_MATCHERINO.md`
+
+Closes #560
+
+#### PR #570 — 564-Enhancement replace !translate with a Translate message command
+
+### Changes
+* Added a "Translate" right-click message command that translates the target message to English
+* Added a "Wrong language?" button on the result to pick the source language (replaces `!t <language>`)
+* Removed the `!t` / `!translate` prefix command
+* Updated README, `docs/TRANSLATION.md`, and `/help`
+
+Closes #564
+
+#### PR #571 — 565-Enhancement replace !sticky/!unsticky with a Set Sticky message command and /unsticky
+
+### Changes
+* Added a "Set Sticky" right-click message command that makes the target message sticky
+* Added `/unsticky` to remove the channel's sticky
+* Removed the `!sticky` / `!unsticky` prefix commands
+* Updated README, `docs/STICKY_MESSAGES.md`, `docs/DATABASE.md`, and `/help`
+
+Closes #565
+
+#### PR #578 — 566-Enhancement replace !close/!delete/!reopen with slash commands
+
+### Changes
+* Added `/close`, `/delete`, and `/reopen`, routed to the right handler for tourney, pre-tourney, support, event, booster, and redemption tickets
+* Made the ticket router accept the slash-command context, so every ticket type's handler runs unchanged
+* Removed the `!close`/`!c`, `!delete`/`!del`, and `!reopen` prefix commands
+* Updated README, `docs/`, `/help`, `/event-staff-help`, and `/tourney-admin-help`
+
+### Notes
+Built on #577 (reuses its `InteractionContext`), so merge #577 first.
+
+Closes #566
+
+#### PR #577 — 567-Enhancement replace !starttourney/!endtourney with /start-tourney and /end-tourney
+
+### Changes
+* Added `/start-tourney` (optional `region: SA` picker and `force`) and `/end-tourney`, replying publicly in the channel like the prefix commands did
+* Added `InteractionContext` so the existing start/end flows run unchanged from a slash command
+* Added a boot warning in the admin channel when `/start-tourney` was interrupted by a restart
+* Made `/end-tourney` post its stats report only once per session, so a re-run after a restart can't double-count the monthly report
+* Removed the `!starttourney` / `!endtourney` prefix commands
+* Updated README, `docs/`, and `/tourney-admin-help`
+
+### Notes
+The ticket expected `/end-tourney` to show an existing message when no tourney is active, but `!endtourney` never had that check, so none was added.
+
+Closes #567
+
+#### PR #572 — 568-Enhancement move scam blacklist commands to slash/message commands and remove !hacked
+
+### Changes
+* Added an "Add to Scam Blacklist" right-click message command that dry-runs the images, then Add or Cancel
+* Added a "Flag as Hacked" right-click message command that works on users who left (replaces `!hacked`)
+* Replaced `!scam-add`, `!scam-test`, `!scam-remove`, `!scam-rename`, `!scam-list` with slash commands
+* Removed the `!scam` exemption from the image scanner
+* Updated README, `docs/SCAM_DETECTION.md`, `docs/HACKED_SYSTEM.md`, and `/help`
+
+Closes #568
+
+#### PR #574 — 573-Bug stop translation rate limit errors
+
+### Changes
+* All translations now go through a shared client that spaces out requests, caches results, and retries Google on "too many requests"
+* Falls back to MyMemory if Google keeps refusing, and shows a friendly "busy" message if both fail
+* Added tests and updated the docs
+
+Closes #573
+
+#### PR #576 — 575-Enhancement add a Create GitHub Issue message command
+
+### Changes
+* Added a "Create GitHub Issue" right-click message command that opens a notes modal, then the Yes/No confirm
+* Posted the confirm prompt and result publicly in the channel (only the ticket creator can press Yes/No)
+* Attached the right-clicked message verbatim to the issue's log section for every ticket type
+* Stopped @mention replies from reading the replied-to message (plain @mention still works)
+* Updated README and `docs/GITHUB_TICKETS.md`
+
+Closes #575
+
+#### PR #584 — 580-Enhancement update version to v1.15.0
+
+### Changes
+* Updated the version to `1.15.0` in `pyproject.toml` and `README.md`
+
+Closes #580
+
+#### PR #585 — 581-Enhancement correct the privacy policy for v1.15.0
+
+### Changes
+* Updated why message content is read (moderation, channel games, transcripts) instead of "commands"
+* Rewrote the GitHub issue disclosure for the Create GitHub Issue right-click command
+* Added a translation disclosure (Google Translate, MyMemory fallback)
+* Set "Last updated" to September 30, 2026 in the module, `PRIVACY_POLICY.md`, and the test
+
+### Notes
+The copy on `remaining7.netlify.app/privacy` needs updating by hand after merge.
+
+Closes #581
+
+#### PR #586 — 582-Enhancement audit docs and help commands for v1.15.0
+
+### Changes
+* Added `/support-panel` and Create GitHub Issue to `/admin-help` (the only commands missing from every help embed)
+* Added a test that no help embed mentions a `!` command
+* Updated the README framework line and project tree (new `translate_client.py` and `interaction_context.py`, stale descriptions)
+* Removed leftover prefix-command wording from `docs/` and code comments
+
+Closes #582
+
+#### PR #587 — 583-Enhancement update documentation for v1.15.0 release
+
+### Changes
+* Added the v1.15.0 section to `docs/logs/SPECS.md`: an as-implemented entry and verdict for #559, #560, #564 to #569, #573, #575, #581, #582 and this ticket, plus the one-line bump entry for #580
+* Added the v1.15.0 section to `docs/logs/CHANGELOG.md`: the release notes and every PR description
+
+Closes #583

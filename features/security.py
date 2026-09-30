@@ -14,6 +14,23 @@ from features.config import ADMIN_ROLE_ID, MODERATOR_ROLE_ID, MODERATOR_LOGS_CHA
 class Security(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
+        # Context menus can't be declared as cog methods, so the "Flag as
+        # Hacked" message command is built here and registered in cog_load.
+        self.flag_hacked_menu = app_commands.ContextMenu(
+            name="Flag as Hacked", callback=self.flag_hacked_message
+        )
+        # Hidden from regular members; has_security_permission still runs.
+        self.flag_hacked_menu.default_permissions = discord.Permissions(
+            moderate_members=True
+        )
+
+    async def cog_load(self):
+        self.bot.tree.add_command(self.flag_hacked_menu)
+
+    async def cog_unload(self):
+        self.bot.tree.remove_command(
+            self.flag_hacked_menu.name, type=self.flag_hacked_menu.type
+        )
 
     # --- HELPER: Checks permissions (Admins OR Mods) ---
     async def has_security_permission(self, source):
@@ -180,43 +197,31 @@ class Security(commands.Cog):
         # Log to both channels
         await self._send_security_logs(result_embed)
 
-    # --- COMMAND 2: Text Command (!hacked) ---
-    @commands.command(name="hacked")
-    async def hacked_text(self, ctx):
-        """
-        Usage: Reply to a suspicious message with !hacked
-        """
-        if not await self.has_security_permission(ctx):
+    # --- COMMAND 2: Message Command (right-click > Apps > Flag as Hacked) ---
+    async def flag_hacked_message(
+        self, interaction: discord.Interaction, message: discord.Message
+    ):
+        if not await self.has_security_permission(interaction):
+            await interaction.response.send_message(
+                "❌ Permission Denied.", ephemeral=True
+            )
             return
 
-        if ctx.message.content.strip() != "!hacked":
-            return
-
-        if not ctx.message.reference:
-            await ctx.send("❌ Reply to a message with `!hacked` to flag that user.")
-            return
-
-        replied_message = await ctx.channel.fetch_message(
-            ctx.message.reference.message_id
-        )
-        target_user = replied_message.author
-
+        target_user = message.author
         if isinstance(target_user, discord.User):
             try:
-                target_user = await ctx.guild.fetch_member(target_user.id)
-            except Exception:
-                pass  # User left — proceed with discord.User to still purge messages and tag DB
+                target_user = await interaction.guild.fetch_member(target_user.id)
+            except discord.HTTPException:
+                pass  # User left — proceed with discord.User to still purge messages and tag DB (#298)
 
-        status_msg = await ctx.send("⏳ Processing Hacked Protocol...")
+        await interaction.response.defer()
         result_embed = await self._execute_hacked_action(
-            ctx.guild, target_user, ctx.author
+            interaction.guild, target_user, interaction.user
         )
-        await status_msg.edit(content=None, embed=result_embed)
+        await interaction.followup.send(embed=result_embed)
 
         # Log to both channels
         await self._send_security_logs(result_embed)
-
-    # --- OTHER COMMANDS ---
 
     @app_commands.command(
         name="unhacked",

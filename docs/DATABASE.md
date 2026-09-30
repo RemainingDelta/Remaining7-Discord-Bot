@@ -117,7 +117,7 @@ One document per tournament session.
 
 Key fields: `start_time`, `matcherino_id`, `total_tickets`, `total_messages`, `peak_queue`, `collect_data`.
 
-Restart-recovery fields (persisted by `!starttourney`, read by the boot-time resume routine): `region`, `admin_role_original_name`, `slowmode_ends_at`, `lock_reopens_at`. The two `*_at` fields are absolute UTC deadlines so a restart can re-arm the remaining time (or act immediately if already elapsed).
+Restart-recovery fields (persisted by `/start-tourney`, read by the boot-time resume routine): `region`, `admin_role_original_name`, `slowmode_ends_at`, `lock_reopens_at`, `setup_complete` (false until `/start-tourney` finishes; still false on boot means setup was interrupted). `/end-tourney` also writes `report_posted` so a re-run after a restart does not post the stats report twice. The two `*_at` fields are absolute UTC deadlines so a restart can re-arm the remaining time (or act immediately if already elapsed).
 
 ---
 
@@ -143,7 +143,7 @@ Key entries:
 | `brawlpass_redeemed_count` | Legacy per-item counter |
 | `booster_drop_message_id` | Message ID of the live booster-channel drop; cleared on claim/expiry |
 | `last_message_{user_id}` | Epoch-seconds of the user's last passive token award (20s cooldown) |
-| `pending_winner_announcement` | JSON marker (`matcherino_id`, `updates_channel_id`, `expires_at`) driving the crash-safe `!endtourney` winner retry |
+| `pending_winner_announcement` | JSON marker (`matcherino_id`, `updates_channel_id`, `expires_at`) driving the crash-safe `/end-tourney` winner retry |
 | `last_monthly_report_month` | `"YYYY-MM"` of the last month a tournament report was generated for (idempotent gate + catch-up) |
 | `last_event_cleanup_day` | `"YYYY-MM-DD"` (ET) of the last event-channel cleanup run (missed-run logging) |
 
@@ -238,7 +238,7 @@ The purge writes this doc **before any deletes**, `$addToSet`s each channel into
 ### `sticky_messages`
 Sticky message data per channel. `_id = str(channel_id)`.
 
-Fields: `content`, `attachment_url`, `message_id` (last posted sticky message to delete on repost).
+Fields: `content`, `attachments` (list of `{filename, data}` with the file bytes), `bot_message_id` (last posted sticky message to delete on repost).
 
 ---
 

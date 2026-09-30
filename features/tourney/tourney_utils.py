@@ -1,5 +1,4 @@
 import re
-from deep_translator import GoogleTranslator
 from langdetect import detect
 import discord
 from discord.ext import commands
@@ -8,6 +7,7 @@ from datetime import datetime
 from discord.utils import utcnow
 import asyncio
 from database.mongo import get_blacklisted_user
+from features import translate_client
 from features.config import (
     TOURNEY_CATEGORY_ID,
     PRE_TOURNEY_CATEGORY_ID,
@@ -36,15 +36,12 @@ _user_last_ticket_open_time: dict[int, datetime] = {}
 async def _get_translation(text: str) -> str | None:
     """Detects language and returns English translation if not already English."""
     try:
-        # Run blocking detection and translation in a thread to keep the bot responsive
+        # Run blocking detection in a thread to keep the bot responsive
         detected = await asyncio.to_thread(detect, text)
         if detected == "en":
             return None
 
-        translated = await asyncio.to_thread(
-            GoogleTranslator(source="auto", target="en").translate, text
-        )
-        return translated
+        return await translate_client.translate(text, source="auto", target="en")
     except Exception:
         return None
 
@@ -469,7 +466,7 @@ async def create_pre_tourney_ticket_channel(
 
 async def close_ticket_via_command(ctx: commands.Context):
     """
-    Handle the !close command:
+    Handle the /close command:
     1. Check perms.
     2. Move to CLOSED category.
     3. Rename (background).

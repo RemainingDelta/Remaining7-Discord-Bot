@@ -386,15 +386,15 @@ def test_embed_only_message_yields_its_field_text():
     assert "AttributeError: boom" in text
 
 
-# --- context collection ---
+# --- context collection (from the right-clicked message, #575) ---
 
 
 @pytest.mark.asyncio
 async def test_context_from_embed_only_error_post():
-    from features.github_tickets import collect_referenced_context
+    from features.github_tickets import context_from_message
 
     referenced = _referenced(embeds=[_error_embed()], attachments=[_text_attachment()])
-    ctx = await collect_referenced_context(_reply_to(referenced))
+    ctx = await context_from_message(referenced)
 
     assert "event on_message" in ctx.text
     assert ctx.logs == ("Traceback...\nBoom",)
@@ -404,9 +404,9 @@ async def test_context_from_embed_only_error_post():
 
 @pytest.mark.asyncio
 async def test_context_from_a_plain_user_message():
-    from features.github_tickets import collect_referenced_context
+    from features.github_tickets import context_from_message
 
-    ctx = await collect_referenced_context(_reply_to(_referenced(content="it broke")))
+    ctx = await context_from_message(_referenced(content="it broke"))
     assert ctx.text == "it broke"
     assert ctx.logs == ()
 
@@ -414,55 +414,21 @@ async def test_context_from_a_plain_user_message():
 @pytest.mark.asyncio
 async def test_images_are_recorded_by_name_only():
     """Discord CDN urls expire, so the filename is all that is worth keeping."""
-    from features.github_tickets import collect_referenced_context
+    from features.github_tickets import context_from_message
 
     referenced = _referenced(content="see attached", attachments=[_image_attachment()])
-    ctx = await collect_referenced_context(_reply_to(referenced))
+    ctx = await context_from_message(referenced)
 
     assert ctx.attachment_names == ("screenshot.png",)
     assert ctx.logs == ()
 
 
 @pytest.mark.asyncio
-async def test_no_reference_yields_no_context():
-    from features.github_tickets import collect_referenced_context
-
-    message = MagicMock(spec=discord.Message)
-    message.reference = None
-    assert await collect_referenced_context(message) is None
-
-
-@pytest.mark.asyncio
-async def test_unresolved_reference_falls_back_to_fetch():
-    from features.github_tickets import collect_referenced_context
-
-    referenced = _referenced(content="fetched")
-    message = _reply_to(referenced)
-    message.reference.resolved = None
-
-    ctx = await collect_referenced_context(message)
-    assert ctx.text == "fetched"
-    message.channel.fetch_message.assert_awaited_once_with(3)
-
-
-@pytest.mark.asyncio
-async def test_a_deleted_referenced_message_is_not_fatal():
-    from features.github_tickets import collect_referenced_context
-
-    message = _reply_to(_referenced())
-    message.reference.resolved = None
-    message.channel.fetch_message = AsyncMock(
-        side_effect=discord.NotFound(MagicMock(status=404), "gone")
-    )
-    assert await collect_referenced_context(message) is None
-
-
-@pytest.mark.asyncio
 async def test_an_oversized_log_is_not_inlined():
-    from features.github_tickets import MAX_INLINE_LOG_BYTES, collect_referenced_context
+    from features.github_tickets import MAX_INLINE_LOG_BYTES, context_from_message
 
     huge = _text_attachment(size=MAX_INLINE_LOG_BYTES + 1)
-    ctx = await collect_referenced_context(_reply_to(_referenced(attachments=[huge])))
+    ctx = await context_from_message(_referenced(attachments=[huge]))
     assert ctx.logs == ()
 
 
@@ -476,30 +442,59 @@ def test_logs_are_inlined_verbatim_in_a_collapsible_block():
     ctx = ReferencedContext(
         text="x", logs=("line one\nline two",), attachment_names=(), jump_url="J"
     )
-    body = append_context("### Screenshots/Logs\nAttach artifacts.\n", ctx, "bug")
+    body = append_context("### Screenshots/Logs\nAttach artifacts.\n", ctx)
 
     assert "<details>" in body
     assert "line one\nline two" in body
 
 
-def test_logs_are_omitted_for_a_non_bug_ticket():
+def test_logs_are_attached_for_a_non_bug_ticket_too():
     from features.github_tickets import ReferencedContext, append_context
 
     ctx = ReferencedContext(
         text="x", logs=("stack",), attachment_names=(), jump_url="J"
     )
-    body = append_context("### Overview\nA nicer button.\n", ctx, "enhancement")
+    body = append_context("### Overview\nA nicer button.\n", ctx)
 
-    assert "stack" not in body
-    assert "<details>" not in body
+    assert "stack" in body
+    assert "<details>" in body
+
+
+def test_the_original_message_text_is_attached_verbatim():
+    from features.github_tickets import ReferencedContext, append_context
+
+    report = "When I /buy the shop freezes\nand my tokens vanish"
+    ctx = ReferencedContext(text=report, logs=(), attachment_names=(), jump_url="J")
+    body = append_context(_gemini_body(), ctx)
+
+    assert report in body
+    assert body.index(report) < body.index("### Branch")
+
+
+def test_logs_section_is_inserted_before_branch_when_template_lacks_it():
+    """Enhancement/feature templates have no Screenshots/Logs heading."""
+    from features.github_tickets import (
+        ENHANCEMENT_TEMPLATE,
+        ReferencedContext,
+        append_context,
+    )
+
+    ctx = ReferencedContext(
+        text="the report", logs=(), attachment_names=(), jump_url="J"
+    )
+    body = append_context(ENHANCEMENT_TEMPLATE, ctx)
+
+    assert "### Screenshots/Logs" in body
+    assert body.index("the report") < body.index("### Branch")
+    assert body.index("### Screenshots/Logs") < body.index("### Branch")
 
 
 def test_empty_sections_are_omitted():
     """No 'Screenshots/Logs: none', no empty image list."""
     from features.github_tickets import ReferencedContext, append_context
 
-    ctx = ReferencedContext(text="x", logs=(), attachment_names=(), jump_url="J")
-    body = append_context("### Overview\nfoo\n", ctx, "bug")
+    ctx = ReferencedContext(text="", logs=(), attachment_names=(), jump_url="J")
+    body = append_context("### Overview\nfoo\n", ctx)
 
     assert "<details>" not in body
     assert "Images" not in body
@@ -512,7 +507,7 @@ def test_jump_url_is_included_as_a_permanent_pointer():
     ctx = ReferencedContext(
         text="x", logs=(), attachment_names=("a.png",), jump_url="https://d/1/2/3"
     )
-    body = append_context("### Overview\nfoo\n", ctx, "bug")
+    body = append_context("### Overview\nfoo\n", ctx)
 
     assert "https://d/1/2/3" in body
     assert "a.png" in body
@@ -530,8 +525,8 @@ def test_bug_template_has_no_if_applicable_marker():
 
 
 @pytest.mark.asyncio
-async def test_on_message_reply_passes_context_to_the_confirm_view(mock_bot):
-    """Replying to an error post pulls its embed and log into the ticket."""
+async def test_on_message_reply_does_not_read_the_replied_to_message(mock_bot):
+    """Without Message Content Intent the replied-to message is empty (#575)."""
     from features.github_tickets import GitHubTickets
 
     cog = GitHubTickets(mock_bot)
@@ -545,14 +540,14 @@ async def test_on_message_reply_passes_context_to_the_confirm_view(mock_bot):
     await cog.on_message(message)
 
     view = message.reply.call_args[1]["view"]
-    assert view.context.logs == ("Traceback...\nBoom",)
-    assert "event on_message" in view.raw_text
-    assert "happens in DMs" in view.raw_text
+    assert view.raw_text == "happens in DMs"
+    assert view.context is None
+    message.channel.fetch_message.assert_not_awaited()
+    referenced.attachments[0].read.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_on_message_reply_with_no_notes_still_works(mock_bot):
-    """A bare mention on a reply is enough; the referenced message is the content."""
+async def test_on_message_bare_mention_reply_gives_the_usage_hint(mock_bot):
     from features.github_tickets import GitHubTickets
 
     cog = GitHubTickets(mock_bot)
@@ -564,8 +559,8 @@ async def test_on_message_reply_with_no_notes_still_works(mock_bot):
 
     await cog.on_message(message)
 
-    assert "view" in message.reply.call_args[1]
-    assert message.reply.call_args[1]["view"].raw_text == "it broke"
+    assert "view" not in message.reply.call_args[1]
+    assert "Create GitHub Issue" in message.reply.call_args[0][0]
 
 
 # --- composed body, derived from the ticket criteria not the helpers (#522) ---
@@ -588,7 +583,7 @@ def test_artifacts_land_under_screenshots_logs_not_after_the_branch_block():
     ctx = ReferencedContext(
         text="x", logs=("stack trace here",), attachment_names=(), jump_url="J"
     )
-    body = append_context(_gemini_body(), ctx, "bug")
+    body = append_context(_gemini_body(), ctx)
 
     assert body.index("stack trace here") < body.index("### Branch"), (
         "artifacts must sit in the Screenshots/Logs section, not below the branch"
@@ -599,23 +594,23 @@ def test_an_empty_logs_section_is_removed_entirely():
     """AC: no 'Screenshots/Logs: None' left in the created ticket."""
     from features.github_tickets import append_context
 
-    body = append_context(_gemini_body(logs_section="None"), None, "bug")
+    body = append_context(_gemini_body(logs_section="None"), None)
 
     assert "### Screenshots/Logs" not in body
     assert "None" not in body
     assert "### Branch" in body  # the rest of the template survives
 
 
-def test_a_non_bug_ticket_drops_the_logs_section_too():
+def test_a_non_bug_ticket_keeps_the_logs_section():
     from features.github_tickets import ReferencedContext, append_context
 
     ctx = ReferencedContext(
         text="x", logs=("stack",), attachment_names=(), jump_url="J"
     )
-    body = append_context(_gemini_body(), ctx, "enhancement")
+    body = append_context(_gemini_body(), ctx)
 
-    assert "stack" not in body
-    assert "J" in body  # the jump link still points at the source
+    assert "stack" in body
+    assert "J" in body
 
 
 def test_total_log_budget_is_under_the_github_body_limit():
@@ -631,7 +626,7 @@ async def test_logs_stop_being_inlined_once_the_total_budget_is_spent():
     from features.github_tickets import (
         MAX_INLINE_LOG_BYTES,
         MAX_TOTAL_LOG_BYTES,
-        collect_referenced_context,
+        context_from_message,
     )
 
     # Each file is inside the per-file cap; together they exceed the total, so
@@ -645,7 +640,7 @@ async def test_logs_stop_being_inlined_once_the_total_budget_is_spent():
             _text_attachment("c.log", body),
         ]
     )
-    ctx = await collect_referenced_context(_reply_to(referenced))
+    ctx = await context_from_message(referenced)
 
     assert len(ctx.logs) == 2, "the budget is across attachments, not per attachment"
     assert ctx.attachment_names == ("c.log",), "the skipped log is still named"
@@ -653,11 +648,196 @@ async def test_logs_stop_being_inlined_once_the_total_budget_is_spent():
 
 @pytest.mark.asyncio
 async def test_a_pdf_is_not_reported_as_an_image():
-    from features.github_tickets import collect_referenced_context
+    from features.github_tickets import context_from_message
 
     pdf = _image_attachment("report.pdf")
     pdf.content_type = "application/pdf"
-    ctx = await collect_referenced_context(_reply_to(_referenced(attachments=[pdf])))
+    ctx = await context_from_message(_referenced(attachments=[pdf]))
 
     assert ctx.attachment_names == ("report.pdf",)
     assert ctx.logs == ()
+
+
+# --- "Create GitHub Issue" message command (#575) ---
+
+
+def _creator_interaction(user_id=TICKET_CREATOR_ID):
+    interaction = MagicMock(spec=discord.Interaction)
+    interaction.user = MagicMock(spec=discord.Member)
+    interaction.user.id = user_id
+    interaction.response = AsyncMock()
+    interaction.followup = AsyncMock()
+    interaction.followup.send = AsyncMock(return_value=MagicMock())
+    return interaction
+
+
+@pytest.mark.asyncio
+async def test_create_issue_menu_denies_anyone_but_the_ticket_creator(mock_bot):
+    from features.github_tickets import GitHubTickets
+
+    cog = GitHubTickets(mock_bot)
+    interaction = _creator_interaction(user_id=999999999)
+
+    await cog.create_issue_from_message(interaction, _referenced(content="bug"))
+
+    interaction.response.send_modal.assert_not_awaited()
+    interaction.response.send_message.assert_awaited_once()
+    assert interaction.response.send_message.call_args.kwargs["ephemeral"] is False
+
+
+@pytest.mark.asyncio
+async def test_create_issue_menu_opens_a_modal_with_one_optional_field(mock_bot):
+    from features.github_tickets import GitHubTickets
+
+    cog = GitHubTickets(mock_bot)
+    interaction = _creator_interaction()
+
+    await cog.create_issue_from_message(interaction, _referenced(content="bug"))
+
+    modal = interaction.response.send_modal.call_args.args[0]
+    assert isinstance(modal, discord.ui.Modal)
+    fields = [c for c in modal.children if isinstance(c, discord.ui.TextInput)]
+    assert len(fields) == 1
+    assert fields[0].required is False
+    assert fields[0].style == discord.TextStyle.paragraph
+
+
+async def _submit(modal, notes):
+    from features.github_tickets import IssueNotesModal
+
+    assert isinstance(modal, IssueNotesModal)
+    modal.notes._value = notes
+    interaction = _creator_interaction()
+    await modal.on_submit(interaction)
+    return interaction
+
+
+@pytest.mark.asyncio
+async def test_submitting_the_modal_offers_confirm_with_message_and_notes():
+    from features.github_tickets import ConfirmView, IssueNotesModal
+
+    report = _referenced(embeds=[_error_embed()], attachments=[_text_attachment()])
+    interaction = await _submit(IssueNotesModal(report), "happens in DMs")
+
+    kwargs = interaction.followup.send.call_args.kwargs
+    view = kwargs["view"]
+    assert isinstance(view, ConfirmView)
+    assert kwargs["ephemeral"] is False
+    assert "event on_message" in view.raw_text
+    assert "happens in DMs" in view.raw_text
+    assert view.context.logs == ("Traceback...\nBoom",)
+    assert view.author_id == TICKET_CREATOR_ID
+
+
+@pytest.mark.asyncio
+async def test_submitting_the_modal_defers_publicly():
+    from features.github_tickets import IssueNotesModal
+
+    interaction = await _submit(IssueNotesModal(_referenced(content="it broke")), "")
+
+    interaction.response.defer.assert_awaited_once_with(ephemeral=False, thinking=True)
+
+
+@pytest.mark.asyncio
+async def test_submitting_the_modal_with_no_notes_still_works():
+    from features.github_tickets import IssueNotesModal
+
+    interaction = await _submit(IssueNotesModal(_referenced(content="it broke")), "")
+
+    assert interaction.followup.send.call_args.kwargs["view"].raw_text == "it broke"
+
+
+@pytest.mark.asyncio
+async def test_submitting_on_an_empty_message_with_no_notes_is_refused():
+    from features.github_tickets import IssueNotesModal
+
+    interaction = await _submit(IssueNotesModal(_referenced()), "  ")
+
+    kwargs = interaction.followup.send.call_args.kwargs
+    assert "view" not in kwargs
+    assert kwargs["ephemeral"] is False
+
+
+@pytest.mark.asyncio
+async def test_cancel_does_not_call_gemini_or_github():
+    from features.github_tickets import ConfirmView
+
+    view = ConfirmView("desc", TICKET_CREATOR_ID)
+    interaction = _creator_interaction()
+    with (
+        patch("features.github_tickets.call_gemini", new=AsyncMock()) as gemini,
+        patch("features.github_tickets.create_github_issue", new=AsyncMock()) as gh,
+    ):
+        await view.cancel.callback(interaction)
+
+    gemini.assert_not_awaited()
+    gh.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_only_the_invoker_can_press_the_confirm_buttons():
+    from features.github_tickets import ConfirmView
+
+    view = ConfirmView("desc", TICKET_CREATOR_ID)
+    assert await view.interaction_check(_creator_interaction()) is True
+    assert await view.interaction_check(_creator_interaction(999999999)) is False
+
+
+@pytest.mark.asyncio
+async def test_confirm_attaches_the_original_message_to_a_feature_ticket():
+    from features.github_tickets import FEATURE_TEMPLATE, ConfirmView, ReferencedContext
+
+    ctx = ReferencedContext(
+        text="please add dark mode", logs=(), attachment_names=(), jump_url="J"
+    )
+    view = ConfirmView("please add dark mode", TICKET_CREATOR_ID, ctx)
+    interaction = _creator_interaction()
+    ticket = {"type": "feature", "title": "Dark mode", "body": FEATURE_TEMPLATE}
+    with (
+        patch(
+            "features.github_tickets.call_gemini", new=AsyncMock(return_value=ticket)
+        ),
+        patch(
+            "features.github_tickets.create_github_issue",
+            new=AsyncMock(return_value={"number": 900, "html_url": "u"}),
+        ),
+        patch("features.github_tickets.update_github_issue", new=AsyncMock()) as update,
+    ):
+        await view.confirm.callback(interaction)
+
+    body = update.call_args.args[1]
+    assert "please add dark mode" in body
+    assert body.index("please add dark mode") < body.index("### Branch")
+    assert "900-Feature" in body
+
+
+@pytest.mark.asyncio
+async def test_cog_load_registers_the_create_issue_message_command(mock_bot):
+    from discord import app_commands
+
+    from features.github_tickets import GitHubTickets
+
+    mock_bot.tree = MagicMock()
+    cog = GitHubTickets(mock_bot)
+
+    await cog.cog_load()
+
+    menu = mock_bot.tree.add_command.call_args.args[0]
+    assert isinstance(menu, app_commands.ContextMenu)
+    assert menu.name == "Create GitHub Issue"
+    assert menu.type is discord.AppCommandType.message
+    assert menu.default_permissions is not None, "hidden from regular members"
+
+
+@pytest.mark.asyncio
+async def test_cog_unload_removes_the_create_issue_message_command(mock_bot):
+    from features.github_tickets import GitHubTickets
+
+    mock_bot.tree = MagicMock()
+    cog = GitHubTickets(mock_bot)
+
+    await cog.cog_unload()
+
+    mock_bot.tree.remove_command.assert_called_once_with(
+        "Create GitHub Issue", type=discord.AppCommandType.message
+    )

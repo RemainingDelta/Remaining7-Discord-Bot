@@ -64,7 +64,7 @@ class General(commands.Cog):
         embed.add_field(name="🎟️ Tournaments", value=tourney_text, inline=False)
 
         translation_text = (
-            "`!t [language]` - Reply to a message to translate it into English (e.g., `!t spanish`)\n"
+            "**Translate** - Right-click a message → Apps → Translate to translate it into English (press **Wrong language?** to pick the source language)\n"
             "`/translate` - Translate your English text into 53 other languages"
         )
         embed.add_field(name="🌐 Translation", value=translation_text, inline=False)
@@ -125,7 +125,7 @@ class General(commands.Cog):
         # Security Protocol
         security_text = (
             "`/hacked <user>` - Times out a user and purges recent messages.\n"
-            "`!hacked` (Prefix) - Reply to a message with this to trigger the protocol.\n"
+            "**Flag as Hacked** - Right-click one of their messages → Apps (works even if they left).\n"
             "`/unhacked <user>` - Removes hacked flag and clears timeout.\n"
             "`/hacked-list` - View all users currently flagged as compromised."
         )
@@ -135,19 +135,20 @@ class General(commands.Cog):
         scam_text = (
             "Images are auto-scanned against the scam blacklist — matches are deleted, "
             "the poster gets a 10-min timeout, and an alert with Confirm/Dismiss buttons is posted in mod-logs.\n"
-            "`!scam-add` - Reply to an image (or attach one) to blacklist it.\n"
-            "`!scam-remove <md5> [md5 ...]` - Remove entries by MD5 prefix.\n"
-            "`!scam-list` - View all blacklisted images.\n"
-            "`!scam-rename <md5> <name>` - Give an entry a readable name.\n"
-            "`!scam-test` - Dry-run detection on an image (no action taken)."
+            "**Add to Scam Blacklist** - Right-click a message → Apps to test its image(s), then Add or Cancel.\n"
+            "`/scam-add <image>` - Blacklist an uploaded image.\n"
+            "`/scam-remove <md5> [md5 ...]` - Remove entries by MD5 prefix.\n"
+            "`/scam-list` - View all blacklisted images.\n"
+            "`/scam-rename <md5> <name>` - Give an entry a readable name.\n"
+            "`/scam-test <image>` - Dry-run detection on an image (no action taken)."
         )
         embed.add_field(name="🖼️ Scam Image Detection", value=scam_text, inline=False)
 
         # Server Tools
         tools_text = (
             "`/set-count <number>` - Manually set the current count in the counting channel.\n"
-            "`!sticky <message>` - Pin a message that reposts whenever others send in that channel.\n"
-            "`!unsticky` - Remove the active sticky message from a channel."
+            "**Set Sticky** - Right-click a message → Apps → Set Sticky to keep it reposted at the bottom of the channel.\n"
+            "`/unsticky` - Remove the active sticky message from a channel."
         )
         embed.add_field(name="🔧 Server Tools", value=tools_text, inline=False)
 
@@ -222,6 +223,12 @@ class General(commands.Cog):
         )
 
         # --- Quest Management ---
+        tools_text = (
+            "`/support-panel` - Post the support ticket panel.\n"
+            "**Create GitHub Issue** - Right-click a message → Apps to file it as a GitHub issue (ticket creator only)."
+        )
+        embed.add_field(name="🛠️ Server & Dev Tools", value=tools_text, inline=False)
+
         quest_text = "`/reset-quests <user>` - Force-reset a user's quest assignments."
         embed.add_field(name="📜 Quest Management", value=quest_text, inline=False)
 

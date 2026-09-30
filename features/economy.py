@@ -459,7 +459,7 @@ async def reopen_redemption_ticket_via_command(ctx: commands.Context) -> None:
 
 async def handle_redemption_delete_attempt(ctx: commands.Context) -> None:
     await ctx.reply(
-        "`!delete` is disabled for redemption tickets. Use `!close` and choose one of the delete options."
+        "`/delete` is disabled for redemption tickets. Use `/close` and choose one of the delete options."
     )
 
 

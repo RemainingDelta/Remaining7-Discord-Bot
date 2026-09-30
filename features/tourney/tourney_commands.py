@@ -77,6 +77,7 @@ from features.config import (
     TOURNEY_ADMIN_ROLE_ID,
     TOURNEY_REPORT_CHANNEL_ID,
     TOURNEY_SCHEDULE_CHANNEL_ID,
+    EVENT_TICKET_PANEL_CHANNEL_ID,
 )
 from .tourney_utils import (
     close_ticket_via_command,
@@ -87,6 +88,7 @@ from .tourney_utils import (
     reopen_ticket_via_command,
 )
 from .tourney_views import TourneyOpenTicketView, PreTourneyOpenTicketView
+from features.interaction_context import InteractionContext
 from features.ticket_command_router import (
     get_support_category_ids,
     route_shared_ticket_command,
@@ -183,7 +185,7 @@ async def _write_snapshot(data: dict, session: dict):
     await insert_tourney_snapshot(snapshot)
 
 
-# Settings key for the crash-safe winner-announcement retry (Item 3). !endtourney
+# Settings key for the crash-safe winner-announcement retry (Item 3). /end-tourney
 # schedules a retry when the winner isn't yet available from Matcherino; persisting
 # it here lets the retry survive a restart (the old asyncio.create_task was lost on
 # crash, and the session is already "finished" so resume_tourney_if_active skips it).
@@ -568,7 +570,7 @@ async def run_hall_of_fame(
     """Fetch results for tournament_id and post them to the Hall of Fame channel.
 
     Returns (success, message) instead of talking to a discord.Interaction so it
-    can be called from the /hall-of-fame slash command, from !endtourney, from the
+    can be called from the /hall-of-fame slash command, from /end-tourney, from the
     retry loop and from the manual-override modal.
 
     `prize_pool` overrides the scraped amount. When the amount cannot be read and
@@ -642,7 +644,7 @@ async def run_hall_of_fame(
         await _clear_pending_hof(
             bot, _retry_marker or existing, "✅ Already posted — nothing further to do."
         )
-        return True, "ℹ️ A Hall of Fame post for this tournament already exists."
+        return True, "⚠️ A Hall of Fame post for this tournament already exists."
 
     if prize_pool is None:
         res = data["results"]
@@ -710,7 +712,7 @@ class QueueDashboard(commands.Cog):
             "message_id": None,
         }
         self._announcement_matcherino_id: str | None = None
-        # The dashboard_task is still manually started via !starttourney
+        # The dashboard_task is still manually started via /start-tourney
         # The match_refresher starts automatically to monitor any active tickets
         self.match_refresher_task.start()
         self.winner_reconcile_task.start()
@@ -745,7 +747,7 @@ class QueueDashboard(commands.Cog):
     # --- WINNER ANNOUNCEMENT RECONCILE (crash recovery) ---
     @tasks.loop(count=1)
     async def winner_reconcile_task(self):
-        """Cold-boot-only. If !endtourney armed a winner retry that a restart killed,
+        """Cold-boot-only. If /end-tourney armed a winner retry that a restart killed,
         re-arm it from the persisted marker (unless it already passed its deadline).
         The session is 'finished' by then, so resume_tourney_if_active never sees it."""
         await self.bot.wait_until_ready()
@@ -1743,11 +1745,184 @@ class BlacklistGroup(app_commands.Group):
         await interaction.response.send_message(embed=embed)
 
 
+async def set_event_panel_visibility(
+    bot: commands.Bot, member_role: discord.Role, visible: bool
+) -> discord.TextChannel | None:
+    """Show or hide the event ticket panel alongside the OTHER ticket channel (#559).
+
+    Never raises: a missing panel or a failed permission edit must not stop
+    tourney start or end. Returns the channel only when it was changed.
+    """
+    channel = (
+        bot.get_channel(EVENT_TICKET_PANEL_CHANNEL_ID)
+        if EVENT_TICKET_PANEL_CHANNEL_ID
+        else None
+    )
+    if not isinstance(channel, discord.TextChannel):
+        print("⚠️ Event ticket panel channel not found, visibility left unchanged")
+        return None
+    try:
+        await channel.set_permissions(member_role, view_channel=visible)
+    except discord.HTTPException as e:
+        print(f"⚠️ Could not update event ticket panel visibility: {e}")
+        return None
+    return channel
+
+
+async def lock_command(ctx: commands.Context):
+    """Temporarily lock the OTHER ticket channel and event panel from members."""
+    if not isinstance(ctx.author, discord.Member) or not is_staff(ctx.author):
+        await ctx.reply("You don't have permission to lock the ticket channel.")
+        return
+
+    bot = ctx.bot
+    channel = bot.get_channel(OTHER_TICKET_CHANNEL_ID)
+    if channel is None or not isinstance(channel, discord.TextChannel):
+        await ctx.reply(
+            "Configured ticket channel not found. Check OTHER_TICKET_CHANNEL_ID."
+        )
+        return
+
+    guild = channel.guild
+
+    # Use member role from config, or @everyone if MEMBER_ROLE_ID is None
+    if MEMBER_ROLE_ID is None:
+        member_role = guild.default_role
+    else:
+        member_role = guild.get_role(MEMBER_ROLE_ID)
+
+    if member_role is None:
+        await ctx.reply("Member role not found in this server.")
+        return
+
+    # Hide from members
+    await channel.set_permissions(member_role, view_channel=False)
+    event_panel = await set_event_panel_visibility(bot, member_role, False)
+    locked = channel.mention + (f" and {event_panel.mention}" if event_panel else "")
+    # send, not reply: under /start-tourney the first reply answers the slash
+    # command, and this notice is a progress post that belongs in the channel.
+    await ctx.send(
+        f"🔒 Locked {locked}. It will auto-reopen in {LOCK_DURATION_HOURS} hours "
+        f"or when `/end-tourney` is run."
+    )
+
+    # Cancel any old timer
+    old = lock_tasks.get(channel.id)
+    if old and not old.done():
+        old.cancel()
+
+    # Remember where the command was run so we can notify there later
+    notify_channel_id = ctx.channel.id
+
+    async def auto_reopen():
+        try:
+            await asyncio.sleep(LOCK_DURATION_HOURS * 3600)
+        except asyncio.CancelledError:
+            return  # unlocked early by /end-tourney
+
+        ticket_ch = bot.get_channel(OTHER_TICKET_CHANNEL_ID)
+        if isinstance(ticket_ch, discord.TextChannel):
+            await ticket_ch.set_permissions(member_role, view_channel=True)
+        await set_event_panel_visibility(bot, member_role, True)
+
+        # Notify in the original channel where !lock was used
+        notify_ch = bot.get_channel(notify_channel_id)
+        if isinstance(notify_ch, discord.TextChannel):
+            await notify_ch.send(
+                f"🔓 Reopened {ticket_ch.mention} automatically after {LOCK_DURATION_HOURS} hours."
+            )
+
+    task = asyncio.create_task(auto_reopen())
+    lock_tasks[channel.id] = task
+
+
+async def unlock_command(ctx: commands.Context):
+    """Unlock the general support channel and event panel. Called internally by /end-tourney."""
+    if not isinstance(ctx.author, discord.Member) or not is_staff(ctx.author):
+        await ctx.reply("You don't have permission to unlock the ticket channel.")
+        return
+
+    bot = ctx.bot
+    channel = bot.get_channel(OTHER_TICKET_CHANNEL_ID)
+    if channel is None or not isinstance(channel, discord.TextChannel):
+        await ctx.reply(
+            "Configured ticket channel not found. Check OTHER_TICKET_CHANNEL_ID."
+        )
+        return
+
+    guild = channel.guild
+
+    if MEMBER_ROLE_ID is None:
+        member_role = guild.default_role
+    else:
+        member_role = guild.get_role(MEMBER_ROLE_ID)
+
+    if member_role is None:
+        await ctx.reply("Member role not found in this server.")
+        return
+
+    # Restore permissions for members
+    await channel.set_permissions(member_role, view_channel=True)
+    event_panel = await set_event_panel_visibility(bot, member_role, True)
+
+    # Cancel any auto-lock timer
+    task = lock_tasks.pop(channel.id, None)
+    if task and not task.done():
+        task.cancel()
+
+    unlocked = channel.mention + (f" and {event_panel.mention}" if event_panel else "")
+    await ctx.send(f"🔓 **Unlocked** {unlocked}. Members can see it again.")
+
+
 # on_ready re-fires on every gateway reconnect, and this registers top-level
-# prefix commands, so a second run raises CommandRegistrationError. The
+# slash commands, so a second run raises CommandAlreadyRegistered. The
 # function owns its own re-entrancy the way load_extension owns
 # ExtensionAlreadyLoaded (#548).
 _TOURNEY_COMMANDS_REGISTERED = False
+
+
+async def post_session_report(ctx, session: dict, embed: discord.Embed) -> bool:
+    """Post the end-of-tourney stats report once per session.
+
+    /end-tourney closes the session only after the report is posted, so a
+    restart in between leaves the session active and staff re-run the command.
+    Without this record the report would post again, and the monthly report
+    (which sums every report embed in the channel) would count the tourney twice.
+    """
+    if session.get("report_posted"):
+        await ctx.send(
+            "ℹ️ The stats report for this tourney was already posted, so it wasn't posted again."
+        )
+        return False
+
+    await ctx.send(embed=embed)
+    report_channel = ctx.bot.get_channel(TOURNEY_REPORT_CHANNEL_ID)
+    if report_channel:
+        await report_channel.send(embed=embed)
+    await update_tourney_runtime_state(session["_id"], report_posted=True)
+    return True
+
+
+async def warn_if_setup_interrupted(bot, session: dict) -> bool:
+    """On boot, flag a /start-tourney that never finished.
+
+    Resume only restores runtime state; it does not redo setup steps that never
+    ran (support panel, pre-tourney cleanup, slow mode), so without this a
+    half-finished start looks like a running tourney. Sessions from before this
+    field existed have no ``setup_complete`` key and stay quiet.
+    """
+    if session.get("setup_complete") is not False:
+        return False
+
+    channel = bot.get_channel(TOURNEY_ADMIN_CHANNEL_ID)
+    if channel:
+        await channel.send(
+            "⚠️ **`/start-tourney` was interrupted by a bot restart** before setup "
+            "finished, so some steps (support panel, pre-tourney cleanup, slow mode) "
+            "may not have run. Run `/start-tourney` again with `force: True` (and the "
+            "same region) to finish setup."
+        )
+    return True
 
 
 def setup_tourney_commands(bot: commands.Bot):
@@ -1766,8 +1941,33 @@ def setup_tourney_commands(bot: commands.Bot):
     # buttons on an outstanding alert keep working (#443).
     bot.add_view(HallOfFamePrizeView(bot))
 
-    @bot.command(name="close", aliases=["c"])
-    async def close_command(ctx: commands.Context):
+    async def _run_ticket_command(
+        interaction: discord.Interaction, handler, done: str
+    ) -> None:
+        """Drive a ctx-based ticket handler from a slash command (#566)."""
+        ctx = InteractionContext(interaction)
+        await ctx.start()
+        await handler(ctx)
+        await ctx.finish(done)
+
+    @app_commands.command(name="close", description="STAFF: Close this ticket.")
+    @app_commands.guild_only()
+    async def close_slash(interaction: discord.Interaction):
+        await _run_ticket_command(interaction, close_command, "✅ Done.")
+
+    @app_commands.command(name="delete", description="STAFF: Delete this ticket.")
+    @app_commands.guild_only()
+    async def delete_slash(interaction: discord.Interaction):
+        await _run_ticket_command(interaction, delete_command, "✅ Done.")
+
+    @app_commands.command(
+        name="reopen", description="STAFF: Reopen this closed ticket."
+    )
+    @app_commands.guild_only()
+    async def reopen_slash(interaction: discord.Interaction):
+        await _run_ticket_command(interaction, reopen_command, "✅ Done.")
+
+    async def close_command(ctx):
         """Close a tourney ticket (staff only)."""
         if await route_shared_ticket_command(ctx, "close"):
             return
@@ -1782,109 +1982,13 @@ def setup_tourney_commands(bot: commands.Bot):
 
         await close_ticket_via_command(ctx)
 
-    async def lock_command(ctx: commands.Context):
-        """Temporarily lock the OTHER ticket channel from members."""
-        if not isinstance(ctx.author, discord.Member) or not is_staff(ctx.author):
-            await ctx.reply("You don't have permission to lock the ticket channel.")
-            return
-
-        channel = bot.get_channel(OTHER_TICKET_CHANNEL_ID)
-        if channel is None or not isinstance(channel, discord.TextChannel):
-            await ctx.reply(
-                "Configured ticket channel not found. Check OTHER_TICKET_CHANNEL_ID."
-            )
-            return
-
-        guild = channel.guild
-
-        # Use member role from config, or @everyone if MEMBER_ROLE_ID is None
-        if MEMBER_ROLE_ID is None:
-            member_role = guild.default_role
-        else:
-            member_role = guild.get_role(MEMBER_ROLE_ID)
-
-        if member_role is None:
-            await ctx.reply("Member role not found in this server.")
-            return
-
-        # Hide from members
-        await channel.set_permissions(member_role, view_channel=False)
-        await ctx.reply(
-            f"🔒 Locked {channel.mention}. It will auto-reopen in {LOCK_DURATION_HOURS} hours "
-            f"or when `!reopen` is used."
-        )
-
-        # Cancel any old timer
-        old = lock_tasks.get(channel.id)
-        if old and not old.done():
-            old.cancel()
-
-        # Remember where the command was run so we can notify there later
-        notify_channel_id = ctx.channel.id
-
-        async def auto_reopen():
-            try:
-                await asyncio.sleep(LOCK_DURATION_HOURS * 3600)
-            except asyncio.CancelledError:
-                return  # manually reopened with !reopen
-
-            ticket_ch = bot.get_channel(OTHER_TICKET_CHANNEL_ID)
-            if isinstance(ticket_ch, discord.TextChannel):
-                await ticket_ch.set_permissions(member_role, view_channel=True)
-
-            # Notify in the original channel where !lock was used
-            notify_ch = bot.get_channel(notify_channel_id)
-            if isinstance(notify_ch, discord.TextChannel):
-                await notify_ch.send(
-                    f"🔓 Reopened {ticket_ch.mention} automatically after {LOCK_DURATION_HOURS} hours."
-                )
-
-        task = asyncio.create_task(auto_reopen())
-        lock_tasks[channel.id] = task
-
-    async def unlock_command(ctx: commands.Context):
-        """Unlock the general support channel. Called internally by !endtourney."""
-        if not isinstance(ctx.author, discord.Member) or not is_staff(ctx.author):
-            await ctx.reply("You don't have permission to unlock the ticket channel.")
-            return
-
-        channel = bot.get_channel(OTHER_TICKET_CHANNEL_ID)
-        if channel is None or not isinstance(channel, discord.TextChannel):
-            await ctx.reply(
-                "Configured ticket channel not found. Check OTHER_TICKET_CHANNEL_ID."
-            )
-            return
-
-        guild = channel.guild
-
-        if MEMBER_ROLE_ID is None:
-            member_role = guild.default_role
-        else:
-            member_role = guild.get_role(MEMBER_ROLE_ID)
-
-        if member_role is None:
-            await ctx.reply("Member role not found in this server.")
-            return
-
-        # Restore permissions for members
-        await channel.set_permissions(member_role, view_channel=True)
-
-        # Cancel any auto-lock timer
-        task = lock_tasks.pop(channel.id, None)
-        if task and not task.done():
-            task.cancel()
-
-        await ctx.reply(f"🔓 **Unlocked** {channel.mention}. Members can see it again.")
-
-    @bot.command(name="delete", aliases=["del"])
-    async def delete_command(ctx: commands.Context):
+    async def delete_command(ctx):
         """Delete a ticket (backup for button)."""
         if await route_shared_ticket_command(ctx, "delete"):
             return
         await delete_ticket_via_command(ctx)
 
-    @bot.command(name="reopen")
-    async def reopen_command(ctx: commands.Context):
+    async def reopen_command(ctx):
         """
         Reopen a closed tourney ticket channel.
         Moves it from the Closed Category back to the Active Category.
@@ -1893,7 +1997,7 @@ def setup_tourney_commands(bot: commands.Bot):
             return
 
         # Check if we are inside a CLOSED ticket category. The isinstance guard
-        # keeps a DM'd `!reopen` from reading `category_id` off a DMChannel (#517);
+        # keeps a DM'd `/reopen` from reading `category_id` off a DMChannel (#517);
         # the else branch's warning is the right reply there.
         if isinstance(ctx.channel, discord.TextChannel) and ctx.channel.category_id in (
             TOURNEY_CLOSED_CATEGORY_ID,
@@ -1905,14 +2009,33 @@ def setup_tourney_commands(bot: commands.Bot):
                 "⚠️ This command is for reopening **Closed Tourney Tickets**."
             )
 
-    @bot.command(name="starttourney")
-    async def start_tourney_command(ctx: commands.Context, *args: str):
+    @app_commands.command(
+        name="start-tourney",
+        description="STAFF: Start the tourney (locks support, wipes old tickets, posts the panel).",
+    )
+    @app_commands.describe(
+        region="Pick SA for South America mode (locks and redirects the Spanish channel)",
+        force="Restart setup over an already-active session (purges channels, resets the clock)",
+    )
+    @app_commands.choices(
+        region=[app_commands.Choice(name="SA (South America)", value="SA")]
+    )
+    async def start_tourney_slash(
+        interaction: discord.Interaction,
+        region: str | None = None,
+        force: bool = False,
+    ):
+        ctx = InteractionContext(interaction)
+        await ctx.start()
+        await start_tourney_command(ctx, region, force)
+        await ctx.finish("✅ Tourney setup finished.")
+
+    async def start_tourney_command(ctx, region: str | None, force: bool):
         import features.config as config
 
         """
-        Start a tourney with an optional region (e.g., !starttourney SA).
-        Pass `force` to restart setup over an already-active session
-        (e.g., !starttourney SA force).
+        Start a tourney with an optional region (SA for South America mode).
+        `force` restarts setup over an already-active session.
         """
         if not isinstance(ctx.author, discord.Member) or not is_staff(ctx.author):
             await ctx.reply("You don't have permission to start the tourney.")
@@ -1928,9 +2051,6 @@ def setup_tourney_commands(bot: commands.Bot):
         if not guild:
             return
 
-        tokens = [a.lower() for a in args]
-        force = "force" in tokens
-        region = next((t for t in tokens if t != "force"), None)
         normalized_region = region.upper() if isinstance(region, str) else None
 
         # Guard against a destructive re-run. After a restart the bot auto-resumes the
@@ -1940,10 +2060,10 @@ def setup_tourney_commands(bot: commands.Bot):
         if existing_session and not force:
             await ctx.reply(
                 "⚠️ A tourney session is already **active** (if the bot just restarted, it "
-                "auto-resumed the running tourney). Re-running `!starttourney` will **purge "
+                "auto-resumed the running tourney). Re-running `/start-tourney` will **purge "
                 "channels, delete all pre-tourney tickets, and reset the session clock**.\n"
                 "If you really want to restart setup from scratch, run "
-                "`!starttourney [region] force`."
+                "`/start-tourney` with `force: True`."
             )
             return
 
@@ -1963,7 +2083,11 @@ def setup_tourney_commands(bot: commands.Bot):
         active_session = await get_active_tourney_session()
         session_id = active_session["_id"] if active_session else None
         if session_id:
-            await update_tourney_runtime_state(session_id, region=normalized_region)
+            # setup_complete stays False until the last step, so a restart part
+            # way through is flagged on boot (warn_if_setup_interrupted).
+            await update_tourney_runtime_state(
+                session_id, region=normalized_region, setup_complete=False
+            )
 
         # Auto-detect Matcherino ID from #tourney-schedule (±1 day of today)
         auto_matcherino_id = None
@@ -2197,7 +2321,7 @@ def setup_tourney_commands(bot: commands.Bot):
             if admin_role.name != "[NOT TOURNEY ADMIN] Admin":
                 admin_role_original_name[0] = admin_role.name
 
-            # Persist so a restart can restore the correct name on !endtourney.
+            # Persist so a restart can restore the correct name on /end-tourney.
             if session_id:
                 await update_tourney_runtime_state(
                     session_id, admin_role_original_name=admin_role_original_name[0]
@@ -2265,7 +2389,7 @@ def setup_tourney_commands(bot: commands.Bot):
             try:
                 await asyncio.sleep(3600)  # 1 hour
             except asyncio.CancelledError:
-                return  # Cancelled by !endtourney or a subsequent !starttourney
+                return  # Cancelled by /end-tourney or a subsequent /start-tourney
 
             channel = bot.get_channel(GENERAL_CHANNEL_ID)
             if isinstance(channel, discord.TextChannel):
@@ -2285,8 +2409,20 @@ def setup_tourney_commands(bot: commands.Bot):
         if dashboard_cog:
             await dashboard_cog.start_dashboard()
 
-    @bot.command(name="endtourney")
-    async def end_tourney_command(ctx: commands.Context):
+        if session_id:
+            await update_tourney_runtime_state(session_id, setup_complete=True)
+
+    @app_commands.command(
+        name="end-tourney",
+        description="STAFF: End the tourney (closes tickets, posts stats, reopens support).",
+    )
+    async def end_tourney_slash(interaction: discord.Interaction):
+        ctx = InteractionContext(interaction)
+        await ctx.start()
+        await end_tourney_command(ctx)
+        await ctx.finish("✅ Tourney ended.")
+
+    async def end_tourney_command(ctx):
         """
         End the tourney:
         - Reopen the "Other" ticket channel.
@@ -2308,7 +2444,7 @@ def setup_tourney_commands(bot: commands.Bot):
         if guild is None:
             return
 
-        # Force one last high-stakes/winner announcement sync so !endtourney doesn't
+        # Force one last high-stakes/winner announcement sync so /end-tourney doesn't
         # depend on the 5-minute loop timing.
         dashboard_cog = bot.get_cog("QueueDashboard")
         active_session_for_announcement = await get_active_tourney_session()
@@ -2329,7 +2465,7 @@ def setup_tourney_commands(bot: commands.Bot):
                         endtourney_matcherino_id, data
                     )
             except Exception as e:
-                print(f"!endtourney announcement sync error: {e}")
+                print(f"/end-tourney announcement sync error: {e}")
 
         winner_was_posted = (
             dashboard_cog is not None
@@ -2479,11 +2615,9 @@ def setup_tourney_commands(bot: commands.Bot):
             if matcherino_id:
                 stat_embed.set_footer(text=f"Matcherino ID: {matcherino_id}")
 
-            # 5. Send to command channel (no pin) and archive to #tourney-reports
-            await ctx.send(embed=stat_embed)
-            report_channel = ctx.bot.get_channel(TOURNEY_REPORT_CHANNEL_ID)
-            if report_channel:
-                await report_channel.send(embed=stat_embed)
+            # 5. Send to command channel (no pin) and archive to #tourney-reports,
+            #    once per session even if a restart makes staff re-run this.
+            await post_session_report(ctx, session, stat_embed)
 
             # 6. Close Session in DB
             await end_tourney_session(session["_id"])
@@ -2838,7 +2972,7 @@ def setup_tourney_commands(bot: commands.Bot):
     async def post_hall_of_fame(
         guild: discord.Guild, tournament_id: str, prize_pool: float | None = None
     ) -> tuple[bool, str]:
-        """Thin wrapper so !endtourney keeps its existing call shape.
+        """Thin wrapper so /end-tourney keeps its existing call shape.
 
         All behaviour -- including the prizepool-unavailable alert and retry --
         lives in the module-level run_hall_of_fame so the retry loop and the
@@ -3194,8 +3328,8 @@ def setup_tourney_commands(bot: commands.Bot):
 
         # --- 1. Session & Channel Management ---
         session_text = (
-            "`!starttourney [region]` - Wipes old tickets, locks general support, and posts the live panel. Use `!starttourney SA` for South America mode. The bot auto-resumes after a restart, so add `force` (`!starttourney [region] force`) only to intentionally restart setup over an active session.\n"
-            "`!endtourney` - Closes all active tickets, generates staff stats, posts the Pre-Tourney panel, and unlocks general support.\n"
+            "`/start-tourney [region] [force]` - Wipes old tickets, locks general and event support, and posts the live panel. Pick `region: SA` for South America mode. The bot auto-resumes after a restart, so set `force: True` only to intentionally restart setup over an active session.\n"
+            "`/end-tourney` - Closes all active tickets, generates staff stats, posts the Pre-Tourney panel, and unlocks general and event support.\n"
             "`/tourney-panel` - Post the live tourney support button.\n"
             "`/pre-tourney-panel` - Post the pre-tourney support button.\n"
             "`/tourney-test-mode` - Toggle 100-ticket limit and 0.1s cooldown for testing."
@@ -3204,9 +3338,9 @@ def setup_tourney_commands(bot: commands.Bot):
 
         # --- 2. Ticket Commands ---
         ticket_text = (
-            "`!close` (or `!c`) - Closes the current ticket and adds to your completed stats.\n"
-            "`!delete` (or `!del`) - Deletes a ticket with transcript.\n"
-            "`!reopen` - Moves a closed ticket back to the active category.\n"
+            "`/close` - Closes the current ticket and adds to your completed stats.\n"
+            "`/delete` - Deletes a ticket with transcript.\n"
+            "`/reopen` - Moves a closed ticket back to the active category.\n"
             "`/add` / `/remove` - Add or remove a specific user to/from the current ticket."
         )
         embed.add_field(name="🎫 Ticket Control", value=ticket_text, inline=False)
@@ -3243,7 +3377,7 @@ def setup_tourney_commands(bot: commands.Bot):
             "**1. Claiming:** When a user opens a ticket, read their submitted Team Name and Issue.\n"
             "**2. Assisting:** Request screenshot proof for no-shows or score disputes.\n"
             "**3. Matcherino:** Perform the necessary actions (advancing teams, resetting matches, etc.) on the bracket on the Matcherino website.\n"
-            "**4. Closing:** Once the issue is resolved in the bracket, let the players know they are good to go and type `!close` to archive the channel."
+            "**4. Closing:** Once the issue is resolved in the bracket, let the players know they are good to go and type `/close` to archive the channel."
         )
         embed.add_field(name="🔄 Support Workflow", value=workflow_text, inline=False)
 
@@ -3761,6 +3895,13 @@ def setup_tourney_commands(bot: commands.Bot):
 
         print("♻️ Active tourney session detected — resuming runtime state...")
 
+        try:
+            await warn_if_setup_interrupted(bot, session)
+        except Exception as e:
+            print(
+                f"⚠️ Tourney resume: could not post the interrupted-setup warning: {e}"
+            )
+
         # 1. Restart dashboard loops (wait briefly for the cog to finish loading,
         #    since it is added via create_task above).
         dashboard_cog = None
@@ -3780,7 +3921,7 @@ def setup_tourney_commands(bot: commands.Bot):
         sticky_redirect_state["enabled"] = True
         sticky_redirect_state["region"] = session.get("region")
 
-        # 3. Restore the Admin role original name for a correct !endtourney restore.
+        # 3. Restore the Admin role original name for a correct /end-tourney restore.
         stored_name = session.get("admin_role_original_name")
         if stored_name:
             admin_role_original_name[0] = stored_name
@@ -3857,6 +3998,8 @@ def setup_tourney_commands(bot: commands.Bot):
                             print("♻️ Locked ticket channel reopened after resume.")
                         except Exception as e:
                             print(f"⚠️ Tourney resume: lock reopen failed: {e}")
+                    if role:
+                        await set_event_panel_visibility(bot, role, True)
 
                 if member_role:
                     old = lock_tasks.get(channel.id)
@@ -3870,6 +4013,11 @@ def setup_tourney_commands(bot: commands.Bot):
 
     asyncio.create_task(resume_tourney_if_active())
 
+    bot.tree.add_command(close_slash)
+    bot.tree.add_command(delete_slash)
+    bot.tree.add_command(reopen_slash)
+    bot.tree.add_command(start_tourney_slash)
+    bot.tree.add_command(end_tourney_slash)
     bot.tree.add_command(tourney_panel)
     bot.tree.add_command(pre_tourney_panel)
     bot.tree.add_command(add_to_ticket)
