@@ -241,7 +241,9 @@ async def test_region_reaches_the_session_unchanged(tourney, region, stored):
         await _start(tourney, interaction, region=region)
 
     tourney.create_tourney_session.assert_awaited_once()
-    tourney.update_tourney_runtime_state.assert_any_await(7, region=stored)
+    tourney.update_tourney_runtime_state.assert_any_await(
+        7, region=stored, setup_complete=False
+    )
 
 
 async def test_starttourney_defers_before_any_work(tourney):
@@ -278,3 +280,117 @@ async def test_endtourney_denies_outside_the_admin_channel(tourney):
     assert f"<#{ADMIN_CHANNEL}>" in _private_text(interaction)
     assert tourney.get_active_tourney_session.await_count == checks_before
     interaction.channel.send.assert_not_awaited()
+
+
+# --- restart safety: interrupted /starttourney is flagged, /endtourney report posts once ---
+
+
+async def test_a_finished_start_marks_setup_complete(tourney):
+    tourney.lock_command.side_effect = None
+    tourney.get_active_tourney_session.side_effect = None
+    tourney.get_active_tourney_session.return_value = None
+    tourney.create_tourney_session.side_effect = lambda: (
+        tourney.get_active_tourney_session.configure_mock(return_value={"_id": 7})
+    )
+    tourney.bot.get_cog = MagicMock(return_value=None)
+    interaction = _slash_interaction()
+    interaction.guild.get_channel = MagicMock(return_value=None)
+    interaction.guild.get_role = MagicMock(return_value=None)
+
+    await _start(tourney, interaction)
+
+    calls = tourney.update_tourney_runtime_state.await_args_list
+    assert calls[-1].args == (7,)
+    assert calls[-1].kwargs == {"setup_complete": True}, "written as the last step"
+
+
+async def test_an_interrupted_start_never_marks_setup_complete(tourney):
+    tourney.get_active_tourney_session.side_effect = [None, {"_id": 7}]
+    interaction = _slash_interaction()
+
+    with pytest.raises(_StopHere):
+        await _start(tourney, interaction)
+
+    for call in tourney.update_tourney_runtime_state.await_args_list:
+        assert call.kwargs.get("setup_complete") is not True
+
+
+def _admin_bot(channel):
+    bot = MagicMock()
+    bot.get_channel = MagicMock(return_value=channel)
+    return bot
+
+
+async def test_boot_warns_when_setup_was_interrupted(monkeypatch):
+    import features.tourney.tourney_commands as tc
+
+    monkeypatch.setattr(tc, "TOURNEY_ADMIN_CHANNEL_ID", ADMIN_CHANNEL)
+    channel = MagicMock(spec=discord.TextChannel)
+    channel.send = AsyncMock()
+    bot = _admin_bot(channel)
+
+    warned = await tc.warn_if_setup_interrupted(
+        bot, {"_id": 7, "setup_complete": False}
+    )
+
+    assert warned is True
+    bot.get_channel.assert_called_with(ADMIN_CHANNEL)
+    text = channel.send.await_args.args[0]
+    assert "/starttourney" in text and "force" in text
+
+
+@pytest.mark.parametrize("session", [{"_id": 7, "setup_complete": True}, {"_id": 7}])
+async def test_boot_stays_quiet_for_a_completed_or_legacy_session(session):
+    import features.tourney.tourney_commands as tc
+
+    channel = MagicMock(spec=discord.TextChannel)
+    channel.send = AsyncMock()
+
+    warned = await tc.warn_if_setup_interrupted(_admin_bot(channel), session)
+
+    assert warned is False
+    channel.send.assert_not_awaited()
+
+
+def _report_ctx(report_channel):
+    ctx = MagicMock()
+    ctx.send = AsyncMock()
+    ctx.bot.get_channel = MagicMock(return_value=report_channel)
+    return ctx
+
+
+async def test_report_is_posted_and_recorded(monkeypatch):
+    import features.tourney.tourney_commands as tc
+
+    record = AsyncMock()
+    monkeypatch.setattr(tc, "update_tourney_runtime_state", record)
+    report_channel = MagicMock(spec=discord.TextChannel)
+    report_channel.send = AsyncMock()
+    ctx = _report_ctx(report_channel)
+    embed = discord.Embed(title="stats")
+
+    posted = await tc.post_session_report(ctx, {"_id": 7}, embed)
+
+    assert posted is True
+    ctx.send.assert_awaited_once_with(embed=embed)
+    report_channel.send.assert_awaited_once_with(embed=embed)
+    record.assert_awaited_once_with(7, report_posted=True)
+
+
+async def test_rerun_after_a_restart_does_not_post_the_report_twice(monkeypatch):
+    import features.tourney.tourney_commands as tc
+
+    record = AsyncMock()
+    monkeypatch.setattr(tc, "update_tourney_runtime_state", record)
+    report_channel = MagicMock(spec=discord.TextChannel)
+    report_channel.send = AsyncMock()
+    ctx = _report_ctx(report_channel)
+
+    posted = await tc.post_session_report(
+        ctx, {"_id": 7, "report_posted": True}, discord.Embed(title="stats")
+    )
+
+    assert posted is False
+    report_channel.send.assert_not_awaited()
+    record.assert_not_awaited()
+    assert "already" in ctx.send.await_args.args[0]
