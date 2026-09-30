@@ -20,7 +20,7 @@ from discord.ext import commands
 from features.config import OTHER_TICKET_CHANNEL_ID, PRIVACY_CHANNEL_ID
 
 POLICY_TITLE = "Remaining 7 Bot Privacy Policy"
-LAST_UPDATED = "September 19, 2026"
+LAST_UPDATED = "September 30, 2026"
 
 # The same policy, hosted on the web. Linked at the foot of the last embed for
 # anyone who wants to read or share it outside Discord. This is the one external
@@ -129,10 +129,11 @@ POLICY_PARTS: tuple[PolicyPart, ...] = (
                     "- We do not use Discord's Presence intent, so we never "
                     "see your online status or activity\n"
                     "- We do not store the content of your everyday messages. "
-                    "Message content is read live to power features like "
-                    "commands, quests, and moderation, but it is not saved, "
-                    "with the single exception of sticky message text "
-                    "described above"
+                    "Message content is read live for moderation (checking "
+                    "images against known scams), channel games (counting and "
+                    "the story game), and ticket transcripts, but it is not "
+                    "saved, except sticky message text and the transcripts "
+                    "described below"
                 ),
             ),
             PolicySection(
@@ -173,21 +174,19 @@ POLICY_PARTS: tuple[PolicyPart, ...] = (
                     "to 25 images posted in it. Both are sent to the person "
                     "who opened the ticket via direct message and archived in "
                     "a staff-only log channel.\n"
-                    "- GitHub issue creation. A single authorized staff member "
-                    "can @mention the bot to convert a bug report or feature "
-                    "request into a GitHub issue. That staff member's message "
-                    "is sent to Google's Gemini API for classification and to "
-                    "GitHub, where the resulting issue is created and publicly "
-                    "visible in our project repository.\n"
-                    "  If they send it as a reply to another message, that "
-                    "message is included too: its text, the contents of any "
-                    "embed on it, the filenames of anything attached to it, and "
-                    "a link back to it in Discord. Attached log files are copied "
-                    "into the issue in full. So if a staff member files an issue "
-                    "by replying to something you wrote, your words and any "
-                    "files you attached can end up on a public page.\n"
-                    "  This feature is restricted to one authorized user and is "
-                    "not available to general members."
+                    "- GitHub issue creation. One authorized staff member can "
+                    "right-click a message and choose Create GitHub Issue. That "
+                    "message's text, embed contents, attachment filenames and a "
+                    "link to it, plus any notes they add, are sent to Google's "
+                    "Gemini API and to GitHub, where the issue is publicly "
+                    "visible. Attached log files are copied in full, so your "
+                    "words and files can end up on a public page. They can also "
+                    "@mention the bot with a description, which sends only "
+                    "their own message. This is not available to general "
+                    "members.\n"
+                    "- Translation. Text translated with Translate or "
+                    "/translate is sent to Google Translate, or MyMemory as a "
+                    "fallback. It is not stored."
                 ),
             ),
         ),
