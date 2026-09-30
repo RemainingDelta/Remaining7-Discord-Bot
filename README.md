@@ -206,8 +206,9 @@ Every user always has **4 active quests** — one daily and one weekly per categ
 - Deleting saves a transcript to the event transcript channel and DMs a copy to the opener, re-uploading up to 25 images from the ticket so submissions survive the channel being deleted.
 
 ### GitHub Ticket Integration
-- AI-powered GitHub issue creation. One authorized staff member @mentions the bot with a description; Gemini classifies it as a bug, enhancement, or feature and fills in the matching template.
-- **Reply for context:** @mention the bot as a reply to another message and that message is folded in — its text, embed contents, attached `.txt`/`.log` files (copied in verbatim), attachment filenames, and a permanent link back to it. Turns an error post in the bot logs channel into a filed issue in one step.
+- AI-powered GitHub issue creation for one authorized staff member. Gemini classifies the description as a bug, enhancement, or feature and fills in the matching template.
+- **Create GitHub Issue** (right-click a message → Apps) — opens a modal for optional notes, then a Yes/No prompt. The message's text, embed contents, attached `.txt`/`.log` files (copied in verbatim), attachment filenames, and a permanent link back to it are attached to the issue. Turns a member's bug report or an error post in the bot logs channel into a filed issue in one step.
+- **@mention** the bot with a description as a fallback. Replying to a message while mentioning no longer pulls that message in; right-click it instead.
 - Requires `GEMINI_TOKEN` and `GITHUB_TOKEN` environment variables. See [`docs/GITHUB_TICKETS.md`](docs/GITHUB_TICKETS.md).
 
 ### Error Reporting
