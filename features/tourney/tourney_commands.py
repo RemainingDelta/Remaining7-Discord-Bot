@@ -1799,8 +1799,8 @@ async def lock_command(ctx: commands.Context):
     await channel.set_permissions(member_role, view_channel=False)
     event_panel = await set_event_panel_visibility(bot, member_role, False)
     locked = channel.mention + (f" and {event_panel.mention}" if event_panel else "")
-    # send, not reply: under /start-tourney the first reply is private to the
-    # invoker, and this notice belongs in the admin channel.
+    # send, not reply: under /start-tourney the first reply answers the slash
+    # command, and this notice is a progress post that belongs in the channel.
     await ctx.send(
         f"🔒 Locked {locked}. It will auto-reopen in {LOCK_DURATION_HOURS} hours "
         f"or when `/end-tourney` is run."

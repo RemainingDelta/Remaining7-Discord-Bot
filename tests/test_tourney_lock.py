@@ -137,8 +137,8 @@ async def test_forbidden_on_event_panel_does_not_raise(
 
 
 # --- the lock notices post in the channel under /start-tourney and /end-tourney (#567) ---
-# Under the slash commands the first ctx.reply is private to the invoker, so a
-# success notice sent with reply would vanish from the admin channel.
+# Under the slash commands the first ctx.reply answers the interaction and would
+# swallow the gate slot, so progress notices go to the channel with send.
 
 
 async def test_lock_notice_is_posted_in_the_channel(other_channel, event_channel):
