@@ -52,6 +52,13 @@ This is fully automatic and a no-op when no session is active. Milestone announc
 
 Because the bot auto-resumes, re-running `/starttourney` while a session is active is treated as an error (it would purge channels, delete pre-tourney tickets, and reset the session clock). It replies with a warning and does nothing. To intentionally tear down and restart setup from scratch, set `force: True`: `/starttourney force:True`.
 
+### A restart in the middle of `/starttourney` or `/endtourney`
+
+Resume only restores runtime state; it does not redo setup or teardown steps that never ran. Two guards cover that:
+
+- **Interrupted start.** `/starttourney` writes `setup_complete: false` on the session as soon as the session exists and `true` only after its last step. On boot, `warn_if_setup_interrupted()` posts a warning in `TOURNEY_ADMIN_CHANNEL_ID` if it is still `false`. Staff then run `/starttourney force:True` with the same region; every step is safe to repeat. Sessions created before this field existed have no `setup_complete` key and never warn.
+- **Interrupted end.** `/endtourney` posts the stats report before it closes the session, so a restart in between leaves the session active. `post_session_report()` records `report_posted: true` right after archiving the report and skips it on a re-run, so re-running `/endtourney` never posts a second report (the monthly report sums every report embed, so a duplicate would count the tourney twice). A restart after the session is closed needs no guard: with no active session, a re-run skips the report and Hall of Fame and redoes the cleanup.
+
 ---
 
 ## `/endtourney`

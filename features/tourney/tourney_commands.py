@@ -1881,6 +1881,50 @@ async def unlock_command(ctx: commands.Context):
 _TOURNEY_COMMANDS_REGISTERED = False
 
 
+async def post_session_report(ctx, session: dict, embed: discord.Embed) -> bool:
+    """Post the end-of-tourney stats report once per session.
+
+    /endtourney closes the session only after the report is posted, so a
+    restart in between leaves the session active and staff re-run the command.
+    Without this record the report would post again, and the monthly report
+    (which sums every report embed in the channel) would count the tourney twice.
+    """
+    if session.get("report_posted"):
+        await ctx.send(
+            "ℹ️ The stats report for this tourney was already posted, so it wasn't posted again."
+        )
+        return False
+
+    await ctx.send(embed=embed)
+    report_channel = ctx.bot.get_channel(TOURNEY_REPORT_CHANNEL_ID)
+    if report_channel:
+        await report_channel.send(embed=embed)
+    await update_tourney_runtime_state(session["_id"], report_posted=True)
+    return True
+
+
+async def warn_if_setup_interrupted(bot, session: dict) -> bool:
+    """On boot, flag a /starttourney that never finished.
+
+    Resume only restores runtime state; it does not redo setup steps that never
+    ran (support panel, pre-tourney cleanup, slow mode), so without this a
+    half-finished start looks like a running tourney. Sessions from before this
+    field existed have no ``setup_complete`` key and stay quiet.
+    """
+    if session.get("setup_complete") is not False:
+        return False
+
+    channel = bot.get_channel(TOURNEY_ADMIN_CHANNEL_ID)
+    if channel:
+        await channel.send(
+            "⚠️ **`/starttourney` was interrupted by a bot restart** before setup "
+            "finished, so some steps (support panel, pre-tourney cleanup, slow mode) "
+            "may not have run. Run `/starttourney` again with `force: True` (and the "
+            "same region) to finish setup."
+        )
+    return True
+
+
 def setup_tourney_commands(bot: commands.Bot):
     global _TOURNEY_COMMANDS_REGISTERED
     if _TOURNEY_COMMANDS_REGISTERED:
@@ -2016,7 +2060,11 @@ def setup_tourney_commands(bot: commands.Bot):
         active_session = await get_active_tourney_session()
         session_id = active_session["_id"] if active_session else None
         if session_id:
-            await update_tourney_runtime_state(session_id, region=normalized_region)
+            # setup_complete stays False until the last step, so a restart part
+            # way through is flagged on boot (warn_if_setup_interrupted).
+            await update_tourney_runtime_state(
+                session_id, region=normalized_region, setup_complete=False
+            )
 
         # Auto-detect Matcherino ID from #tourney-schedule (±1 day of today)
         auto_matcherino_id = None
@@ -2338,6 +2386,9 @@ def setup_tourney_commands(bot: commands.Bot):
         if dashboard_cog:
             await dashboard_cog.start_dashboard()
 
+        if session_id:
+            await update_tourney_runtime_state(session_id, setup_complete=True)
+
     @app_commands.command(
         name="endtourney",
         description="STAFF: End the tourney (closes tickets, posts stats, reopens support).",
@@ -2541,11 +2592,9 @@ def setup_tourney_commands(bot: commands.Bot):
             if matcherino_id:
                 stat_embed.set_footer(text=f"Matcherino ID: {matcherino_id}")
 
-            # 5. Send to command channel (no pin) and archive to #tourney-reports
-            await ctx.send(embed=stat_embed)
-            report_channel = ctx.bot.get_channel(TOURNEY_REPORT_CHANNEL_ID)
-            if report_channel:
-                await report_channel.send(embed=stat_embed)
+            # 5. Send to command channel (no pin) and archive to #tourney-reports,
+            #    once per session even if a restart makes staff re-run this.
+            await post_session_report(ctx, session, stat_embed)
 
             # 6. Close Session in DB
             await end_tourney_session(session["_id"])
@@ -3822,6 +3871,13 @@ def setup_tourney_commands(bot: commands.Bot):
             return
 
         print("♻️ Active tourney session detected — resuming runtime state...")
+
+        try:
+            await warn_if_setup_interrupted(bot, session)
+        except Exception as e:
+            print(
+                f"⚠️ Tourney resume: could not post the interrupted-setup warning: {e}"
+            )
 
         # 1. Restart dashboard loops (wait briefly for the cog to finish loading,
         #    since it is added via create_task above).

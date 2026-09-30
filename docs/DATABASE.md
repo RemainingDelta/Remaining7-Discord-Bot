@@ -117,7 +117,7 @@ One document per tournament session.
 
 Key fields: `start_time`, `matcherino_id`, `total_tickets`, `total_messages`, `peak_queue`, `collect_data`.
 
-Restart-recovery fields (persisted by `/starttourney`, read by the boot-time resume routine): `region`, `admin_role_original_name`, `slowmode_ends_at`, `lock_reopens_at`. The two `*_at` fields are absolute UTC deadlines so a restart can re-arm the remaining time (or act immediately if already elapsed).
+Restart-recovery fields (persisted by `/starttourney`, read by the boot-time resume routine): `region`, `admin_role_original_name`, `slowmode_ends_at`, `lock_reopens_at`, `setup_complete` (false until `/starttourney` finishes; still false on boot means setup was interrupted). `/endtourney` also writes `report_posted` so a re-run after a restart does not post the stats report twice. The two `*_at` fields are absolute UTC deadlines so a restart can re-arm the remaining time (or act immediately if already elapsed).
 
 ---
 
