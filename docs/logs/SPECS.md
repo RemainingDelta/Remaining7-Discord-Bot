@@ -4619,7 +4619,7 @@ Implemented in `6398221`, `13fa848`. Files: `features/general.py`, `tests/test_g
 > ### Proposed Behavior
 > Both cover everything since `v1.14.0`: #559, #560, #563 (#564 to #569, #575), #573, and the release tickets…(truncated)
 
-Implemented in `<pending — set to the 583-Enhancement doc commit sha once committed>`. Files: `docs/logs/SPECS.md`, `docs/logs/CHANGELOG.md`
+Implemented in `3aeef91`. Files: `docs/logs/SPECS.md`, `docs/logs/CHANGELOG.md`
 
 ✅ Reviewed against the diff: implementation matches the filed spec.
 
