@@ -431,12 +431,12 @@ async def test_close_without_a_session_leaves_stats_alone(tickets):
     tickets.tc.update_tourney_queue.assert_not_awaited()
 
 
-async def test_reopen_outside_a_closed_category_warns_privately(tickets):
+async def test_reopen_outside_a_closed_category_warns_publicly(tickets):
     interaction = _ticket_interaction(category_id=TOURNEY_CAT)
 
     await _run(tickets, "reopen", interaction)
 
-    assert "Closed Tourney Tickets" in _private_text(interaction)
+    assert "Closed Tourney Tickets" in _reply_text(interaction)
     tickets.handlers[("tourney", "reopen")].assert_not_awaited()
 
 
@@ -445,12 +445,12 @@ async def test_ticket_commands_are_server_only(tickets):
         assert tickets.bot.tree.get_command(name).guild_only is True
 
 
-async def test_ticket_commands_defer_privately_first(tickets):
+async def test_ticket_commands_defer_publicly_first(tickets):
     interaction = _ticket_interaction()
 
     await _run(tickets, "close", interaction)
 
-    interaction.response.defer.assert_awaited_once_with(ephemeral=True, thinking=True)
+    interaction.response.defer.assert_awaited_once_with(ephemeral=False, thinking=True)
 
 
 async def test_redemption_delete_points_at_the_slash_commands():
@@ -466,7 +466,7 @@ async def test_redemption_delete_points_at_the_slash_commands():
     assert "!" not in text
 
 
-async def test_tourney_close_denies_non_staff_privately(bot, monkeypatch):
+async def test_tourney_close_denies_non_staff_publicly(bot, monkeypatch):
     """The real tourney handler's permission check still applies."""
     import features.tourney.tourney_commands as tc
     import features.tourney.tourney_utils as tu
@@ -487,7 +487,7 @@ async def test_tourney_close_denies_non_staff_privately(bot, monkeypatch):
 
     await bot.tree.get_command("close").callback(interaction)
 
-    assert "permission" in _private_text(interaction)
+    assert "permission" in _reply_text(interaction)
 
 
 # --- restart safety: interrupted /start-tourney is flagged, /end-tourney report posts once ---
