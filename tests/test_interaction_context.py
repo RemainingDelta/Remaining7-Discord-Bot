@@ -1,9 +1,9 @@
 """Tests for features/interaction_context.py (#567).
 
-The tourney start/end flows were written against commands.Context. The adapter
-lets a slash command drive them unchanged: gate replies stay private to the
-invoker, progress posts go to the channel as they always did, and a long run
-never depends on the 15-minute interaction token.
+The tourney start/end and ticket flows were written against commands.Context.
+The adapter lets a slash command drive them unchanged: replies are public, as
+the prefix commands' were, progress posts go to the channel as they always did,
+and a long run never depends on the 15-minute interaction token.
 """
 
 from unittest.mock import AsyncMock, MagicMock
@@ -36,20 +36,20 @@ def test_exposes_the_context_attributes_the_flows_read(interaction):
     assert ctx.bot is interaction.client
 
 
-async def test_start_defers_privately(interaction):
+async def test_start_defers_publicly(interaction):
     await InteractionContext(interaction).start()
 
-    interaction.response.defer.assert_awaited_once_with(ephemeral=True, thinking=True)
+    interaction.response.defer.assert_awaited_once_with(ephemeral=False, thinking=True)
 
 
-async def test_first_reply_is_private_to_the_invoker(interaction):
+async def test_first_reply_answers_the_interaction_publicly(interaction):
     ctx = InteractionContext(interaction)
     await ctx.start()
 
     await ctx.reply("You don't have permission.")
 
     interaction.followup.send.assert_awaited_once_with(
-        "You don't have permission.", ephemeral=True
+        "You don't have permission.", ephemeral=False
     )
     interaction.channel.send.assert_not_awaited()
 
@@ -82,7 +82,7 @@ async def test_finish_resolves_the_thinking_state_when_nothing_replied(interacti
 
     await ctx.finish("✅ Done.")
 
-    interaction.followup.send.assert_awaited_once_with("✅ Done.", ephemeral=True)
+    interaction.followup.send.assert_awaited_once_with("✅ Done.", ephemeral=False)
 
 
 async def test_finish_is_silent_after_a_reply_already_answered(interaction):
