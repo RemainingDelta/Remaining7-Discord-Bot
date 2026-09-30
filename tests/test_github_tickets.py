@@ -682,7 +682,7 @@ async def test_create_issue_menu_denies_anyone_but_the_ticket_creator(mock_bot):
 
     interaction.response.send_modal.assert_not_awaited()
     interaction.response.send_message.assert_awaited_once()
-    assert interaction.response.send_message.call_args.kwargs["ephemeral"]
+    assert interaction.response.send_message.call_args.kwargs["ephemeral"] is False
 
 
 @pytest.mark.asyncio
@@ -722,11 +722,20 @@ async def test_submitting_the_modal_offers_confirm_with_message_and_notes():
     kwargs = interaction.followup.send.call_args.kwargs
     view = kwargs["view"]
     assert isinstance(view, ConfirmView)
-    assert kwargs["ephemeral"]
+    assert kwargs["ephemeral"] is False
     assert "event on_message" in view.raw_text
     assert "happens in DMs" in view.raw_text
     assert view.context.logs == ("Traceback...\nBoom",)
     assert view.author_id == TICKET_CREATOR_ID
+
+
+@pytest.mark.asyncio
+async def test_submitting_the_modal_defers_publicly():
+    from features.github_tickets import IssueNotesModal
+
+    interaction = await _submit(IssueNotesModal(_referenced(content="it broke")), "")
+
+    interaction.response.defer.assert_awaited_once_with(ephemeral=False, thinking=True)
 
 
 @pytest.mark.asyncio
@@ -746,7 +755,7 @@ async def test_submitting_on_an_empty_message_with_no_notes_is_refused():
 
     kwargs = interaction.followup.send.call_args.kwargs
     assert "view" not in kwargs
-    assert kwargs["ephemeral"]
+    assert kwargs["ephemeral"] is False
 
 
 @pytest.mark.asyncio
