@@ -1,13 +1,13 @@
 # Tournament Overview
 
 ## Overview
-The tournament system orchestrates the full lifecycle of a Brawl Stars tournament on the Remaining7 server. `!starttourney` performs a large coordinated setup across multiple channels, roles, and background tasks. `!endtourney` reverses all of it and generates a stat report. Both commands are restricted to `TOURNEY_ADMIN_CHANNEL_ID`.
+The tournament system orchestrates the full lifecycle of a Brawl Stars tournament on the Remaining7 server. `/start-tourney` performs a large coordinated setup across multiple channels, roles, and background tasks. `/end-tourney` reverses all of it and generates a stat report. Both commands are restricted to `TOURNEY_ADMIN_CHANNEL_ID`.
 
 ---
 
-## `!starttourney [region] [force]`
+## `/start-tourney [region] [force]`
 
-`force` is an optional flag (e.g. `!starttourney sa force`) — see **Restart / Auto-Resume** below. Without it, `!starttourney` refuses to run when a session is already active.
+`force` is an optional flag (e.g. `/start-tourney region:SA force:True`) — see **Restart / Auto-Resume** below. Without it, `/start-tourney` refuses to run when a session is already active.
 
 ### What it does (in order)
 
@@ -20,7 +20,7 @@ The tournament system orchestrates the full lifecycle of a Brawl Stars tournamen
    ```
    and saves the ID to the active session. If not found, posts a warning telling staff to set it manually with `/set-matcherino`.
 5. **Locks** `OTHER_TICKET_CHANNEL_ID` and the event ticket panel (`EVENT_TICKET_PANEL_CHANNEL_ID`) from members via the internal `lock_command()` helper (6-hour auto-reopen timer starts)
-6. **SA region mode** (`!starttourney sa`): locks the Spanish support channel (`SPANISH_CHANNEL_ID`) and posts a redirect embed in Spanish pointing members to the main tourney support channel
+6. **SA region mode** (`/start-tourney region:SA`): locks the Spanish support channel (`SPANISH_CHANNEL_ID`) and posts a redirect embed in Spanish pointing members to the main tourney support channel
 7. **Main tourney support channel** (`TOURNEY_SUPPORT_CHANNEL_ID`):
    - Sets permissions: `@everyone` can view but not send; staff roles can send
    - Purges all existing messages
@@ -33,7 +33,7 @@ The tournament system orchestrates the full lifecycle of a Brawl Stars tournamen
 9. **Deletes all pre-tourney tickets** from both `PRE_TOURNEY_CATEGORY_ID` and `PRE_TOURNEY_CLOSED_CATEGORY_ID` (saves transcripts first)
 10. **Grants Tourney Admin role** `moderate_members` permission (ability to timeout members) for the duration of the tournament
 11. **Renames Admin role** to `[NOT TOURNEY ADMIN] Admin` so members don't ping the wrong people
-12. **Enables 60-second slowmode** on the general channel for 1 hour (auto-removed after 1 hour via `asyncio.sleep(3600)` or on `!endtourney`)
+12. **Enables 60-second slowmode** on the general channel for 1 hour (auto-removed after 1 hour via `asyncio.sleep(3600)` or on `/end-tourney`)
 13. **Resets announcement state** (semi-final, finals, winner announcement tracking)
 14. **Starts dashboard loops** (queue dashboard every 15s, progress dashboard every 5m) and immediately posts the first progress update
 
@@ -41,7 +41,7 @@ The tournament system orchestrates the full lifecycle of a Brawl Stars tournamen
 
 ## Restart / Auto-Resume
 
-The MongoDB session survives a bot restart, but all runtime state (dashboard loops, the slowmode/lock timers, the SA region redirect, the Admin-role-name memory, and the in-memory ticket counter) is lost when the process dies. To avoid a mid-tourney restart leaving things broken, `!starttourney` persists the recoverable bits onto the active session (`region`, `admin_role_original_name`, and the absolute deadlines `slowmode_ends_at` / `lock_reopens_at`), and a boot-time routine (`resume_tourney_if_active` in `tourney_commands.py`) rehydrates on startup:
+The MongoDB session survives a bot restart, but all runtime state (dashboard loops, the slowmode/lock timers, the SA region redirect, the Admin-role-name memory, and the in-memory ticket counter) is lost when the process dies. To avoid a mid-tourney restart leaving things broken, `/start-tourney` persists the recoverable bits onto the active session (`region`, `admin_role_original_name`, and the absolute deadlines `slowmode_ends_at` / `lock_reopens_at`), and a boot-time routine (`resume_tourney_if_active` in `tourney_commands.py`) rehydrates on startup:
 
 - Restarts the queue + progress dashboard loops (idempotent via `start_dashboard()`).
 - Rebuilds the live ticket counter by scanning existing ticket channels in `TOURNEY_CATEGORY_ID` / `TOURNEY_CLOSED_CATEGORY_ID` and continuing from the highest number + 1 (no collisions).
@@ -50,11 +50,18 @@ The MongoDB session survives a bot restart, but all runtime state (dashboard loo
 
 This is fully automatic and a no-op when no session is active. Milestone announcements (semi-final / finals / winner) self-heal separately: their history cross-check window is wide enough that the next progress tick re-adopts the existing messages instead of re-posting.
 
-Because the bot auto-resumes, re-running `!starttourney` while a session is active is treated as an error (it would purge channels, delete pre-tourney tickets, and reset the session clock). It replies with a warning and does nothing. To intentionally tear down and restart setup from scratch, pass `force`: `!starttourney [region] force`.
+Because the bot auto-resumes, re-running `/start-tourney` while a session is active is treated as an error (it would purge channels, delete pre-tourney tickets, and reset the session clock). It replies with a warning and does nothing. To intentionally tear down and restart setup from scratch, set `force: True`: `/start-tourney force:True`.
+
+### A restart in the middle of `/start-tourney` or `/end-tourney`
+
+Resume only restores runtime state; it does not redo setup or teardown steps that never ran. Two guards cover that:
+
+- **Interrupted start.** `/start-tourney` writes `setup_complete: false` on the session as soon as the session exists and `true` only after its last step. On boot, `warn_if_setup_interrupted()` posts a warning in `TOURNEY_ADMIN_CHANNEL_ID` if it is still `false`. Staff then run `/start-tourney force:True` with the same region; every step is safe to repeat. Sessions created before this field existed have no `setup_complete` key and never warn.
+- **Interrupted end.** `/end-tourney` posts the stats report before it closes the session, so a restart in between leaves the session active. `post_session_report()` records `report_posted: true` right after archiving the report and skips it on a re-run, so re-running `/end-tourney` never posts a second report (the monthly report sums every report embed, so a duplicate would count the tourney twice). A restart after the session is closed needs no guard: with no active session, a re-run skips the report and Hall of Fame and redoes the cleanup.
 
 ---
 
-## `!endtourney`
+## `/end-tourney`
 
 ### What it does (in order)
 
@@ -72,7 +79,7 @@ Because the bot auto-resumes, re-running `!starttourney` while a session is acti
 7. **Posts the tournament report embed** to the command channel and archives it to `TOURNEY_REPORT_CHANNEL_ID`
 8. **Closes the session** in MongoDB (`end_tourney_session()`) and disables data collection
 9. **Clears the bracket team cache** (`clear_bracket_teams_cache()`)
-10. **Auto-posts Hall of Fame** using the session's `matcherino_id` (shared `post_hall_of_fame()` helper, also used by `/hall-of-fame`) — skipped if no `matcherino_id` was set; failures are caught and reported without blocking the rest of `!endtourney`
+10. **Auto-posts Hall of Fame** using the session's `matcherino_id` (shared `post_hall_of_fame()` helper, also used by `/hall-of-fame`) — skipped if no `matcherino_id` was set; failures are caught and reported without blocking the rest of `/end-tourney`
 11. **Reopens** `OTHER_TICKET_CHANNEL_ID` and the event ticket panel (unlocks members)
 12. **Restores Admin role name** to its original value
 13. **Cancels the slowmode timer** and removes slowmode from general channel immediately
@@ -84,7 +91,7 @@ Because the bot auto-resumes, re-running `!starttourney` while a session is acti
 
 ## Hall of Fame Prize Pool
 
-`/hall-of-fame` (and the `!endtourney` auto-post) reads the total prize pool by scraping the
+`/hall-of-fame` (and the `/end-tourney` auto-post) reads the total prize pool by scraping the
 Matcherino tournament page. That scrape can fail, and the failure used to be invisible: the amount
 defaulted to `0.0`, so a broken read was published as a permanent public `$0.00` embed while staff
 were told the post succeeded.
@@ -132,10 +139,10 @@ can't cause a duplicate), and a modal submitted after a supersede is rejected ra
 
 ## SA Region Mode
 
-When `!starttourney sa` is used:
+When `/start-tourney region:SA` is used:
 - `SPANISH_CHANNEL_ID` is locked (`send_messages=False` for `@everyone`)
 - A Spanish-language redirect embed is posted: `¡Atención! Por favor, utiliza #tourney-support para abrir un ticket`
-- On `!endtourney`, the Spanish channel is unlocked and restored
+- On `/end-tourney`, the Spanish channel is unlocked and restored
 
 The region state is tracked in a closure-scoped dict `sticky_redirect_state = {"enabled": False, "region": None}` inside `setup_tourney_commands()`.
 
@@ -147,20 +154,20 @@ Active sessions are stored in `tourney_sessions`:
 
 | Field | Purpose |
 |-------|---------|
-| `start_time` | UTC datetime of `!starttourney` |
+| `start_time` | UTC datetime of `/start-tourney` |
 | `matcherino_id` | Linked bracket ID |
 | `total_tickets` | Count of opened tickets |
 | `total_messages` | Count of messages in all tickets |
 | `peak_queue` | Max simultaneous open tickets |
 | `collect_data` | Whether bracket snapshots are being saved |
 | `region` | Region flag (e.g. `SA`) for restoring the sticky redirect on restart |
-| `admin_role_original_name` | Admin role's pre-tourney name, for correct restore on `!endtourney` after a restart |
+| `admin_role_original_name` | Admin role's pre-tourney name, for correct restore on `/end-tourney` after a restart |
 | `slowmode_ends_at` | Absolute UTC deadline for the general-channel slowmode auto-disable |
 | `lock_reopens_at` | Absolute UTC deadline for the ticket-channel lock auto-reopen |
 
 ---
 
-## Background Tasks Started by `!starttourney`
+## Background Tasks Started by `/start-tourney`
 
 | Task | Interval | Purpose |
 |------|----------|---------|
@@ -174,7 +181,7 @@ Active sessions are stored in `tourney_sessions`:
 ---
 
 ## Source Files
-- `features/tourney/tourney_commands.py` — `!starttourney`, `!endtourney`, queue and progress dashboards
+- `features/tourney/tourney_commands.py` — `/start-tourney`, `/end-tourney`, queue and progress dashboards
 - `features/tourney/tourney_utils.py` — ticket creation, closing, deletion, reopening
 - `features/tourney/tourney_views.py` — UI buttons and modals
 - `features/tourney/hall_of_fame.py` — Hall of Fame prizepool retry scheduling (pure, unit-tested)

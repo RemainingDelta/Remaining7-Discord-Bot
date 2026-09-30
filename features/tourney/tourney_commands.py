@@ -88,6 +88,7 @@ from .tourney_utils import (
     reopen_ticket_via_command,
 )
 from .tourney_views import TourneyOpenTicketView, PreTourneyOpenTicketView
+from features.interaction_context import InteractionContext
 from features.ticket_command_router import (
     get_support_category_ids,
     route_shared_ticket_command,
@@ -184,7 +185,7 @@ async def _write_snapshot(data: dict, session: dict):
     await insert_tourney_snapshot(snapshot)
 
 
-# Settings key for the crash-safe winner-announcement retry (Item 3). !endtourney
+# Settings key for the crash-safe winner-announcement retry (Item 3). /end-tourney
 # schedules a retry when the winner isn't yet available from Matcherino; persisting
 # it here lets the retry survive a restart (the old asyncio.create_task was lost on
 # crash, and the session is already "finished" so resume_tourney_if_active skips it).
@@ -569,7 +570,7 @@ async def run_hall_of_fame(
     """Fetch results for tournament_id and post them to the Hall of Fame channel.
 
     Returns (success, message) instead of talking to a discord.Interaction so it
-    can be called from the /hall-of-fame slash command, from !endtourney, from the
+    can be called from the /hall-of-fame slash command, from /end-tourney, from the
     retry loop and from the manual-override modal.
 
     `prize_pool` overrides the scraped amount. When the amount cannot be read and
@@ -711,7 +712,7 @@ class QueueDashboard(commands.Cog):
             "message_id": None,
         }
         self._announcement_matcherino_id: str | None = None
-        # The dashboard_task is still manually started via !starttourney
+        # The dashboard_task is still manually started via /start-tourney
         # The match_refresher starts automatically to monitor any active tickets
         self.match_refresher_task.start()
         self.winner_reconcile_task.start()
@@ -746,7 +747,7 @@ class QueueDashboard(commands.Cog):
     # --- WINNER ANNOUNCEMENT RECONCILE (crash recovery) ---
     @tasks.loop(count=1)
     async def winner_reconcile_task(self):
-        """Cold-boot-only. If !endtourney armed a winner retry that a restart killed,
+        """Cold-boot-only. If /end-tourney armed a winner retry that a restart killed,
         re-arm it from the persisted marker (unless it already passed its deadline).
         The session is 'finished' by then, so resume_tourney_if_active never sees it."""
         await self.bot.wait_until_ready()
@@ -1798,9 +1799,11 @@ async def lock_command(ctx: commands.Context):
     await channel.set_permissions(member_role, view_channel=False)
     event_panel = await set_event_panel_visibility(bot, member_role, False)
     locked = channel.mention + (f" and {event_panel.mention}" if event_panel else "")
-    await ctx.reply(
+    # send, not reply: under /start-tourney the first reply answers the slash
+    # command, and this notice is a progress post that belongs in the channel.
+    await ctx.send(
         f"🔒 Locked {locked}. It will auto-reopen in {LOCK_DURATION_HOURS} hours "
-        f"or when `!reopen` is used."
+        f"or when `/end-tourney` is run."
     )
 
     # Cancel any old timer
@@ -1815,7 +1818,7 @@ async def lock_command(ctx: commands.Context):
         try:
             await asyncio.sleep(LOCK_DURATION_HOURS * 3600)
         except asyncio.CancelledError:
-            return  # manually reopened with !reopen
+            return  # unlocked early by /end-tourney
 
         ticket_ch = bot.get_channel(OTHER_TICKET_CHANNEL_ID)
         if isinstance(ticket_ch, discord.TextChannel):
@@ -1834,7 +1837,7 @@ async def lock_command(ctx: commands.Context):
 
 
 async def unlock_command(ctx: commands.Context):
-    """Unlock the general support channel and event panel. Called internally by !endtourney."""
+    """Unlock the general support channel and event panel. Called internally by /end-tourney."""
     if not isinstance(ctx.author, discord.Member) or not is_staff(ctx.author):
         await ctx.reply("You don't have permission to unlock the ticket channel.")
         return
@@ -1868,7 +1871,7 @@ async def unlock_command(ctx: commands.Context):
         task.cancel()
 
     unlocked = channel.mention + (f" and {event_panel.mention}" if event_panel else "")
-    await ctx.reply(f"🔓 **Unlocked** {unlocked}. Members can see it again.")
+    await ctx.send(f"🔓 **Unlocked** {unlocked}. Members can see it again.")
 
 
 # on_ready re-fires on every gateway reconnect, and this registers top-level
@@ -1876,6 +1879,50 @@ async def unlock_command(ctx: commands.Context):
 # function owns its own re-entrancy the way load_extension owns
 # ExtensionAlreadyLoaded (#548).
 _TOURNEY_COMMANDS_REGISTERED = False
+
+
+async def post_session_report(ctx, session: dict, embed: discord.Embed) -> bool:
+    """Post the end-of-tourney stats report once per session.
+
+    /end-tourney closes the session only after the report is posted, so a
+    restart in between leaves the session active and staff re-run the command.
+    Without this record the report would post again, and the monthly report
+    (which sums every report embed in the channel) would count the tourney twice.
+    """
+    if session.get("report_posted"):
+        await ctx.send(
+            "ℹ️ The stats report for this tourney was already posted, so it wasn't posted again."
+        )
+        return False
+
+    await ctx.send(embed=embed)
+    report_channel = ctx.bot.get_channel(TOURNEY_REPORT_CHANNEL_ID)
+    if report_channel:
+        await report_channel.send(embed=embed)
+    await update_tourney_runtime_state(session["_id"], report_posted=True)
+    return True
+
+
+async def warn_if_setup_interrupted(bot, session: dict) -> bool:
+    """On boot, flag a /start-tourney that never finished.
+
+    Resume only restores runtime state; it does not redo setup steps that never
+    ran (support panel, pre-tourney cleanup, slow mode), so without this a
+    half-finished start looks like a running tourney. Sessions from before this
+    field existed have no ``setup_complete`` key and stay quiet.
+    """
+    if session.get("setup_complete") is not False:
+        return False
+
+    channel = bot.get_channel(TOURNEY_ADMIN_CHANNEL_ID)
+    if channel:
+        await channel.send(
+            "⚠️ **`/start-tourney` was interrupted by a bot restart** before setup "
+            "finished, so some steps (support panel, pre-tourney cleanup, slow mode) "
+            "may not have run. Run `/start-tourney` again with `force: True` (and the "
+            "same region) to finish setup."
+        )
+    return True
 
 
 def setup_tourney_commands(bot: commands.Bot):
@@ -1939,14 +1986,33 @@ def setup_tourney_commands(bot: commands.Bot):
                 "⚠️ This command is for reopening **Closed Tourney Tickets**."
             )
 
-    @bot.command(name="starttourney")
-    async def start_tourney_command(ctx: commands.Context, *args: str):
+    @app_commands.command(
+        name="start-tourney",
+        description="STAFF: Start the tourney (locks support, wipes old tickets, posts the panel).",
+    )
+    @app_commands.describe(
+        region="Pick SA for South America mode (locks and redirects the Spanish channel)",
+        force="Restart setup over an already-active session (purges channels, resets the clock)",
+    )
+    @app_commands.choices(
+        region=[app_commands.Choice(name="SA (South America)", value="SA")]
+    )
+    async def start_tourney_slash(
+        interaction: discord.Interaction,
+        region: str | None = None,
+        force: bool = False,
+    ):
+        ctx = InteractionContext(interaction)
+        await ctx.start()
+        await start_tourney_command(ctx, region, force)
+        await ctx.finish("✅ Tourney setup finished.")
+
+    async def start_tourney_command(ctx, region: str | None, force: bool):
         import features.config as config
 
         """
-        Start a tourney with an optional region (e.g., !starttourney SA).
-        Pass `force` to restart setup over an already-active session
-        (e.g., !starttourney SA force).
+        Start a tourney with an optional region (SA for South America mode).
+        `force` restarts setup over an already-active session.
         """
         if not isinstance(ctx.author, discord.Member) or not is_staff(ctx.author):
             await ctx.reply("You don't have permission to start the tourney.")
@@ -1962,9 +2028,6 @@ def setup_tourney_commands(bot: commands.Bot):
         if not guild:
             return
 
-        tokens = [a.lower() for a in args]
-        force = "force" in tokens
-        region = next((t for t in tokens if t != "force"), None)
         normalized_region = region.upper() if isinstance(region, str) else None
 
         # Guard against a destructive re-run. After a restart the bot auto-resumes the
@@ -1974,10 +2037,10 @@ def setup_tourney_commands(bot: commands.Bot):
         if existing_session and not force:
             await ctx.reply(
                 "⚠️ A tourney session is already **active** (if the bot just restarted, it "
-                "auto-resumed the running tourney). Re-running `!starttourney` will **purge "
+                "auto-resumed the running tourney). Re-running `/start-tourney` will **purge "
                 "channels, delete all pre-tourney tickets, and reset the session clock**.\n"
                 "If you really want to restart setup from scratch, run "
-                "`!starttourney [region] force`."
+                "`/start-tourney` with `force: True`."
             )
             return
 
@@ -1997,7 +2060,11 @@ def setup_tourney_commands(bot: commands.Bot):
         active_session = await get_active_tourney_session()
         session_id = active_session["_id"] if active_session else None
         if session_id:
-            await update_tourney_runtime_state(session_id, region=normalized_region)
+            # setup_complete stays False until the last step, so a restart part
+            # way through is flagged on boot (warn_if_setup_interrupted).
+            await update_tourney_runtime_state(
+                session_id, region=normalized_region, setup_complete=False
+            )
 
         # Auto-detect Matcherino ID from #tourney-schedule (±1 day of today)
         auto_matcherino_id = None
@@ -2231,7 +2298,7 @@ def setup_tourney_commands(bot: commands.Bot):
             if admin_role.name != "[NOT TOURNEY ADMIN] Admin":
                 admin_role_original_name[0] = admin_role.name
 
-            # Persist so a restart can restore the correct name on !endtourney.
+            # Persist so a restart can restore the correct name on /end-tourney.
             if session_id:
                 await update_tourney_runtime_state(
                     session_id, admin_role_original_name=admin_role_original_name[0]
@@ -2299,7 +2366,7 @@ def setup_tourney_commands(bot: commands.Bot):
             try:
                 await asyncio.sleep(3600)  # 1 hour
             except asyncio.CancelledError:
-                return  # Cancelled by !endtourney or a subsequent !starttourney
+                return  # Cancelled by /end-tourney or a subsequent /start-tourney
 
             channel = bot.get_channel(GENERAL_CHANNEL_ID)
             if isinstance(channel, discord.TextChannel):
@@ -2319,8 +2386,20 @@ def setup_tourney_commands(bot: commands.Bot):
         if dashboard_cog:
             await dashboard_cog.start_dashboard()
 
-    @bot.command(name="endtourney")
-    async def end_tourney_command(ctx: commands.Context):
+        if session_id:
+            await update_tourney_runtime_state(session_id, setup_complete=True)
+
+    @app_commands.command(
+        name="end-tourney",
+        description="STAFF: End the tourney (closes tickets, posts stats, reopens support).",
+    )
+    async def end_tourney_slash(interaction: discord.Interaction):
+        ctx = InteractionContext(interaction)
+        await ctx.start()
+        await end_tourney_command(ctx)
+        await ctx.finish("✅ Tourney ended.")
+
+    async def end_tourney_command(ctx):
         """
         End the tourney:
         - Reopen the "Other" ticket channel.
@@ -2342,7 +2421,7 @@ def setup_tourney_commands(bot: commands.Bot):
         if guild is None:
             return
 
-        # Force one last high-stakes/winner announcement sync so !endtourney doesn't
+        # Force one last high-stakes/winner announcement sync so /end-tourney doesn't
         # depend on the 5-minute loop timing.
         dashboard_cog = bot.get_cog("QueueDashboard")
         active_session_for_announcement = await get_active_tourney_session()
@@ -2363,7 +2442,7 @@ def setup_tourney_commands(bot: commands.Bot):
                         endtourney_matcherino_id, data
                     )
             except Exception as e:
-                print(f"!endtourney announcement sync error: {e}")
+                print(f"/end-tourney announcement sync error: {e}")
 
         winner_was_posted = (
             dashboard_cog is not None
@@ -2513,11 +2592,9 @@ def setup_tourney_commands(bot: commands.Bot):
             if matcherino_id:
                 stat_embed.set_footer(text=f"Matcherino ID: {matcherino_id}")
 
-            # 5. Send to command channel (no pin) and archive to #tourney-reports
-            await ctx.send(embed=stat_embed)
-            report_channel = ctx.bot.get_channel(TOURNEY_REPORT_CHANNEL_ID)
-            if report_channel:
-                await report_channel.send(embed=stat_embed)
+            # 5. Send to command channel (no pin) and archive to #tourney-reports,
+            #    once per session even if a restart makes staff re-run this.
+            await post_session_report(ctx, session, stat_embed)
 
             # 6. Close Session in DB
             await end_tourney_session(session["_id"])
@@ -2872,7 +2949,7 @@ def setup_tourney_commands(bot: commands.Bot):
     async def post_hall_of_fame(
         guild: discord.Guild, tournament_id: str, prize_pool: float | None = None
     ) -> tuple[bool, str]:
-        """Thin wrapper so !endtourney keeps its existing call shape.
+        """Thin wrapper so /end-tourney keeps its existing call shape.
 
         All behaviour -- including the prizepool-unavailable alert and retry --
         lives in the module-level run_hall_of_fame so the retry loop and the
@@ -3228,8 +3305,8 @@ def setup_tourney_commands(bot: commands.Bot):
 
         # --- 1. Session & Channel Management ---
         session_text = (
-            "`!starttourney [region]` - Wipes old tickets, locks general and event support, and posts the live panel. Use `!starttourney SA` for South America mode. The bot auto-resumes after a restart, so add `force` (`!starttourney [region] force`) only to intentionally restart setup over an active session.\n"
-            "`!endtourney` - Closes all active tickets, generates staff stats, posts the Pre-Tourney panel, and unlocks general and event support.\n"
+            "`/start-tourney [region] [force]` - Wipes old tickets, locks general and event support, and posts the live panel. Pick `region: SA` for South America mode. The bot auto-resumes after a restart, so set `force: True` only to intentionally restart setup over an active session.\n"
+            "`/end-tourney` - Closes all active tickets, generates staff stats, posts the Pre-Tourney panel, and unlocks general and event support.\n"
             "`/tourney-panel` - Post the live tourney support button.\n"
             "`/pre-tourney-panel` - Post the pre-tourney support button.\n"
             "`/tourney-test-mode` - Toggle 100-ticket limit and 0.1s cooldown for testing."
@@ -3795,6 +3872,13 @@ def setup_tourney_commands(bot: commands.Bot):
 
         print("♻️ Active tourney session detected — resuming runtime state...")
 
+        try:
+            await warn_if_setup_interrupted(bot, session)
+        except Exception as e:
+            print(
+                f"⚠️ Tourney resume: could not post the interrupted-setup warning: {e}"
+            )
+
         # 1. Restart dashboard loops (wait briefly for the cog to finish loading,
         #    since it is added via create_task above).
         dashboard_cog = None
@@ -3814,7 +3898,7 @@ def setup_tourney_commands(bot: commands.Bot):
         sticky_redirect_state["enabled"] = True
         sticky_redirect_state["region"] = session.get("region")
 
-        # 3. Restore the Admin role original name for a correct !endtourney restore.
+        # 3. Restore the Admin role original name for a correct /end-tourney restore.
         stored_name = session.get("admin_role_original_name")
         if stored_name:
             admin_role_original_name[0] = stored_name
@@ -3906,6 +3990,8 @@ def setup_tourney_commands(bot: commands.Bot):
 
     asyncio.create_task(resume_tourney_if_active())
 
+    bot.tree.add_command(start_tourney_slash)
+    bot.tree.add_command(end_tourney_slash)
     bot.tree.add_command(tourney_panel)
     bot.tree.add_command(pre_tourney_panel)
     bot.tree.add_command(add_to_ticket)
