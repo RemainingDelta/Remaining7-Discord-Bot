@@ -11,7 +11,7 @@ Only the ticket creator (`TICKET_CREATOR_ID`) can file issues. There are two way
 
 ### Right-click a message: "Create GitHub Issue" (primary)
 
-Right-click any message, then **Apps → Create GitHub Issue**. A modal opens with one optional field for extra context. On submit, the bot shows an ephemeral Yes/No prompt; on Yes the original message plus the notes go to Gemini for classification and templating.
+Right-click any message, then **Apps → Create GitHub Issue**. A modal opens with one optional field for extra context. On submit, the bot posts a Yes/No prompt publicly in the channel (only the ticket creator can press it); on Yes the original message plus the notes go to Gemini for classification and templating, and the same message updates to the created issue's link.
 
 This is how to turn someone else's bug report, or a runtime error in `#bot-logs`, into an issue. The target message's full content arrives in the interaction payload, so this needs no Message Content Intent (#575).
 

@@ -495,20 +495,20 @@ class IssueNotesModal(discord.ui.Modal, title="Create GitHub Issue"):
 
     async def on_submit(self, interaction: discord.Interaction):
         # Reading log attachments can outlast the 3-second response window.
-        await interaction.response.defer(ephemeral=True, thinking=True)
+        await interaction.response.defer(ephemeral=False, thinking=True)
 
         context = await context_from_message(self.target)
         raw_text = build_description(self.notes.value.strip(), context)
         if not raw_text:
             await interaction.followup.send(
                 "That message has no text to file, and no notes were added.",
-                ephemeral=True,
+                ephemeral=False,
             )
             return
 
         view = ConfirmView(raw_text, interaction.user.id, context)
         view.message = await interaction.followup.send(
-            "Create a GitHub issue?", view=view, ephemeral=True, wait=True
+            "Create a GitHub issue?", view=view, ephemeral=False, wait=True
         )
 
 
@@ -538,7 +538,7 @@ class GitHubTickets(commands.Cog):
     ):
         if interaction.user.id != TICKET_CREATOR_ID:
             await interaction.response.send_message(
-                "❌ You can't create GitHub issues.", ephemeral=True
+                "❌ You can't create GitHub issues.", ephemeral=False
             )
             return
         await interaction.response.send_modal(IssueNotesModal(message))
