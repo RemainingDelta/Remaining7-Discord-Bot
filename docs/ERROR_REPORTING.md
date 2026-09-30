@@ -29,7 +29,7 @@ Three global handlers replace discord.py's log-only defaults:
 | Handler | Covers |
 |---|---|
 | `on_error` | Unhandled exception inside any listener |
-| `on_command_error` | Unhandled prefix command error |
+| `on_command_error` | Unhandled prefix command error (none are registered since v1.15.0; kept as a safety net) |
 | `on_app_command_error` (`bot.tree.error`) | Unhandled slash command error |
 
 Background tasks are covered separately. `attach_task_error_reporting()` walks every loaded cog and attaches a handler to each `tasks.Loop` it finds, so all 19 are covered without editing each cog. A `tasks.Loop` that raises stops looping and only logs, which means a dead scheduler is otherwise completely silent.

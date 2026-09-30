@@ -223,6 +223,12 @@ class General(commands.Cog):
         )
 
         # --- Quest Management ---
+        tools_text = (
+            "`/support-panel` - Post the support ticket panel.\n"
+            "**Create GitHub Issue** - Right-click a message → Apps to file it as a GitHub issue (ticket creator only)."
+        )
+        embed.add_field(name="🛠️ Server & Dev Tools", value=tools_text, inline=False)
+
         quest_text = "`/reset-quests <user>` - Force-reset a user's quest assignments."
         embed.add_field(name="📜 Quest Management", value=quest_text, inline=False)
 

@@ -145,7 +145,7 @@ after the cogs, so the views they attach are already registered. `bot.tree.sync(
 **`on_ready` re-fires on every gateway reconnect, not just on startup.** Anything it
 calls has to be safe to run again. Cog loading handles this by swallowing
 `ExtensionAlreadyLoaded`; `setup_tourney_commands()` is idempotent via its own module
-flag, since re-registering a prefix command raises; and the panel restore is guarded to
+flag, since re-registering a slash command raises `CommandAlreadyRegistered`; and the panel restore is guarded to
 once per process, because a reconnect leaves the View objects alive — reposting would
 only break the panel's pins and jump links. A restore that fails is *not* latched, so a
 network error on the first attempt is retried on the next reconnect (#548).
