@@ -109,7 +109,7 @@ async def test_a_real_registration_failure_is_still_reported(monkeypatch, bot):
     record.assert_called_once()
 
 
-# --- /starttourney and /endtourney replace the prefix commands (#567) ---
+# --- /start-tourney and /end-tourney replace the prefix commands (#567) ---
 
 ADMIN_CHANNEL = 424242
 
@@ -164,7 +164,7 @@ async def tourney(bot, monkeypatch):
 
 
 async def _start(tourney, interaction, region=None, force=False):
-    command = tourney.bot.tree.get_command("starttourney")
+    command = tourney.bot.tree.get_command("start-tourney")
     await command.callback(interaction, region=region, force=force)
 
 
@@ -172,15 +172,18 @@ async def test_start_and_end_are_slash_commands_registered_once(bot):
     setup_tourney_commands(bot)
     setup_tourney_commands(bot)
 
-    assert bot.tree.get_command("starttourney") is not None
-    assert bot.tree.get_command("endtourney") is not None
+    assert bot.tree.get_command("start-tourney") is not None
+    assert bot.tree.get_command("end-tourney") is not None
     assert bot.get_command("starttourney") is None
     assert bot.get_command("endtourney") is None
+    # Named to match the other hyphenated commands (/tourney-panel, /hall-of-fame).
+    assert bot.tree.get_command("starttourney") is None
+    assert bot.tree.get_command("endtourney") is None
 
 
 async def test_region_is_a_picker_and_force_defaults_off(bot):
     setup_tourney_commands(bot)
-    params = {p.name: p for p in bot.tree.get_command("starttourney").parameters}
+    params = {p.name: p for p in bot.tree.get_command("start-tourney").parameters}
 
     assert [c.value for c in params["region"].choices] == ["SA"]
     assert params["region"].required is False
@@ -216,7 +219,7 @@ async def test_starttourney_refuses_an_active_session_without_force(tourney):
 
     text = _private_text(interaction)
     assert "already" in text and "force" in text
-    assert "!starttourney" not in text, "the warning must name the slash command"
+    assert "/start-tourney" in text, "the warning must name the slash command"
     tourney.reset_ticket_counter.assert_not_called()
     tourney.reset_tourney_session_start_time.assert_not_awaited()
 
@@ -262,7 +265,7 @@ async def test_endtourney_denies_non_staff(tourney, monkeypatch):
     await asyncio.sleep(0)  # let setup's resume task make its own session check
     checks_before = tourney.get_active_tourney_session.await_count
 
-    await tourney.bot.tree.get_command("endtourney").callback(interaction)
+    await tourney.bot.tree.get_command("end-tourney").callback(interaction)
 
     assert "permission" in _private_text(interaction)
     assert tourney.get_active_tourney_session.await_count == checks_before
@@ -275,14 +278,14 @@ async def test_endtourney_denies_outside_the_admin_channel(tourney):
     await asyncio.sleep(0)  # let setup's resume task make its own session check
     checks_before = tourney.get_active_tourney_session.await_count
 
-    await tourney.bot.tree.get_command("endtourney").callback(interaction)
+    await tourney.bot.tree.get_command("end-tourney").callback(interaction)
 
     assert f"<#{ADMIN_CHANNEL}>" in _private_text(interaction)
     assert tourney.get_active_tourney_session.await_count == checks_before
     interaction.channel.send.assert_not_awaited()
 
 
-# --- restart safety: interrupted /starttourney is flagged, /endtourney report posts once ---
+# --- restart safety: interrupted /start-tourney is flagged, /end-tourney report posts once ---
 
 
 async def test_a_finished_start_marks_setup_complete(tourney):
@@ -336,7 +339,7 @@ async def test_boot_warns_when_setup_was_interrupted(monkeypatch):
     assert warned is True
     bot.get_channel.assert_called_with(ADMIN_CHANNEL)
     text = channel.send.await_args.args[0]
-    assert "/starttourney" in text and "force" in text
+    assert "/start-tourney" in text and "force" in text
 
 
 @pytest.mark.parametrize("session", [{"_id": 7, "setup_complete": True}, {"_id": 7}])

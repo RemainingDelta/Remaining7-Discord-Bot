@@ -136,7 +136,7 @@ async def test_forbidden_on_event_panel_does_not_raise(
     other_channel.set_permissions.assert_awaited_with(member_role, view_channel=True)
 
 
-# --- the lock notices post in the channel under /starttourney and /endtourney (#567) ---
+# --- the lock notices post in the channel under /start-tourney and /end-tourney (#567) ---
 # Under the slash commands the first ctx.reply is private to the invoker, so a
 # success notice sent with reply would vanish from the admin channel.
 
@@ -148,7 +148,7 @@ async def test_lock_notice_is_posted_in_the_channel(other_channel, event_channel
 
     text = ctx.send.await_args.args[0]
     assert "Locked" in text
-    assert "!reopen" not in text, "the lock is lifted by /endtourney, not !reopen"
+    assert "/end-tourney" in text, "the lock is lifted by /end-tourney"
     ctx.reply.assert_not_awaited()
 
 
