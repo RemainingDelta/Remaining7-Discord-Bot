@@ -1,7 +1,7 @@
 # Support Tickets
 
 ## Overview
-The support ticket system provides four types of private help channels for members. Each type has its own Discord category, independent auto-incrementing counter, and ticket panel button. Staff manage tickets with the same `!close`, `!delete`, `!reopen` commands as tourney tickets — these are routed by `ticket_command_router.py`.
+The support ticket system provides four types of private help channels for members. Each type has its own Discord category, independent auto-incrementing counter, and ticket panel button. Staff manage tickets with the same `/close`, `/delete`, `/reopen` commands as tourney tickets — these are routed by `ticket_command_router.py`.
 
 ---
 
@@ -63,9 +63,9 @@ On delete, `build_support_transcript_text()` collects the full channel history i
 
 | Command | Action |
 |---------|--------|
-| `!close` / `!c` | Locks the ticket, moves it to the Closed category |
-| `!delete` / `!del` | Saves transcript and deletes the channel |
-| `!reopen` | Moves ticket back to active category, restores opener send permissions |
+| `/close` | Locks the ticket, moves it to the Closed category |
+| `/delete` | Saves transcript and deletes the channel |
+| `/reopen` | Moves ticket back to active category, restores opener send permissions |
 
 These commands are identical to tourney ticket commands because the router dispatches to the support handler when the channel is in a support category.
 

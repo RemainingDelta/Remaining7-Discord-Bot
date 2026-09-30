@@ -156,9 +156,9 @@ Every user always has **4 active quests** — one daily and one weekly per categ
   - `/end-tourney` — end tournament, clean up dashboards and tickets, auto-post Hall of Fame.
 - **Ticket Panels:** `/tourney-panel` (live) and `/pre-tourney-panel` (pre-tourney) post interactive open buttons.
 - **Ticket Operations:**
-  - `!close` / `!c` — close a ticket.
-  - `!delete` / `!del` — delete ticket with transcript.
-  - `!reopen` — reopen a closed ticket.
+  - `/close` — close a ticket.
+  - `/delete` — delete ticket with transcript.
+  - `/reopen` — reopen a closed ticket.
   - `/add <user>` / `/remove <user>` — manage ticket access.
 - **Queue:** `/queue` — check your position in line (inside a tourney ticket only).
 - **Queue Dashboard:** Auto-updating embed every 15 seconds showing currently serving and queue length.
@@ -201,7 +201,7 @@ Every user always has **4 active quests** — one daily and one weekly per categ
 - The panel channel is cleared and reposted automatically on bot restart, so the panel always reflects the current wording.
 - Members click **Open Event Ticket** to get a private channel for their event submission.
 - Channels are named after the opener (`「❗」event-username`); **one open ticket per member**.
-- Event Staff and Admins can close, reopen, and delete tickets via `!close` / `!reopen` / `!delete`.
+- Event Staff and Admins can close, reopen, and delete tickets via `/close` / `/reopen` / `/delete`.
 - Closing renames the channel in place (`「❗」` → `「👍」`) and locks the opener to read-only — the channel is not moved.
 - Deleting saves a transcript to the event transcript channel and DMs a copy to the opener, re-uploading up to 25 images from the ticket so submissions survive the channel being deleted.
 

@@ -1941,8 +1941,33 @@ def setup_tourney_commands(bot: commands.Bot):
     # buttons on an outstanding alert keep working (#443).
     bot.add_view(HallOfFamePrizeView(bot))
 
-    @bot.command(name="close", aliases=["c"])
-    async def close_command(ctx: commands.Context):
+    async def _run_ticket_command(
+        interaction: discord.Interaction, handler, done: str
+    ) -> None:
+        """Drive a ctx-based ticket handler from a slash command (#566)."""
+        ctx = InteractionContext(interaction)
+        await ctx.start()
+        await handler(ctx)
+        await ctx.finish(done)
+
+    @app_commands.command(name="close", description="STAFF: Close this ticket.")
+    @app_commands.guild_only()
+    async def close_slash(interaction: discord.Interaction):
+        await _run_ticket_command(interaction, close_command, "✅ Done.")
+
+    @app_commands.command(name="delete", description="STAFF: Delete this ticket.")
+    @app_commands.guild_only()
+    async def delete_slash(interaction: discord.Interaction):
+        await _run_ticket_command(interaction, delete_command, "✅ Done.")
+
+    @app_commands.command(
+        name="reopen", description="STAFF: Reopen this closed ticket."
+    )
+    @app_commands.guild_only()
+    async def reopen_slash(interaction: discord.Interaction):
+        await _run_ticket_command(interaction, reopen_command, "✅ Done.")
+
+    async def close_command(ctx):
         """Close a tourney ticket (staff only)."""
         if await route_shared_ticket_command(ctx, "close"):
             return
@@ -1957,15 +1982,13 @@ def setup_tourney_commands(bot: commands.Bot):
 
         await close_ticket_via_command(ctx)
 
-    @bot.command(name="delete", aliases=["del"])
-    async def delete_command(ctx: commands.Context):
+    async def delete_command(ctx):
         """Delete a ticket (backup for button)."""
         if await route_shared_ticket_command(ctx, "delete"):
             return
         await delete_ticket_via_command(ctx)
 
-    @bot.command(name="reopen")
-    async def reopen_command(ctx: commands.Context):
+    async def reopen_command(ctx):
         """
         Reopen a closed tourney ticket channel.
         Moves it from the Closed Category back to the Active Category.
@@ -1974,7 +1997,7 @@ def setup_tourney_commands(bot: commands.Bot):
             return
 
         # Check if we are inside a CLOSED ticket category. The isinstance guard
-        # keeps a DM'd `!reopen` from reading `category_id` off a DMChannel (#517);
+        # keeps a DM'd `/reopen` from reading `category_id` off a DMChannel (#517);
         # the else branch's warning is the right reply there.
         if isinstance(ctx.channel, discord.TextChannel) and ctx.channel.category_id in (
             TOURNEY_CLOSED_CATEGORY_ID,
@@ -3315,9 +3338,9 @@ def setup_tourney_commands(bot: commands.Bot):
 
         # --- 2. Ticket Commands ---
         ticket_text = (
-            "`!close` (or `!c`) - Closes the current ticket and adds to your completed stats.\n"
-            "`!delete` (or `!del`) - Deletes a ticket with transcript.\n"
-            "`!reopen` - Moves a closed ticket back to the active category.\n"
+            "`/close` - Closes the current ticket and adds to your completed stats.\n"
+            "`/delete` - Deletes a ticket with transcript.\n"
+            "`/reopen` - Moves a closed ticket back to the active category.\n"
             "`/add` / `/remove` - Add or remove a specific user to/from the current ticket."
         )
         embed.add_field(name="🎫 Ticket Control", value=ticket_text, inline=False)
@@ -3354,7 +3377,7 @@ def setup_tourney_commands(bot: commands.Bot):
             "**1. Claiming:** When a user opens a ticket, read their submitted Team Name and Issue.\n"
             "**2. Assisting:** Request screenshot proof for no-shows or score disputes.\n"
             "**3. Matcherino:** Perform the necessary actions (advancing teams, resetting matches, etc.) on the bracket on the Matcherino website.\n"
-            "**4. Closing:** Once the issue is resolved in the bracket, let the players know they are good to go and type `!close` to archive the channel."
+            "**4. Closing:** Once the issue is resolved in the bracket, let the players know they are good to go and type `/close` to archive the channel."
         )
         embed.add_field(name="🔄 Support Workflow", value=workflow_text, inline=False)
 
@@ -3990,6 +4013,9 @@ def setup_tourney_commands(bot: commands.Bot):
 
     asyncio.create_task(resume_tourney_if_active())
 
+    bot.tree.add_command(close_slash)
+    bot.tree.add_command(delete_slash)
+    bot.tree.add_command(reopen_slash)
     bot.tree.add_command(start_tourney_slash)
     bot.tree.add_command(end_tourney_slash)
     bot.tree.add_command(tourney_panel)

@@ -1,6 +1,8 @@
 import discord
 from discord.ext import commands
 
+from features.interaction_context import InteractionContext
+
 from features.config import (
     BOOSTER_SHOUTOUT_CATEGORY_ID,
     REDEMPTION_TICKET_CATEGORY_ID,
@@ -55,10 +57,14 @@ def is_booster_shoutout_ticket_channel(
     return channel.category_id == BOOSTER_SHOUTOUT_CATEGORY_ID
 
 
-async def route_shared_ticket_command(ctx: commands.Context, action: str) -> bool:
+async def route_shared_ticket_command(
+    ctx: commands.Context | InteractionContext, action: str
+) -> bool:
     """
-    Route shared prefix ticket commands to support/redemption ticket handlers.
-    Returns True if handled by a non-tourney module.
+    Route the shared /close, /delete and /reopen commands to the handler for
+    the ticket type this channel belongs to. ``ctx`` is an InteractionContext
+    from the slash command; the handlers only use its author, channel, guild,
+    bot, reply and send. Returns True if handled by a non-tourney module.
     """
     if is_redemption_ticket_channel(ctx.channel):
         from features.economy import (

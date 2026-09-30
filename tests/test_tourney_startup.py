@@ -39,12 +39,14 @@ async def test_registering_twice_does_not_raise(bot):
     setup_tourney_commands(bot)  # the reconnect; must be a no-op
 
 
-async def test_the_close_command_is_registered_once(bot):
+async def test_the_ticket_slash_commands_are_registered_once(bot):
     setup_tourney_commands(bot)
     setup_tourney_commands(bot)
 
-    assert bot.get_command("close") is not None
-    assert bot.get_command("c") is not None
+    for name in ("close", "delete", "reopen"):
+        assert bot.tree.get_command(name) is not None
+    for name in ("close", "c", "delete", "del", "reopen"):
+        assert bot.get_command(name) is None, f"prefix !{name} still registered"
 
 
 async def test_persistent_views_are_not_added_twice(bot):
@@ -284,6 +286,208 @@ async def test_endtourney_denies_outside_the_admin_channel(tourney):
     assert f"<#{ADMIN_CHANNEL}>" in _reply_text(interaction)
     assert tourney.get_active_tourney_session.await_count == checks_before
     interaction.channel.send.assert_not_awaited()
+
+
+# --- /close, /delete, /reopen route to every ticket type (#566) ---
+
+import features.ticket_command_router as router  # noqa: E402
+
+TOURNEY_CAT, CLOSED_CAT = 111, 222
+
+
+@pytest.fixture
+async def tickets(bot, monkeypatch):
+    """Registered ticket commands with every per-type handler replaced by a mock."""
+    import features.economy as economy
+    import features.event_tickets as event_tickets
+    import features.booster_shoutout as booster
+    import features.support_tickets as support
+    import features.tourney.tourney_commands as tc
+
+    for name in (
+        "is_redemption_ticket_channel",
+        "is_booster_shoutout_ticket_channel",
+        "is_support_ticket_channel",
+    ):
+        monkeypatch.setattr(router, name, lambda channel: False)
+    monkeypatch.setattr(event_tickets, "is_event_ticket_channel", lambda c: False)
+
+    handlers = {}
+    targets = {
+        "redemption": (
+            economy,
+            "close_redemption_ticket_via_command",
+            "handle_redemption_delete_attempt",
+            "reopen_redemption_ticket_via_command",
+        ),
+        "booster": (
+            booster,
+            "close_booster_shoutout_ticket_via_command",
+            "delete_booster_shoutout_ticket_via_command",
+            "reopen_booster_shoutout_ticket_via_command",
+        ),
+        "event": (
+            event_tickets,
+            "close_event_ticket_via_command",
+            "delete_event_ticket_via_command",
+            "reopen_event_ticket_via_command",
+        ),
+        "support": (
+            support,
+            "close_support_ticket_via_command",
+            "delete_support_ticket_via_command",
+            "reopen_support_ticket_via_command",
+        ),
+        "tourney": (
+            tc,
+            "close_ticket_via_command",
+            "delete_ticket_via_command",
+            "reopen_ticket_via_command",
+        ),
+    }
+    for kind, (module, close, delete, reopen) in targets.items():
+        for action, attr in (("close", close), ("delete", delete), ("reopen", reopen)):
+            mock = AsyncMock()
+            monkeypatch.setattr(module, attr, mock)
+            handlers[(kind, action)] = mock
+
+    monkeypatch.setattr(tc, "get_active_tourney_session", AsyncMock(return_value=None))
+    monkeypatch.setattr(tc, "increment_staff_closure", AsyncMock())
+    monkeypatch.setattr(tc, "update_tourney_queue", AsyncMock())
+    monkeypatch.setattr(tc, "TOURNEY_CLOSED_CATEGORY_ID", CLOSED_CAT)
+    monkeypatch.setattr(tc, "PRE_TOURNEY_CLOSED_CATEGORY_ID", CLOSED_CAT + 1)
+    setup_tourney_commands(bot)
+    return MagicMock(bot=bot, tc=tc, handlers=handlers, monkeypatch=monkeypatch)
+
+
+def _ticket_interaction(category_id=TOURNEY_CAT):
+    interaction = _slash_interaction()
+    interaction.channel.category_id = category_id
+    return interaction
+
+
+def _mark(tickets, kind):
+    """Make the router recognise the channel as this ticket type."""
+    import features.event_tickets as event_tickets
+
+    predicate = {
+        "redemption": (router, "is_redemption_ticket_channel"),
+        "booster": (router, "is_booster_shoutout_ticket_channel"),
+        "event": (event_tickets, "is_event_ticket_channel"),
+        "support": (router, "is_support_ticket_channel"),
+    }.get(kind)
+    if predicate:
+        tickets.monkeypatch.setattr(*predicate, lambda channel: True)
+
+
+async def _run(tickets, action, interaction):
+    await tickets.bot.tree.get_command(action).callback(interaction)
+
+
+@pytest.mark.parametrize("action", ["close", "delete", "reopen"])
+@pytest.mark.parametrize(
+    "kind", ["redemption", "booster", "event", "support", "tourney"]
+)
+async def test_each_ticket_type_gets_only_its_own_handler(tickets, kind, action):
+    _mark(tickets, kind)
+    interaction = _ticket_interaction(
+        category_id=CLOSED_CAT if action == "reopen" else TOURNEY_CAT
+    )
+
+    await _run(tickets, action, interaction)
+
+    for (other_kind, other_action), mock in tickets.handlers.items():
+        if (other_kind, other_action) == (kind, action):
+            mock.assert_awaited_once()
+        else:
+            mock.assert_not_awaited()
+
+
+async def test_the_handler_receives_the_invoker_and_channel(tickets):
+    _mark(tickets, "support")
+    interaction = _ticket_interaction()
+
+    await _run(tickets, "close", interaction)
+
+    ctx = tickets.handlers[("support", "close")].await_args.args[0]
+    assert ctx.author is interaction.user
+    assert ctx.channel is interaction.channel
+
+
+async def test_close_counts_a_staff_closure_during_an_active_session(tickets):
+    tickets.tc.get_active_tourney_session.return_value = {"_id": 9}
+    interaction = _ticket_interaction()
+
+    await _run(tickets, "close", interaction)
+
+    tickets.tc.increment_staff_closure.assert_awaited_once_with(9, 1, "staff")
+    tickets.tc.update_tourney_queue.assert_awaited_once_with(9, change=-1)
+
+
+async def test_close_without_a_session_leaves_stats_alone(tickets):
+    await _run(tickets, "close", _ticket_interaction())
+
+    tickets.tc.increment_staff_closure.assert_not_awaited()
+    tickets.tc.update_tourney_queue.assert_not_awaited()
+
+
+async def test_reopen_outside_a_closed_category_warns_publicly(tickets):
+    interaction = _ticket_interaction(category_id=TOURNEY_CAT)
+
+    await _run(tickets, "reopen", interaction)
+
+    assert "Closed Tourney Tickets" in _reply_text(interaction)
+    tickets.handlers[("tourney", "reopen")].assert_not_awaited()
+
+
+async def test_ticket_commands_are_server_only(tickets):
+    for name in ("close", "delete", "reopen"):
+        assert tickets.bot.tree.get_command(name).guild_only is True
+
+
+async def test_ticket_commands_defer_publicly_first(tickets):
+    interaction = _ticket_interaction()
+
+    await _run(tickets, "close", interaction)
+
+    interaction.response.defer.assert_awaited_once_with(ephemeral=False, thinking=True)
+
+
+async def test_redemption_delete_points_at_the_slash_commands():
+    from features.economy import handle_redemption_delete_attempt
+
+    ctx = MagicMock()
+    ctx.reply = AsyncMock()
+
+    await handle_redemption_delete_attempt(ctx)
+
+    text = ctx.reply.await_args.args[0]
+    assert "/delete" in text and "/close" in text
+    assert "!" not in text
+
+
+async def test_tourney_close_denies_non_staff_publicly(bot, monkeypatch):
+    """The real tourney handler's permission check still applies."""
+    import features.tourney.tourney_commands as tc
+    import features.tourney.tourney_utils as tu
+
+    monkeypatch.setattr(tc, "get_active_tourney_session", AsyncMock(return_value=None))
+    monkeypatch.setattr(tu, "_is_staff", lambda member: False)
+    for name in (
+        "is_redemption_ticket_channel",
+        "is_booster_shoutout_ticket_channel",
+        "is_support_ticket_channel",
+    ):
+        monkeypatch.setattr(router, name, lambda channel: False)
+    import features.event_tickets as event_tickets
+
+    monkeypatch.setattr(event_tickets, "is_event_ticket_channel", lambda c: False)
+    setup_tourney_commands(bot)
+    interaction = _ticket_interaction()
+
+    await bot.tree.get_command("close").callback(interaction)
+
+    assert "permission" in _reply_text(interaction)
 
 
 # --- restart safety: interrupted /start-tourney is flagged, /end-tourney report posts once ---
