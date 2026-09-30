@@ -181,8 +181,8 @@ reconnect, and a reconnect is not a restart.
 
 ### Hidden during tourneys
 
-`/starttourney` hides the panel channel from the member role together with
-`OTHER_TICKET_CHANNEL_ID`, and `/endtourney` (or the 6-hour auto-reopen, including one
+`/start-tourney` hides the panel channel from the member role together with
+`OTHER_TICKET_CHANNEL_ID`, and `/end-tourney` (or the 6-hour auto-reopen, including one
 re-armed after a restart) shows it again (#559). This goes through
 `set_event_panel_visibility()` in `features/tourney/tourney_commands.py`, which never
 raises, so a missing panel channel cannot stop tourney start or end. The repost above

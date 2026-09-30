@@ -169,14 +169,14 @@ Translation embeds are parsed and formatted as:
 
 ## Ticket Counters
 
-Two independent in-memory counters, reset on `/starttourney`:
+Two independent in-memory counters, reset on `/start-tourney`:
 
 ```python
 _ticket_counter: int = 1           # live tourney tickets
 _pre_tourney_ticket_counter: int = 1  # pre-tourney tickets
 ```
 
-Both wrap back to 1 after 999. `reset_ticket_counter()` is called during `/starttourney` to reset the live counter. The pre-tourney counter resets independently.
+Both wrap back to 1 after 999. `reset_ticket_counter()` is called during `/start-tourney` to reset the live counter. The pre-tourney counter resets independently.
 
 ---
 

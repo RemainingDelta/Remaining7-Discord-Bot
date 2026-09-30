@@ -75,7 +75,7 @@ When generating the invite URL, select **bot** + **applications.commands** scope
 | Permission | Used for |
 |-----------|---------|
 | Manage Channels | Creating/deleting ticket channels |
-| Manage Roles | Granting `moderate_members` to Tourney Admin on `/starttourney` |
+| Manage Roles | Granting `moderate_members` to Tourney Admin on `/start-tourney` |
 | Manage Messages | Deleting messages (counting, sticky, hacked purge, channel purge) |
 | Send Messages | All bot responses |
 | Embed Links | All embed responses |
@@ -164,7 +164,7 @@ TOURNEY_CATEGORY_ID              # Active live ticket category
 PRE_TOURNEY_CATEGORY_ID          # Active pre-tourney ticket category
 TOURNEY_CLOSED_CATEGORY_ID       # Closed live ticket category
 PRE_TOURNEY_CLOSED_CATEGORY_ID   # Closed pre-tourney ticket category
-TOURNEY_ADMIN_CHANNEL_ID         # Where /starttourney / /endtourney are run
+TOURNEY_ADMIN_CHANNEL_ID         # Where /start-tourney / /end-tourney are run
 TOURNEY_UPDATES_CHANNEL_ID       # Where stage announcements are posted
 TOURNEY_SCHEDULE_CHANNEL_ID      # Scanned for Matcherino ID auto-detection
 TOURNEY_REPORT_CHANNEL_ID        # End-of-tourney stat embeds archive
@@ -235,9 +235,9 @@ features/config.py         # Create a new one with new server's IDs
 
 ### What to strip if not needed
 - Economy/payout commands inside `tourney_commands.py` (can be removed if the new bot doesn't track staff payments)
-- SA region mode (`/starttourney region:SA`) — safe to remove if not needed
+- SA region mode (`/start-tourney region:SA`) — safe to remove if not needed
 - Bracket snapshot/POC data collection (`collect_data`, `insert_tourney_snapshot`) — remove if not doing analytics
-- Admin role rename logic in `/starttourney` / `/endtourney`
+- Admin role rename logic in `/start-tourney` / `/end-tourney`
 
 ---
 
