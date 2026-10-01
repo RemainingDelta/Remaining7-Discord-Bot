@@ -25,8 +25,11 @@ The cooldown lives in the `settings` collection, so the check is one small DB re
 ## Daily Reward (`/daily`)
 
 ```
-Tokens = 80 + (level * 5) capped at 160
+base   = random 80-160
+tokens = int(base * (1 + (level - 1) * 0.05))
 ```
+
+Level **multiplies** a random base rather than adding to it, and nothing caps the result — a Level 20 member rolls 156-312 tokens where a Level 1 member rolls 80-160.
 
 Requires:
 - 24-hour cooldown since last claim (stored on the user doc as `users.daily_last_claimed`, an epoch-seconds float)
@@ -35,7 +38,7 @@ Requires:
 On claim:
 1. Reads `daily_last_claimed` from the user doc and derives the message-count window key from it
 2. Checks the message count for the current window is `>= 5` and the 24h cooldown has passed
-3. Calculates the token reward based on the user's current level
+3. Rolls a random 80-160 base and multiplies it by `1 + (level - 1) * 0.05`
 4. Adds a flat **+20 tokens** if the member has the Server Booster role (shown as a separate line in the claim embed)
 5. Grants the tokens and stamps the cooldown in **one atomic write** — `claim_daily_reward()` (`database/mongo.py`) does `find_one_and_update` with a `{"$inc": {"balance": ...}, "$set": {"daily_last_claimed": now}}` guarded by a `daily_last_claimed < cutoff` predicate. This closes the crash window where tokens could be granted before the cooldown was stamped (which allowed a second immediate claim), and also blocks concurrent double-invocations. If the predicate loses (already claimed), the command shows the cooldown status instead of granting.
 
@@ -83,24 +86,6 @@ Channel access is restricted to the Server Booster role via manual Discord permi
 ### Persistent claim button (all drop types)
 
 The supply (`/drop` and the auto `supply_drop_task`), booster, and admin drops all share one claim button, `DropClaimButton` — a `discord.ui.DynamicItem` whose `custom_id` is `drop_claim:{amount}`. It's re-registered once in `Economy.cog_load` via `bot.add_dynamic_items(DropClaimButton)`, so a drop message posted **before** a restart stays claimable (the token amount is recovered from the `custom_id`; the old plain `DropView` had no `custom_id` and was never re-added, leaving pre-restart buttons dead). The single-claim guard is the atomic `claim_drop(message_id, user_id)` (a `$setOnInsert` on the `drop_claims` collection, TTL-expired after 7 days), which replaces the old in-memory `claimed` flag — so it survives restarts and serializes two near-simultaneous clicks. Payout is the atomic `increment_user_balance()` (`$inc`).
-
----
-
-## Permission System (`/perm`)
-
-A simple allow-list (`allowed_users: set` in-memory) that gates certain admin-like economy commands (e.g. `/set-balance`) for non-Admin users:
-
-```python
-allowed_users = set()  # module-level set; reset on restart
-
-# Grant access:
-allowed_users.add(user.id)
-
-# Revoke:
-allowed_users.discard(user.id)
-```
-
-This is volatile — resets on bot restart. It's intended for temporary delegation, not permanent grants.
 
 ---
 

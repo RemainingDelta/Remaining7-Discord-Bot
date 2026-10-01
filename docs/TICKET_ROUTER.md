@@ -1,13 +1,13 @@
 # Ticket Command Router
 
 ## Overview
-The ticket command router (`features/ticket_command_router.py`) is a dispatcher that intercepts prefix commands (`!close`, `!delete`, `!reopen`) and routes them to the correct handler based on which Discord category the current channel belongs to. This allows a single set of short commands to work seamlessly across tournament tickets, support tickets, redemption tickets, and booster shoutout tickets.
+The ticket command router (`features/ticket_command_router.py`) is a dispatcher that takes the slash commands (`/close`, `/delete`, `/reopen`) and routes them to the correct handler based on which Discord category the current channel belongs to. This allows a single set of short commands to work seamlessly across tournament tickets, support tickets, redemption tickets, and booster shoutout tickets.
 
 ---
 
 ## How It Works
 
-`route_shared_ticket_command(ctx, action)` is called at the top of every prefix ticket command before any tourney-specific logic:
+`route_shared_ticket_command(ctx, action)` is called at the top of every ticket command (`/close`, `/delete`, `/reopen`) before any tourney-specific logic:
 
 ```python
 @bot.command(name="close", aliases=["c"])
@@ -34,7 +34,7 @@ If the channel is in a support or redemption category, the router dispatches to 
 |-----------------|--------|---------------|
 | Redemption ticket category | `close` | `close_redemption_ticket_via_command()` in `economy.py` |
 | Redemption ticket category | `reopen` | `reopen_redemption_ticket_via_command()` in `economy.py` |
-| Redemption ticket category | `delete` | `handle_redemption_delete_attempt()` (blocks with error — use `!close` instead) |
+| Redemption ticket category | `delete` | `handle_redemption_delete_attempt()` (blocks with error — use `/close` instead) |
 | Booster shoutout category | `close` | `close_booster_shoutout_ticket_via_command()` in `booster_shoutout.py` |
 | Booster shoutout category | `delete` | `delete_booster_shoutout_ticket_via_command()` in `booster_shoutout.py` |
 | Booster shoutout category | `reopen` | `reopen_booster_shoutout_ticket_via_command()` in `booster_shoutout.py` |
@@ -47,7 +47,7 @@ If the channel is in a support or redemption category, the router dispatches to 
 
 ## Why This Pattern
 
-Without the router, each ticket type would need its own set of commands (`!t-close`, `!s-close`, `!r-close`) which would be confusing for staff. The router lets all ticket channels share `!close`, `!delete`, and `!reopen` with context-aware behavior.
+Without the router, each ticket type would need its own set of commands (`/t-close`, `/s-close`, `/r-close`) which would be confusing for staff. The router lets all ticket channels share `/close`, `/delete`, and `/reopen` with context-aware behavior.
 
 ---
 

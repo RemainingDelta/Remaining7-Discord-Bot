@@ -1,7 +1,12 @@
 """Tests for in-memory ticket tracking functions in features/tourney/tourney_utils.py."""
 
+from unittest.mock import AsyncMock, MagicMock
+
+import discord
 import pytest
+
 import features.tourney.tourney_utils as tu
+from features.config import TOURNEY_ADMIN_ROLE_ID
 
 
 @pytest.fixture(autouse=True)
@@ -170,3 +175,31 @@ def test_filter_image_attachments_drops_non_images():
 def test_filter_image_attachments_drops_missing_content_type():
     unknown = _FakeAttachment(None)
     assert tu._filter_image_attachments([unknown]) == []
+
+
+# --- delete_ticket_via_command DM handling (#517) ---
+
+
+async def test_delete_ticket_via_command_rejects_dm(monkeypatch):
+    """A DM channel has no `category_id`, so the check must not read it.
+
+    Today this only survives because the staff check runs first and a DM
+    author is a discord.User, not a Member. Give the author a staff role so
+    that early return cannot mask the missing channel guard.
+    """
+    delete_with_transcript = AsyncMock()
+    monkeypatch.setattr(tu, "delete_ticket_with_transcript", delete_with_transcript)
+
+    staff_role = MagicMock(spec=discord.Role)
+    staff_role.id = TOURNEY_ADMIN_ROLE_ID
+    ctx = MagicMock()
+    ctx.author = MagicMock(spec=discord.Member)
+    ctx.author.roles = [staff_role]
+    ctx.channel = MagicMock(spec=discord.DMChannel)
+    ctx.reply = AsyncMock()
+    ctx.send = AsyncMock()
+
+    await tu.delete_ticket_via_command(ctx)
+
+    ctx.reply.assert_awaited_once()
+    delete_with_transcript.assert_not_awaited()

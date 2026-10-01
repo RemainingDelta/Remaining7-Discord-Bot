@@ -67,9 +67,23 @@ shop_choices = [
     for key, data in SHOP_DATA.items()
 ]
 
-allowed_users = set()
-
 DEFAULT_MONTHLY_BUDGET = 50.0
+
+# Base XP for the leveling curve. Both the /level display and the on_message
+# level-up loop derive "XP required for level N" from _exp_required_for_level,
+# so they can never diverge (see issue #461).
+BASE_EXP = 100
+
+
+def _exp_required_for_level(level: int) -> int:
+    """XP required to advance from `level` to `level + 1`.
+
+    Single source of truth for the leveling curve: a pure exponential with no
+    linear phase, matching exactly what the on_message level-up loop checks
+    against at every level.
+    """
+    return int(BASE_EXP * (1.5 ** (level - 1)))
+
 
 # Dollar impact for rewards that consume the monthly redemption budget.
 REDEMPTION_BUDGET_COSTS = {
@@ -420,7 +434,7 @@ async def reopen_redemption_ticket_via_command(ctx: commands.Context) -> None:
 
 async def handle_redemption_delete_attempt(ctx: commands.Context) -> None:
     await ctx.reply(
-        "`!delete` is disabled for redemption tickets. Use `!close` and choose one of the delete options."
+        "`/delete` is disabled for redemption tickets. Use `/close` and choose one of the delete options."
     )
 
 
@@ -1348,6 +1362,11 @@ class Economy(commands.Cog):
     async def on_message(self, message: discord.Message):
         if message.author.bot:
             return
+        # DMs earn nothing (the reward path is gated on guild channel IDs) and a
+        # DMChannel has no `category`, so reading it below raised AttributeError
+        # on every DM (#517).
+        if message.guild is None:
+            return
         if message.content.startswith("!"):
             return
 
@@ -1433,13 +1452,12 @@ class Economy(commands.Cog):
 
             # --- PART 2: XP & LEVELING ---
             EXP_PER_MESSAGE = 10
-            BASE_EXP = 100
 
             level, exp = await get_leveling_data(user_id)
             exp += EXP_PER_MESSAGE + booster_xp_bonus
 
             while True:
-                required_exp = int(BASE_EXP * (1.5 ** (level - 1)))
+                required_exp = _exp_required_for_level(level)
                 if exp >= required_exp:
                     exp -= required_exp
                     level += 1
@@ -1572,11 +1590,10 @@ class Economy(commands.Cog):
         )
 
     async def has_permission(self, interaction: discord.Interaction):
+        # Guarded on Member: in a DM context interaction.user is a discord.User,
+        # which has no roles at all.
         if isinstance(interaction.user, discord.Member):
-            if interaction.user.get_role(ADMIN_ROLE_ID):
-                return True
-        if interaction.user.id in allowed_users:
-            return True
+            return interaction.user.get_role(ADMIN_ROLE_ID) is not None
         return False
 
     # --- SHOP & REDEMPTION COMMANDS ---
@@ -1930,13 +1947,7 @@ class Economy(commands.Cog):
         user = user or interaction.user
         user_id = str(user.id)
         level, exp = await get_leveling_data(user_id)
-        BASE_EXP = 100
-        EXP_GROWTH_PHASE_CUTOFF = 20
-        if level <= EXP_GROWTH_PHASE_CUTOFF:
-            next_level_exp = int(BASE_EXP * (1.5 ** (level - 1)))
-        else:
-            level_20_exp = int(BASE_EXP * (1.5 ** (EXP_GROWTH_PHASE_CUTOFF - 1)))
-            next_level_exp = level_20_exp + 5000 * (level - EXP_GROWTH_PHASE_CUTOFF)
+        next_level_exp = _exp_required_for_level(level)
 
         progress_percentage = (exp / next_level_exp) * 100 if next_level_exp > 0 else 0
         progress_bar_length = 10
@@ -2223,43 +2234,6 @@ class Economy(commands.Cog):
                 color=discord.Color.green(),
             )
         )
-
-    @app_commands.command(
-        name="perm", description="Grant or revoke bot command permissions."
-    )
-    @app_commands.describe(
-        member="The user to modify permissions for", action="Add or Remove permission"
-    )
-    @app_commands.choices(
-        action=[
-            app_commands.Choice(name="Add", value="add"),
-            app_commands.Choice(name="Remove", value="remove"),
-        ]
-    )
-    async def perm(
-        self, interaction: discord.Interaction, member: discord.Member, action: str
-    ):
-        if not await self.has_permission(interaction):
-            await interaction.response.send_message(
-                "❌ Permission Denied.", ephemeral=True
-            )
-            return
-        if action == "add":
-            allowed_users.add(member.id)
-            await interaction.response.send_message(
-                f"✅ **Added:** {member.mention} has been granted bot command permissions."
-            )
-        else:
-            if member.id in allowed_users:
-                allowed_users.remove(member.id)
-                await interaction.response.send_message(
-                    f"🗑️ **Removed:** {member.mention} has been revoked bot command permissions."
-                )
-            else:
-                await interaction.response.send_message(
-                    f"⚠️ {member.mention} did not have special permissions.",
-                    ephemeral=True,
-                )
 
     @app_commands.command(
         name="economy-help", description="A complete guide to the R7 Token economy."

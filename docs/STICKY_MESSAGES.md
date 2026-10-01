@@ -42,40 +42,43 @@ async def on_message(message):
 
 ---
 
-## `!sticky <message>` Command
+## "Set Sticky" Message Command
 
-Requires the **Administrator** permission or the **Event Staff** role (`EVENT_STAFF_ROLE_ID`).
+Right-click the message to stick, then **Apps → Set Sticky**. Requires the **Administrator** permission or the **Event Staff** role (`EVENT_STAFF_ROLE_ID`). All responses are ephemeral.
 
-1. Stores content + any attachment URL in MongoDB (`sticky` collection, keyed by `channel_id`)
-2. Posts the sticky message immediately and saves its message ID
-3. If a sticky already exists in the channel, the old one is deleted first
+1. Reads the target message's text and downloads its attachments (the interaction is deferred first, since large files can outlast the 3-second response window)
+2. Rejects the message if it has neither text nor attachments
+3. If a sticky already exists in the channel, the old bot message is deleted first
+4. Posts the sticky immediately and stores it in MongoDB with the new message ID
 
-### MongoDB Document
+The context menu is registered on the command tree in `cog_load` and removed in `cog_unload`, since discord.py does not allow context menus to be declared as cog methods.
+
+### MongoDB Document (`sticky_messages`)
 ```json
 {
   "_id": "channel_id",
   "content": "Welcome! Please read #rules.",
-  "attachment_url": "https://cdn.discordapp.com/...",
-  "message_id": "987654321"
+  "attachments": [{"filename": "banner.png", "data": "<bytes>"}],
+  "bot_message_id": 987654321
 }
 ```
 
 ---
 
-## `!unsticky` Command
+## `/unsticky` Command
 
 Requires the **Administrator** permission or the **Event Staff** role (`EVENT_STAFF_ROLE_ID`).
 
 1. Fetches the current sticky for the channel from MongoDB
-2. Deletes the sticky message from Discord by `message_id`
-3. Removes the document from the `sticky` collection
+2. Deletes the sticky message from Discord by `bot_message_id`
+3. Removes the document from the `sticky_messages` collection
 4. Cancels any pending debounce task for the channel
 
 ---
 
 ## Attachment Preservation
 
-When setting a sticky with an attachment, the URL is stored. On each repost, the URL is sent as a separate message component or as `content` alongside the text. Note: Discord CDN URLs can expire — long-running stickies with attachments may eventually break if the attachment URL expires.
+Attachments are downloaded when the sticky is set and stored as bytes in the document, so reposts never depend on Discord CDN URLs (which expire).
 
 ---
 

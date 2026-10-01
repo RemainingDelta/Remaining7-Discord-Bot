@@ -46,11 +46,12 @@ Key IDs defined in config:
 | `PRE_TOURNEY_CATEGORY_ID` | Active pre-tourney ticket category |
 | `TOURNEY_CLOSED_CATEGORY_ID` | Closed live tourney ticket category |
 | `PRE_TOURNEY_CLOSED_CATEGORY_ID` | Closed pre-tourney ticket category |
-| `TOURNEY_ADMIN_CHANNEL_ID` | Where `!starttourney` / `!endtourney` are run |
+| `TOURNEY_ADMIN_CHANNEL_ID` | Where `/start-tourney` / `/end-tourney` are run |
 | `TOURNEY_UPDATES_CHANNEL_ID` | Where stage announcements are posted |
 | `TOURNEY_SCHEDULE_CHANNEL_ID` | Scanned for Matcherino ID auto-detection |
 | `TOURNEY_REPORT_CHANNEL_ID` | Where end-of-tourney stat embeds are archived |
 | `LOG_CHANNEL_ID` | Transcript log channel |
+| `BOT_LOGS_CHANNEL_ID` | Startup summary, feature-load failures, and runtime error reports |
 | `REDEMPTION_TICKET_CATEGORY_ID` | Redemption ticket category |
 | `BOOSTER_SHOUTOUT_CATEGORY_ID` | Booster shoutout ticket category |
 | `REDEMPTION_TRANSCRIPT_CHANNEL_ID` | Redemption transcript archive |

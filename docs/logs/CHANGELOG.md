@@ -1429,3 +1429,456 @@ Closes #435
 Closes #494
 
 ---
+
+## v1.13.1 — 2026-09-03
+
+# 🚀 Release Notes v1.13.1
+
+## 🐛 Bug Fixes & Improvements
+- **20 of 72 slash commands disappeared from Discord and support tickets stopped working:** one feature (scam detection) failed to load at startup, and because all 17 features were loaded inside a single shared error handler, the 12 listed after it were skipped — support tickets among them. The bot then published its shortened command list to Discord, which treats that list as authoritative and deleted every command belonging to a skipped feature. Each feature now loads on its own, so one failure can no longer take out the others
+- **The support panel dropdown answered "didn't respond in time" and created no ticket:** the code handling the panel was one of the features that never loaded, so nothing was listening when a category was picked. Fixed by the change above
+- **A partial startup can no longer delete commands:** before publishing, the bot now compares its command list against what Discord already has and skips the update if it would remove anything, naming what it would have deleted. An update that only adds commands still goes through, so commands come back on the next restart even while a feature stays broken
+- **Startup failures were effectively invisible:** a failing feature logged only its error message, with no exception type and no traceback, which is why this went undiagnosed. Failures now log the exception type and a full traceback
+- **Opening a support ticket could crash on a database error:** the ticket counter returned nothing instead of a number, which broke ticket creation before the channel was made. It now falls back to `1`
+- **Support tickets acknowledge the click immediately** rather than risking Discord's 3-second timeout while the channel is being created, and the channel's topic is now set as the channel is created — closing a gap where a ticket could end up without its opener recorded, making it invisible to the duplicate check and unusable for close, reopen, and transcripts
+
+## 📝 Documentation
+- Added the `v1.13.1` section to `docs/logs/SPECS.md` and `docs/logs/CHANGELOG.md`
+
+## 🔄 Future Enhancements
+- Why `features/scam_detection.py` fails to import is still unknown, so automatic scam-image detection and the `!scam-*` commands remain offline. It is the only feature using `cv2`, and the traceback added in this release should identify it on the next restart
+
+**Full Changelog**: https://github.com/RemainingDelta/Remaining7-Discord-Bot/compare/v1.13.0...v1.13.1
+
+
+### PR Descriptions
+
+#### PR #504 — 503-Bug isolate cog loading and guard the global command sync
+
+### Changes
+* Load each cog in its own `try` in `main.py` (`load_features()`), so one failing cog no longer skips the rest — `features.scam_detection` was aborting the load before `features.support_tickets`
+* Treat `ExtensionAlreadyLoaded` as success, and log failures with `repr(e)` plus `traceback.print_exc()` instead of a bare `{e}`
+* Guard the global sync (`sync_commands()`) — skip it only when it would delete a command, so a partial load can no longer wipe Discord's command list; the tourney setup and the privacy policy repost feed the same guard
+* Fixed `get_next_support_ticket_number` falling through as `None` on a DB error, which raised `TypeError` before a ticket channel was created
+* Defer in `SupportTicketSelect.callback` before its first network call, and set the topic in `create_text_channel` instead of a follow-up edit
+* Added `tests/test_startup.py` and extended `tests/test_support_tickets.py` (19 cases)
+
+### Notes
+* `scam_detection` registers no slash commands, so all 72 sync even while it stays broken — only automatic scam-image detection and the `!scam-*` commands stay offline
+* Why it fails is still unknown; it is the only cog importing `cv2`, and the traceback added here will show it on the next boot. Tracked as a follow-up
+
+Closes #503
+
+#### PR #507 — 505-Enhancement update version to v1.13.1
+
+### Changes
+* Bumped `pyproject.toml` to `version = "1.13.1"` for the v1.13.1 patch release
+* Updated the `**Version:**` line in `README.md` to match
+
+### Notes
+* `features/config.py` derives `BOT_VERSION` from `pyproject.toml`, so `/version` and the help embeds follow with no edit there — verified it resolves to `v1.13.1`
+* Has to land on `dev` before the release PR opens, since `version-check.yml` fails any PR into `main` whose version equals `main`'s
+
+Closes #505
+
+#### PR #508 — 506-Enhancement update documentation for v1.13.1 release (pending)
+
+### Changes
+* Added the `v1.13.1` section to `docs/logs/SPECS.md`, documenting every issue in the release (#503, #505, #506)
+* Added the `v1.13.1` release notes and these PR descriptions to `docs/logs/CHANGELOG.md`
+
+Closes #506
+
+---
+
+## v1.13.2 — 2026-09-08
+
+# 🚀 Release Notes v1.13.2
+
+## 🎯 Features
+### Error reporting
+- The bot now posts its own failures to a bot logs channel, on startup and while running, with the traceback attached
+- Covers commands, listeners and all 19 background tasks, with a plain-English explanation and a severity colour
+- User mistakes are not reported, and reports are rate limited
+
+### File a GitHub issue by replying
+- Reply to a message and @mention the bot: its text, embeds and attached logs go into the issue, copied in full
+- Turns an error post into a filed issue in one step
+
+## 🔒 Security & Monitoring
+- Privacy policy updated for both features: replying can send someone else's message and files to Gemini and a public issue, and error logs can contain your user ID
+- Policy date now September 8, 2026
+
+## 🐛 Bug Fixes & Improvements
+- **The bot crashed on every DM:** two features read a channel category that DMs do not have. `!reopen` and `!delete` had the same flaw
+- **Scam image detection is back online:** the host was installing a desktop image library needing graphics support the server lacks. All 17 features load and all 72 commands sync
+
+## 📝 Documentation
+- Added `docs/ERROR_REPORTING.md` and README sections for both features
+- Fixed the README ticket section, the release guide's version instructions, and the log size limit in `docs/GITHUB_TICKETS.md`
+
+**Full Changelog**: https://github.com/RemainingDelta/Remaining7-Discord-Bot/compare/v1.13.1...v1.13.2
+
+
+### PR Descriptions
+
+#### PR #515 — 513-Bug import cv2 by name so the host stops adding opencv-python
+
+### Changes
+
+  - Fixed scam detection failing to load — the host's dependency scanner reads the literal `import cv2` and installs the desktop opencv-python package, which needs X11 and overwrites the headless build
+    - Binds cv2 via `import_module("cv2")` instead; all 11 call sites unchanged
+    - Deleting the package from the host's panel does not stick, so the fix is to remove what the scanner keys on
+  - Added a regression test asserting no module in `features/` imports cv2 literally
+
+Closes #513
+
+#### PR #516 — 514-Enhancement report startup failures and a boot summary to Discord
+
+### Changes
+
+  - Added a startup report to a new `BOT_LOGS_CHANNEL_ID` — version, features loaded, commands synced, and any failure with its exception, tracebacks attached as a file so Discord's 2000-character limit cannot truncate them
+    - Covers `setup_tourney_commands` and `repost_privacy_policy`, which previously failed silently the same way a cog did
+    - Guarded to once per process, since `on_ready` re-fires on every gateway reconnect
+  - Added global runtime error handling, which the bot had none of — no `on_command_error`, no tree error handler, no `on_error`, and 19 background tasks whose unhandled exception stops the loop and only logs
+    - Every cog task gets an error handler attached programmatically, so all 19 are covered without editing each cog
+    - Rate limited: the same error is not reposted within 5 minutes, and at most 5 posts go out per minute — a task failing every minute would otherwise post 1,440 messages a day
+    - User mistakes are not reported: unknown commands, failed permission checks and bad arguments are not bugs
+  - Added `BOT_LOGS_CHANNEL_ID` to both config branches, documented it in CONFIG_SYSTEM and SETUP, and recorded the host's log-dropping and dependency-scanner quirks in HOSTING
+
+Closes #514
+
+#### PR #521 — 517-Bug guard on_message and !reopen against DM channels
+
+### Changes
+* Fixed `AttributeError: 'DMChannel' object has no attribute 'category'` crashing `Economy.on_message` and `Quests.on_message` on every DM — both now return early when `message.guild is None`
+* Fixed the same unguarded `category_id` read on `!reopen` and in `delete_ticket_via_command`
+* Added DM coverage for both listeners and `delete_ticket_via_command`; moved the message factories into `tests/conftest.py`
+
+Closes #517
+
+#### PR #523 — 522-Enhancement pull context from a replied-to message into a ticket
+
+### Changes
+* Added reply support to the @-mention ticket flow — replying to a message now folds its content, embed fields, and `.txt`/`.log` attachments into the issue alongside the typed notes
+* Logs are inlined verbatim in a collapsible block on bug tickets, images are recorded by filename, and a `jump_url` links back to the Discord message
+* Removed the `[if applicable]` marker from the `Screenshots/Logs` heading in `BUG_TEMPLATE` and `.github/ISSUE_TEMPLATE/bug.md`
+* Updated `docs/GITHUB_TICKETS.md`, whose Trigger section described a flow the code never had
+
+Closes #522
+
+#### PR #528 — 524-Enhancement update version to v1.13.2
+
+### Changes
+* Bumped `pyproject.toml` and the README version line to v1.13.2
+* Fixed `release-guide.md`, which said to bump `BOT_VERSION` in `features/config.py` — it is derived from `pyproject.toml`, so editing it there does nothing
+
+Closes #524
+
+#### PR #529 — 525-Enhancement correct the privacy policy for v1.13.2 data flows
+
+### Changes
+* Updated the GitHub issue bullet in the privacy policy — a replied-to message's text, embed contents, attachment filenames and log files now reach Gemini and a public issue, which the old wording did not cover
+* Added error logs to what the bot collects, including that they can contain user IDs
+* Bumped the policy date to September 8, 2026 in `features/privacy_policy.py`, `PRIVACY_POLICY.md` and the test that pins it
+* Fixed the inline log limit in `docs/GITHUB_TICKETS.md` — 100 KB stated, 20 KB in code
+
+Closes #525
+
+#### PR #530 — 526-Enhancement audit docs and help commands for v1.13.2
+
+### Changes
+* Added `docs/ERROR_REPORTING.md` — #514 shipped the subsystem with no guide
+* Added an Error Reporting section to the README's Core Features
+* Rewrote the README's GitHub Ticket Integration section — it described generating issues from ticket conversations, which the code has never done, and predated #522
+* Updated the `BOT_LOGS_CHANNEL_ID` descriptions in `docs/CONFIG_SYSTEM.md` and `docs/SETUP.md` to cover runtime errors, not just startup
+
+Closes #526
+
+## v1.14.0 — 2026-09-19
+
+# 🚀 Release Notes v1.14.0
+
+## 🎯 Features
+### Event tickets
+- Click a button to open a private channel for your event submission, instead of DMing staff
+- One ticket per member; event staff and admins see them all
+- `!close`, `!reopen` and `!delete` manage a ticket from inside it
+- Deleting saves a transcript to the log channel and DMs you a copy, with the ticket's images attached
+- The panel reposts itself on every bot restart
+
+## 🔒 Security & Monitoring
+- Privacy policy updated for event ticket transcripts and the image copies they carry
+- Policy date now September 19, 2026
+
+## 🐛 Bug Fixes & Improvements
+- **The `/level` bar lied past level 20:** a level 25 member with 200,000 XP saw 81% when they were really at 12%. The display and the level-up check now use one formula
+- **Every reconnect reported a failed feature:** a false Critical alert in the bot logs channel on every network blip. A reconnect is now a no-op
+- **Removed `/perm`:** the access it granted was wiped on every restart, so it never did anything
+
+## 📝 Documentation
+- Added `docs/EVENT_TICKETS.md`
+- Fixed the `/daily` reward formula in the README and two guides — it was documented as capped at 160, but nothing caps it
+- Added the missing `hall_of_fame.py` to the README project tree
+
+**Full Changelog**: https://github.com/RemainingDelta/Remaining7-Discord-Bot/compare/v1.13.2...v1.14.0
+
+
+### PR Descriptions
+
+#### PR #456 — 401-Feature add event ticketing system
+
+### Changes
+* Added `features/event_tickets.py` — members click a button to open a private `「❗」event-<username>` channel for their event submission; one open ticket each, event staff see all of them
+* Close locks the opener and flips `「❗」` → `「👍」` in place; reopen undoes it; delete saves a transcript to the log channel, DMs a copy to the opener, then deletes the channel
+* The transcript re-uploads the ticket's images (up to 25, streamed in 8 MB batches) instead of linking them, since attachment URLs die with the channel; oversized/non-image files stay named and linked in the `.txt`
+* Added `/event-ticket-panel` (staff-gated) to post the button, wired `!close` / `!reopen` / `!delete` through `features/ticket_command_router.py`, and registered the cog in `main.py` (reposts the panel on restart)
+* Set the three channel IDs in both config branches and documented it in `docs/EVENT_TICKETS.md`, `docs/HOSTING.md`, `docs/SETUP.md`, the `/event-staff-help` embed, and `README.md`
+* Added 107 tests covering the helpers, the full lifecycle, transcript image batching, and config parity
+
+### Notes
+Ticket numbering with a per-event reset was dropped in favour of username-based names, and transcripts fire on delete rather than close. Both divergences from the issue are explained in a comment on #401.
+
+Closes #401
+
+#### PR #471 — 461-Bug fix /level display diverging from real level-up requirement past level 20
+
+### Changes
+* Added `_exp_required_for_level` as the single source of truth for the leveling curve (pure exponential `int(100 * 1.5 ** (level - 1))`)
+* Updated the `on_message` level-up loop and the `/level` display to both use `_exp_required_for_level`, removing the display-only linear phase past level 20
+* Added `tests/test_leveling.py` covering the shared helper and the `/level` display/progress-bar behavior above and below level 20
+* Updated `docs/XP_AND_LEVELING.md` to document the single-source-of-truth formula
+
+Closes #461
+
+#### PR #539 — 538-Enhancement remove the unused /perm command and allowed_users allow-list
+
+### Changes
+* Removed `/perm` and the `allowed_users` set from `features/economy.py`; `has_permission` is now a plain `ADMIN_ROLE_ID` check
+* Removed `/perm` from the `/admin-help` embed, `README.md`, and `docs/TOKEN_SYSTEM.md`
+* Removed `/give` and `/set-balance` from `/mod-help` — both are Admin-gated, so they were never reachable for a Moderator
+* Added tests in `tests/test_economy.py`
+
+Closes #538
+
+#### PR #549 — 548-Bug stop the tourney startup raising on every gateway reconnect
+
+### Changes
+* Made `setup_tourney_commands` idempotent, so a reconnect no longer raises `CommandRegistrationError` on `!close` — this also stops a duplicate persistent view being added each time
+* Extracted step 3 of `on_ready` into `start_tourney_system(bot)`, and guarded the panel restore to once per process
+* Added `tests/test_tourney_startup.py` and documented the reconnect hazard in `docs/SETUP.md`
+
+### Notes
+`on_ready` re-fires on every gateway reconnect, which is what made this happen — `load_features()` already handled it for cogs, step 3 didn't. Commands kept working; the cost was a false Critical embed in the bot logs channel on every blip.
+
+The panel restore needed its own guard rather than inheriting the crash as one: a reconnect leaves the Views alive, so reposting would only break the panels' pins and links.
+
+Closes #548
+
+#### PR #554 — 550-Enhancement update version to v1.14.0
+
+### Changes
+* Bumped `version` in `pyproject.toml` from `1.13.2` to `1.14.0`
+* Updated the `**Version:**` line in `README.md` to match
+
+`BOT_VERSION` is derived from `pyproject.toml` by regex, so `features/config.py` needs no edit.
+
+Closes #550
+
+#### PR #555 — 551-Enhancement disclose event ticket transcripts and their image copies
+
+### Changes
+* Added failing tests first, pinning the new disclosures and the policy date
+* Updated the ticket-transcript bullet to name event tickets and to state that up to 25 images posted in one are copied into the transcript — the 25 is pinned against `_MAX_TRANSCRIPT_IMAGES`, so raising the cap without touching the policy now fails CI
+* Updated the deletion carve-out to cover those image copies
+* Bumped the policy date to September 19, 2026 in `features/privacy_policy.py`, `PRIVACY_POLICY.md` and the test that pins it
+* Added a test asserting `PRIVACY_POLICY.md` repeats the module text verbatim — heading parity alone did not catch the two saying different things
+* Corrected the embed-size note in `docs/PRIVACY_SYSTEM.md`
+
+Note: the embed sequence is now 5958 of Discord's 6000-character limit. The next disclosure will not fit without splitting the policy across two messages.
+
+Closes #551
+
+#### PR #556 — 552-Enhancement audit docs and help commands for v1.14.0
+
+### Changes
+* Fixed the `/daily` reward formula in `docs/TOKEN_SYSTEM.md` and `docs/XP_AND_LEVELING.md` — both said `80 + (level * 5) capped at 160`, but the code rolls a random 80–160 base and multiplies it by `1 + (level - 1) * 0.05` with no cap, so a Level 20 member rolls 156–312 rather than the documented 160
+* Reworded the same claim in the README
+* Added the missing `features/tourney/hall_of_fame.py` to the README project-structure tree
+* Corrected the event ticket delete flow in `docs/EVENT_TICKETS.md`, which described the DM and the transcript channel as separate ordered steps
+
+Checked and found already correct: the command inventory against every cog, the in-bot help embeds, `docs/XP_AND_LEVELING.md` against #461, and the "19 background tasks" figure.
+
+Closes #552
+
+#### PR #557 — 553-Enhancement update documentation for v1.14.0 release
+
+### Changes
+* Added the v1.14.0 section to `docs/logs/SPECS.md` — an as-implemented entry and verdict for #401, #461, #538, #548, #551, #552 and this ticket, plus the one-line bump entry for #550
+* Added the v1.14.0 section to `docs/logs/CHANGELOG.md` — the release notes and every PR description
+
+Closes #553
+
+## v1.15.0 — 2026-09-30
+
+# 🚀 Release Notes v1.15.0
+
+## 🎯 Features
+### All `!` commands are now slash or right-click commands
+- Right-click a message → **Apps**: Translate, Set Sticky, Add to Scam Blacklist, Flag as Hacked, Create GitHub Issue
+- New slash commands: `/unsticky`, `/scam-*`, `/start-tourney`, `/end-tourney`, `/close`, `/delete`, `/reopen`
+- Translate has a **Wrong language?** button for picking the source language
+
+### Other changes
+- Event support is hidden during tourneys
+- The bot flags an interrupted `/start-tourney` after a restart, and `/end-tourney` won't post its report twice
+
+## 🔒 Security & Monitoring
+- The scam scanner no longer skips messages starting with `!scam`
+- Privacy policy updated for this release (dated September 30, 2026)
+
+## 🐛 Bug Fixes & Improvements
+- **Translations failed with "too many requests":** requests are now throttled and cached, with MyMemory as a fallback
+
+## 📝 Documentation
+- README, docs and help commands updated for the new commands
+
+**Full Changelog**: https://github.com/RemainingDelta/Remaining7-Discord-Bot/compare/v1.14.0...v1.15.0
+
+
+### PR Descriptions
+
+#### PR #561 — 559-Enhancement hide event support during tourneys
+
+### Changes
+* `!starttourney` hides event support from members, and `!endtourney` (or the auto-reopen) shows it again
+* Added tests and updated the docs
+
+Closes #559
+
+#### PR #562 — 560-Bug read the prize pool from the redesigned Matcherino page
+
+### Changes
+* Fixed the Hall of Fame prize pool scrape in `features/tourney/matcherino.py`, which read `div.prize-pool-amt` that Matcherino's redesign removed. It now reads the first dollar figure in `section#prize-pool`, then `div.prize-pool-card`, then the legacy div, matching only ids and semantic classes, never the `tw:` utility classes
+* Added an `og:title` / `<title>` fallback for the tournament name, stripping trailing " | Supercell" and " | Matcherino" suffixes while keeping a "|" that is part of the name
+* Updated the duplicate Hall of Fame reply from ℹ️ to ⚠️
+* Added 18 tests to `tests/test_matcherino.py` built from the live page markup for tournament 221477, and updated the selectors in `docs/TOURNEY_MATCHERINO.md`
+
+Closes #560
+
+#### PR #570 — 564-Enhancement replace !translate with a Translate message command
+
+### Changes
+* Added a "Translate" right-click message command that translates the target message to English
+* Added a "Wrong language?" button on the result to pick the source language (replaces `!t <language>`)
+* Removed the `!t` / `!translate` prefix command
+* Updated README, `docs/TRANSLATION.md`, and `/help`
+
+Closes #564
+
+#### PR #571 — 565-Enhancement replace !sticky/!unsticky with a Set Sticky message command and /unsticky
+
+### Changes
+* Added a "Set Sticky" right-click message command that makes the target message sticky
+* Added `/unsticky` to remove the channel's sticky
+* Removed the `!sticky` / `!unsticky` prefix commands
+* Updated README, `docs/STICKY_MESSAGES.md`, `docs/DATABASE.md`, and `/help`
+
+Closes #565
+
+#### PR #578 — 566-Enhancement replace !close/!delete/!reopen with slash commands
+
+### Changes
+* Added `/close`, `/delete`, and `/reopen`, routed to the right handler for tourney, pre-tourney, support, event, booster, and redemption tickets
+* Made the ticket router accept the slash-command context, so every ticket type's handler runs unchanged
+* Removed the `!close`/`!c`, `!delete`/`!del`, and `!reopen` prefix commands
+* Updated README, `docs/`, `/help`, `/event-staff-help`, and `/tourney-admin-help`
+
+### Notes
+Built on #577 (reuses its `InteractionContext`), so merge #577 first.
+
+Closes #566
+
+#### PR #577 — 567-Enhancement replace !starttourney/!endtourney with /start-tourney and /end-tourney
+
+### Changes
+* Added `/start-tourney` (optional `region: SA` picker and `force`) and `/end-tourney`, replying publicly in the channel like the prefix commands did
+* Added `InteractionContext` so the existing start/end flows run unchanged from a slash command
+* Added a boot warning in the admin channel when `/start-tourney` was interrupted by a restart
+* Made `/end-tourney` post its stats report only once per session, so a re-run after a restart can't double-count the monthly report
+* Removed the `!starttourney` / `!endtourney` prefix commands
+* Updated README, `docs/`, and `/tourney-admin-help`
+
+### Notes
+The ticket expected `/end-tourney` to show an existing message when no tourney is active, but `!endtourney` never had that check, so none was added.
+
+Closes #567
+
+#### PR #572 — 568-Enhancement move scam blacklist commands to slash/message commands and remove !hacked
+
+### Changes
+* Added an "Add to Scam Blacklist" right-click message command that dry-runs the images, then Add or Cancel
+* Added a "Flag as Hacked" right-click message command that works on users who left (replaces `!hacked`)
+* Replaced `!scam-add`, `!scam-test`, `!scam-remove`, `!scam-rename`, `!scam-list` with slash commands
+* Removed the `!scam` exemption from the image scanner
+* Updated README, `docs/SCAM_DETECTION.md`, `docs/HACKED_SYSTEM.md`, and `/help`
+
+Closes #568
+
+#### PR #574 — 573-Bug stop translation rate limit errors
+
+### Changes
+* All translations now go through a shared client that spaces out requests, caches results, and retries Google on "too many requests"
+* Falls back to MyMemory if Google keeps refusing, and shows a friendly "busy" message if both fail
+* Added tests and updated the docs
+
+Closes #573
+
+#### PR #576 — 575-Enhancement add a Create GitHub Issue message command
+
+### Changes
+* Added a "Create GitHub Issue" right-click message command that opens a notes modal, then the Yes/No confirm
+* Posted the confirm prompt and result publicly in the channel (only the ticket creator can press Yes/No)
+* Attached the right-clicked message verbatim to the issue's log section for every ticket type
+* Stopped @mention replies from reading the replied-to message (plain @mention still works)
+* Updated README and `docs/GITHUB_TICKETS.md`
+
+Closes #575
+
+#### PR #584 — 580-Enhancement update version to v1.15.0
+
+### Changes
+* Updated the version to `1.15.0` in `pyproject.toml` and `README.md`
+
+Closes #580
+
+#### PR #585 — 581-Enhancement correct the privacy policy for v1.15.0
+
+### Changes
+* Updated why message content is read (moderation, channel games, transcripts) instead of "commands"
+* Rewrote the GitHub issue disclosure for the Create GitHub Issue right-click command
+* Added a translation disclosure (Google Translate, MyMemory fallback)
+* Set "Last updated" to September 30, 2026 in the module, `PRIVACY_POLICY.md`, and the test
+
+### Notes
+The copy on `remaining7.netlify.app/privacy` needs updating by hand after merge.
+
+Closes #581
+
+#### PR #586 — 582-Enhancement audit docs and help commands for v1.15.0
+
+### Changes
+* Added `/support-panel` and Create GitHub Issue to `/admin-help` (the only commands missing from every help embed)
+* Added a test that no help embed mentions a `!` command
+* Updated the README framework line and project tree (new `translate_client.py` and `interaction_context.py`, stale descriptions)
+* Removed leftover prefix-command wording from `docs/` and code comments
+
+Closes #582
+
+#### PR #587 — 583-Enhancement update documentation for v1.15.0 release
+
+### Changes
+* Added the v1.15.0 section to `docs/logs/SPECS.md`: an as-implemented entry and verdict for #559, #560, #564 to #569, #573, #575, #581, #582 and this ticket, plus the one-line bump entry for #580
+* Added the v1.15.0 section to `docs/logs/CHANGELOG.md`: the release notes and every PR description
+
+Closes #583

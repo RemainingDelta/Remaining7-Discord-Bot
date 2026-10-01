@@ -564,18 +564,54 @@ def fetch_ticket_context(
         return {"error": f"An unexpected error occurred: {e}"}
 
 
+# Page <title> / og:title carry site suffixes like "Name | Supercell" or
+# "Name | Supercell | Matcherino" (Supercell is the whitelabel host). Only
+# these known names are stripped, so a "|" inside a tourney name survives.
+_SITE_SUFFIX_RE = re.compile(
+    r"\s*[|\-\u2013\u2014]\s*(Matcherino|Supercell)\s*$", re.IGNORECASE
+)
+_SITE_NAMES = ("matcherino", "supercell")
+
+
 def _parse_tournament_name(soup) -> str | None:
     """Read the tournament name from a tournament page, or None if absent.
 
     Kept free of HTTP so it can be unit-tested in isolation.
     """
     # 1st choice: the specific title class. 2nd: the sidebar title container.
+    # Both predate the #560 redesign and are kept in case they come back.
     name_tag = soup.find("div", class_="title mr-08") or soup.find(
         "div", class_="title-container"
     )
-    if not name_tag:
-        return None
-    return name_tag.get_text(strip=True) or None
+    if name_tag:
+        return name_tag.get_text(strip=True) or None
+
+    # Redesigned page: fall back to the page metadata.
+    candidates = []
+    og = soup.find("meta", attrs={"property": "og:title"})
+    if og and og.get("content"):
+        candidates.append(og["content"])
+    if soup.title and soup.title.string:
+        candidates.append(soup.title.string)
+    for raw in candidates:
+        name = raw.strip()
+        while (stripped := _SITE_SUFFIX_RE.sub("", name).strip()) != name:
+            name = stripped
+        if name and name.lower() not in _SITE_NAMES:
+            return name
+    return None
+
+
+# A bare dollar amount such as "$145.50", "$1,250.00" or "$0".
+_MONEY_RE = re.compile(r"^\$?\s*\d[\d,]*(\.\d+)?$")
+
+# Where the prize pool lives, newest layout first. Only the id and semantic
+# class names are used: the tw: utility classes are styling and churn (#560).
+_PRIZE_POOL_CONTAINERS = (
+    ("section", {"id": "prize-pool"}),
+    ("div", {"class_": "prize-pool-card"}),
+    ("div", {"class_": "prize-pool-amt"}),  # pre-#560 layout
+)
 
 
 def _parse_prize_pool(soup) -> float | None:
@@ -586,24 +622,32 @@ def _parse_prize_pool(soup) -> float | None:
     point: conflating them is what made the Hall of Fame publish "$0.00" for a
     scrape failure, with no error and no log line.
 
+    The amount is the first bare dollar figure inside the prize pool container,
+    which skips its labels ("Prize Pool", "Current Total", the contribute
+    button). Only the container is searched, so unrelated dollar figures
+    elsewhere on the page are never picked up.
+
     Kept free of HTTP so it can be unit-tested in isolation.
     """
-    container = soup.find("div", class_="prize-pool-amt")
-    if not container:
-        print("[PAYOUT] prize pool element (div.prize-pool-amt) not found on page")
-        return None
+    found_container = False
+    for tag, attrs in _PRIZE_POOL_CONTAINERS:
+        container = soup.find(tag, **attrs)
+        if not container:
+            continue
+        found_container = True
+        for text in container.find_all(string=True):
+            raw_text = text.strip()
+            if _MONEY_RE.match(raw_text):
+                return float(raw_text.replace("$", "").replace(",", "").strip())
 
-    span = container.find("span")
-    if not span:
-        print("[PAYOUT] prize pool container has no <span> child")
-        return None
-
-    raw_text = span.get_text(strip=True)
-    try:
-        return float(raw_text.replace("$", "").replace(",", "").strip())
-    except ValueError:
-        print(f"[PAYOUT] prize pool text is not numeric: {raw_text!r}")
-        return None
+    if found_container:
+        print("[PAYOUT] prize pool container found but it holds no dollar amount")
+    else:
+        print(
+            "[PAYOUT] prize pool element not found on page "
+            "(section#prize-pool, div.prize-pool-card, div.prize-pool-amt)"
+        )
+    return None
 
 
 def _fetch_tournament_page(url: str) -> str | None:

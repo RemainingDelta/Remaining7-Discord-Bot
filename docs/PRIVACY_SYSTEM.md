@@ -3,7 +3,7 @@
 ## Overview
 The bot publishes one privacy policy in three places: `PRIVACY_POLICY.md` at the repo root, the `/privacy-policy` slash command, and a channel the bot reposts to on every startup. The wording lives once, as data, in `features/privacy_policy.py` — both Discord surfaces render the same `POLICY_PARTS`, so a change to the policy reaches the command and the channel together.
 
-The same policy is also hosted on the web at <https://remaining7.netlify.app/privacy>, linked at the foot of the last embed for anyone who wants to read or share it outside Discord. The only other reference the policy carries is a mention of the in-server tickets channel, which is how deletion requests and questions arrive.
+The same policy is also hosted on the web at <https://remaining7.netlify.app/privacy>, linked at the foot of the last embed for anyone who wants to read or share it outside Discord. The site reads `PRIVACY_POLICY.md` only when it builds, so `.github/workflows/redeploy-website.yml` triggers a Netlify rebuild on every push to `main` (#589). The web copy therefore matches the latest release, not `dev`. The workflow needs the `NETLIFY_BUILD_HOOK` repository secret (the build hook URL from Netlify's site configuration); without it the run fails in the Actions tab. The only other reference the policy carries is a mention of the in-server tickets channel, which is how deletion requests and questions arrive.
 
 ---
 
@@ -24,7 +24,7 @@ PolicyPart(title, intro, sections)    # a group of sections = one embed
 | 2 | 🔒 Privacy Policy — Use & Storage | What we do not collect or store, Why we collect this information, Where your information is stored, When information leaves Discord |
 | 3 | 🔒 Privacy Policy — Your Choices | Opt-out and your choices, Age requirement, Changes to this policy, Contact us |
 
-The grouping exists for Discord's limits, not for the reading order. A description caps at **4096 characters** and one message caps at **6000 characters across all its embeds**; the policy renders to roughly 5.2k, so it fits in a single message with headroom. `tests/test_privacy_policy.py` asserts both limits, so a section that grows past them fails the suite rather than the API.
+The grouping exists for Discord's limits, not for the reading order. A description caps at **4096 characters** and one message caps at **6000 characters across all its embeds**; the policy renders to roughly 5.9k, so it fits in a single message but has very little room left. `tests/test_privacy_policy.py` asserts both limits, so a section that grows past them fails the suite rather than the API — which is now the likely outcome of any further disclosure, and the point at which the policy has to be split across two messages.
 
 ---
 
@@ -85,6 +85,7 @@ The channel should be locked so only the bot can post in it; the delete pass onl
 3. Bump `LAST_UPDATED` in the module and `Last updated:` in the document.
 4. Run `make ci`. The character-limit tests are the guard against a section that has grown too long for its embed.
 5. Restart the bot. The privacy channel updates itself; nothing needs reposting by hand.
+6. The website updates itself once the change is merged to `main`; nothing needs redeploying by hand.
 
 Adding a section means adding a `PolicySection` to whichever part keeps the three roughly balanced, plus the same `## heading` in the document, plus the heading in `POLICY_HEADINGS` in `tests/test_privacy_policy.py` (that list is the ticket's spec, so it is updated deliberately, not to make a test pass).
 

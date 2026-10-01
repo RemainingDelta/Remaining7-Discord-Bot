@@ -43,10 +43,10 @@ A ticket is created at most once per calendar month per user:
 
 Close, reopen, and delete are **staff-only** (Admin + Moderator) — the booster cannot close their own ticket; they opt out by saying so in the ticket and staff close it. This intentionally deviates from the original issue spec ("booster closes to opt out") per maintainer decision.
 
-- `!close` — revokes the booster's send permission, renames to `「👍」shoutout-NNN`, posts a message with the persistent `BoosterShoutoutClosedView` (Delete / Reopen buttons).
-- `!reopen` (or the Reopen button) — restores send permission and the `「❗」` prefix.
-- `!delete` (or the Delete button) — builds a plain-text transcript, DMs it to the booster, posts it to `SUPPORT_TRANSCRIPT_LOG_CHANNEL_ID`, then deletes the channel.
+- `/close` — revokes the booster's send permission, renames to `「👍」shoutout-NNN`, posts a message with the persistent `BoosterShoutoutClosedView` (Delete / Reopen buttons).
+- `/reopen` (or the Reopen button) — restores send permission and the `「❗」` prefix.
+- `/delete` (or the Delete button) — builds a plain-text transcript, DMs it to the booster, posts it to `SUPPORT_TRANSCRIPT_LOG_CHANNEL_ID`, then deletes the channel.
 
-Prefix commands are dispatched through `features/ticket_command_router.py` (`is_booster_shoutout_ticket_channel()`), the same mechanism used by support and redemption tickets — see `docs/TICKET_ROUTER.md`.
+`/close`, `/delete` and `/reopen` are dispatched through `features/ticket_command_router.py` (`is_booster_shoutout_ticket_channel()`), the same mechanism used by support and redemption tickets — see `docs/TICKET_ROUTER.md`.
 
 The closed view is re-registered in `cog_load()` via `bot.add_view()` so buttons keep working across restarts.

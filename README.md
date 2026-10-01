@@ -2,7 +2,7 @@
 
 ## Overview
 **Name:** Remaining7 Discord Bot
-**Version:** v1.13.0
+**Version:** v1.15.0
 **Contributors:** remainingdelta, nightwarrior5
 **Objective:** A feature-rich Discord bot for the Remaining7 community server (16k+ members). Handles an R7 Token economy, leveling, quests, a Brawl Stars collection minigame, tournament management with Matcherino integration, support tickets, event operations, a security protocol, and multi-language translation.
 **Server Link:** https://discord.gg/6MzrjS2X8k
@@ -12,9 +12,9 @@
 
 ## Tech Stack
 - **Language:** Python 3.10+
-- **Framework:** `discord.py` (slash commands + prefix commands)
+- **Framework:** `discord.py` (slash commands + message context-menu commands)
 - **Database:** MongoDB Atlas via `motor` (async)
-- **Translation:** `deep-translator` + `langdetect`
+- **Translation:** `deep-translator` (Google, MyMemory fallback) + `langdetect`
 - **External API:** Matcherino (tournament brackets, payouts)
 - **AI Integration:** Gemini API (GitHub issue generation)
 - **Linting:** Ruff (`ruff check .` / `ruff format .`)
@@ -46,13 +46,16 @@ Remaining7-Discord-Bot/
 │   ├── event.py                     # Event channel cleanup & reward payouts
 │   ├── general.py                   # /help, /mod-help, /admin-help, /version, /convert-time
 │   ├── privacy_policy.py            # Policy content, /privacy-policy, startup repost
-│   ├── translation.py               # !t prefix & /translate slash command (54 languages)
+│   ├── translation.py               # "Translate" message command & /translate slash command (54 languages)
+│   ├── translate_client.py          # Shared throttled, cached translation client (Google + MyMemory fallback)
 │   ├── counting.py                  # Sequential counting game with /set-count
 │   ├── story.py                     # Collaborative one-word story game (staff-run, moderated)
-│   ├── sticky.py                    # !sticky / !unsticky persistent channel messages
+│   ├── sticky.py                    # "Set Sticky" message command / /unsticky persistent channel messages
 │   ├── support_tickets.py           # General support tickets (issues, support, apps, partnership)
-│   ├── github_tickets.py           # AI-powered GitHub issue creation from tickets (Gemini)
-│   ├── ticket_command_router.py     # Shared routing for tourney & support ticket commands
+│   ├── github_tickets.py            # "GitHub Issue" message command & @mention: create or edit issues (Gemini)
+│   ├── event_tickets.py             # Private event answer-submission tickets
+│   ├── ticket_command_router.py     # Routes /close, /delete, /reopen to every ticket type
+│   ├── interaction_context.py       # Runs ctx-based flows from slash commands (tourney, tickets)
 │   ├── booster_shoutout.py          # Auto-opened booster shoutout tickets
 │   ├── message_mirror.py            # Moderator message link mirror via webhook
 │   ├── brawl/
@@ -61,10 +64,11 @@ Remaining7-Discord-Bot/
 │   │   ├── commands.py              # /megabox, /starrdrop, /profile, /upgrade, etc.
 │   │   └── drops.py                 # Weighted RNG drop logic
 │   └── tourney/
-│       ├── tourney_commands.py      # All tournament slash & prefix commands
+│       ├── tourney_commands.py      # All tournament slash commands
 │       ├── tourney_utils.py         # Ticket lifecycle helpers, auto-translation
 │       ├── tourney_views.py         # discord.ui.View classes for ticket buttons
 │       ├── tourney_reports.py       # Monthly tournament report generation
+│       ├── hall_of_fame.py          # Hall of Fame posts and prize splits
 │       └── matcherino.py            # Matcherino API integration
 ├── scripts/
 │   └── generate_specs.py            # Generates docs/logs/ SPECS & CHANGELOG from GitHub data
@@ -84,7 +88,8 @@ Remaining7-Discord-Bot/
         ├── version-check.yml        # Blocks PRs into main without a pyproject.toml version bump
         ├── pr-issue-reference-check.yml  # Verifies issue number matches across branch/title/body
         ├── pr-title-format-check.yml     # Enforces PR title shape on PRs into dev (no colon, lowercase verb)
-        └── strip-pr-footer.yml           # Strips the Claude Code footer from PR bodies targeting dev
+        ├── strip-pr-footer.yml           # Strips the Claude Code footer from PR bodies targeting dev
+        └── redeploy-website.yml          # Rebuilds the Netlify site (/privacy) on every push to main
 ```
 
 ---
@@ -93,11 +98,10 @@ Remaining7-Discord-Bot/
 
 ### R7 Token Economy
 - **Passive Income:** Users earn 2–5 R7 Tokens per message (20-second cooldown), restricted to the general and booster channels. Server Boosters get a ~10% increase in tokens on average.
-- **Daily Rewards:** `/daily` grants 80–160 tokens (scaled by level). Requires 5 messages sent since last claim and a 24-hour cooldown.
+- **Daily Rewards:** `/daily` grants a random 80–160 tokens, increased 5% per level above 1. Requires 5 messages sent since last claim and a 24-hour cooldown.
 - **Supply Drop:** `/drop <amount>` (Admin) to force a token drop in general chat.
 - **Balance & Ranking:** `/balance [user]`, `/leaderboard token`.
 - **Give & Set:** `/give <user> <token/xp/level> <amount>`, `/set-balance <user> <amount>` (Admin).
-- **Permissions:** `/perm <user> <add/remove>` to grant/revoke command access.
 - **Guide:** `/economy-help` for a full user-facing guide.
 
 ### Shop & Budget System
@@ -151,13 +155,13 @@ Every user always has **4 active quests** — one daily and one weekly per categ
 
 ### Tournament System
 - **Phase Management:**
-  - `!starttourney [region]` — start live tournament, reset counters, init queue dashboard. Use `!starttourney SA` for South America mode. The bot auto-resumes tourney state (dashboards, slow-mode/lock timers, region, ticket counter) after a restart; pass `force` (`!starttourney [region] force`) to restart setup over an already-active session.
-  - `!endtourney` — end tournament, clean up dashboards and tickets, auto-post Hall of Fame.
+  - `/start-tourney [region] [force]` — start live tournament, reset counters, init queue dashboard. Pick `region: SA` for South America mode. The bot auto-resumes tourney state (dashboards, slow-mode/lock timers, region, ticket counter) after a restart; set `force: True` to restart setup over an already-active session.
+  - `/end-tourney` — end tournament, clean up dashboards and tickets, auto-post Hall of Fame.
 - **Ticket Panels:** `/tourney-panel` (live) and `/pre-tourney-panel` (pre-tourney) post interactive open buttons.
 - **Ticket Operations:**
-  - `!close` / `!c` — close a ticket.
-  - `!delete` / `!del` — delete ticket with transcript.
-  - `!reopen` — reopen a closed ticket.
+  - `/close` — close a ticket.
+  - `/delete` — delete ticket with transcript.
+  - `/reopen` — reopen a closed ticket.
   - `/add <user>` / `/remove <user>` — manage ticket access.
 - **Queue:** `/queue` — check your position in line (inside a tourney ticket only).
 - **Queue Dashboard:** Auto-updating embed every 15 seconds showing currently serving and queue length.
@@ -167,14 +171,14 @@ Every user always has **4 active quests** — one daily and one weekly per categ
   - `/match-history <team>` — view match history.
   - `/set-ticket-match <team1> <team2>` — assign match context to a ticket.
   - `/tourney-progress` — bracket progress dashboard with semi-final/final announcements.
-- **Hall of Fame:** `/hall-of-fame` — post winning teams with prize distribution; also auto-triggered by `!endtourney` using the session's Matcherino ID.
+- **Hall of Fame:** `/hall-of-fame` — post winning teams with prize distribution; also auto-triggered by `/end-tourney` using the session's Matcherino ID.
 - **Blacklist:** `/blacklist add/remove/list` — manage banned users (Discord ID, Matcherino profile, reason, alts).
 - **Rate Limits:** Max 3 open tickets per user, 180s cooldown. Auto-reopen after 6-hour lock.
 - **Auto-translation:** Ticket messages auto-translated via `deep-translator` + `langdetect`.
 - **Test Mode:** `/tourney-test-mode` — toggle 100-ticket limit and 0.1s cooldown for testing.
 - **Active Matches:** `/active-matches` — display all active match scores grouped by round.
-- **Monthly Reports:** Auto-generated monthly tournament reports posted to a dedicated archive channel. Matcherino ID is auto-detected on `!starttourney`. `/monthly-report [month] [year]` (Staff) generates or re-generates a report on demand.
-- **Slow Mode:** `!starttourney` enables 60s slow mode in general chat with a public notice; auto-removed after 1 hour (or immediately on `!endtourney`).
+- **Monthly Reports:** Auto-generated monthly tournament reports posted to a dedicated archive channel. Matcherino ID is auto-detected on `/start-tourney`. `/monthly-report [month] [year]` (Staff) generates or re-generates a report on demand.
+- **Slow Mode:** `/start-tourney` enables 60s slow mode in general chat with a public notice; auto-removed after 1 hour (or immediately on `/end-tourney`).
 - **Staff Guide:** `/tourney-admin-help`.
 - **SA Mode:** South America region variant with separate ticket categories and region-specific workflow.
 
@@ -195,10 +199,29 @@ Every user always has **4 active quests** — one daily and one weekly per categ
 - Staff can close, reopen, and delete tickets with transcript generation.
 - Transcripts DM'd to the opener and archived in a log channel.
 
+### Event Tickets
+- `/event-ticket-panel` — post the event ticket panel (Event Staff or Admin).
+- The panel channel is cleared and reposted automatically on bot restart, so the panel always reflects the current wording.
+- Members click **Open Event Ticket** to get a private channel for their event submission.
+- Channels are named after the opener (`「❗」event-username`); **one open ticket per member**.
+- Event Staff and Admins can close, reopen, and delete tickets via `/close` / `/reopen` / `/delete`.
+- Closing renames the channel in place (`「❗」` → `「👍」`) and locks the opener to read-only — the channel is not moved.
+- Deleting saves a transcript to the event transcript channel and DMs a copy to the opener, re-uploading up to 25 images from the ticket so submissions survive the channel being deleted.
+
 ### GitHub Ticket Integration
-- AI-powered GitHub issue creation from support tickets using Gemini.
-- Automatically generates structured bug reports, feature requests, and enhancement issues from ticket conversations.
-- Requires `GEMINI_TOKEN` and `GITHUB_TOKEN` environment variables.
+- AI-powered GitHub issue management for one authorized staff member. After a mention or right-click the bot offers **Create new issue**, **Edit existing issue**, or **Cancel**, and each choice runs its own Gemini prompt.
+- **Create:** Gemini classifies the description as a bug, enhancement, or feature and fills in the matching template. Any `#N` in the text (e.g. "like #512") is read as a reference for the new issue and left unchanged.
+- **Edit:** needs an issue number (`#540` or an issue URL); the first one is the target. It does exactly what was asked: edit the description or title, comment, add or remove labels, and close (completed / not planned) or reopen, e.g. `@bot close #540 with this comment "fixed"`. The bot previews every change (a diff for the description) with **Apply** / **Cancel** before touching GitHub, and lists anything it can't do, like a label that doesn't exist, as skipped. Logs and the branch block are always kept word for word.
+- **GitHub Issue** (right-click a message → Apps): opens a modal for optional notes, then the choice. The message's text, embed contents, attached `.txt`/`.log` files (copied in verbatim), attachment filenames, and a permanent link back to it go into the new issue, or into a comment on the edited one. Turns a member's bug report or an error post in the bot logs channel into an issue or an update in one step.
+- **@mention** the bot with a description, e.g. `@bot close #540, fixed in v2.3`. Replying to a message while mentioning does not pull that message in; right-click it instead.
+- Requires `GEMINI_TOKEN` and `GITHUB_TOKEN` environment variables. See [`docs/GITHUB_TICKETS.md`](docs/GITHUB_TICKETS.md).
+
+### Error Reporting
+- Reports the bot's own failures to a dedicated logs channel, because the host drops console output — a failing feature or a dead background task was previously invisible.
+- **On startup:** version, features loaded, commands synced, and any failure with its traceback attached as a file.
+- **At runtime:** unhandled errors in listeners, slash and message commands, and all 19 background tasks, each with a plain-English explanation and a severity colour.
+- User mistakes are not reported — unknown commands, failed permission checks, and bad arguments are not bugs.
+- Rate limited so a repeating failure cannot flood the channel. See [`docs/ERROR_REPORTING.md`](docs/ERROR_REPORTING.md).
 
 ### Event Management
 - **Automated Monitoring:** Daily background task at 12:00 AM ET scans event channels.
@@ -210,7 +233,7 @@ Every user always has **4 active quests** — one daily and one weekly per categ
 - **Staff Guide:** `/event-staff-help`.
 
 ### Security Protocol
-- `/hacked <user>` or `!hacked` (reply) — instantly timeout (7 days), flag in DB, purge messages across all channels.
+- `/hacked <user>` or **Flag as Hacked** (right-click one of their messages → Apps, works even if they left) — instantly timeout (7 days), flag in DB, purge messages across all channels.
 - `/unhacked <user>` — remove flag and timeout.
 - `/hacked-list` — view all currently flagged users.
 - Logs to moderator logs channel. Prevents targeting equal/higher role members.
@@ -219,19 +242,20 @@ Every user always has **4 active quests** — one daily and one weekly per categ
 - Automatically scans every image attachment against a MongoDB blacklist using three matchers: MD5 (identical files), pHash (re-compressed/resized copies), and ORB (cropped variants).
 - On a match: deletes the message, purges other copies of the image across all channels (30-min lookback), applies a 10-minute precautionary timeout, and sends a mod alert with the image and action buttons.
 - **Confirm Hacked** button — upgrades to a 7-day timeout, flags the user in the hacked DB, and DMs them. **False Positive** button — removes the timeout.
-- `!scam-add` (reply or attach) — add image(s) to the blacklist.
-- `!scam-remove <md5> [md5 ...]` — remove entries by MD5 prefix.
-- `!scam-list` — view all blacklisted images.
-- `!scam-rename <md5> <name>` — give an entry a readable name.
-- `!scam-test` (reply or attach) — dry-run detection with match distances, no action taken.
+- **Add to Scam Blacklist** (right-click a message → Apps) — dry-runs that message's image(s) against the blacklist, then **Add** or **Cancel**.
+- `/scam-add <image>` — add an uploaded image to the blacklist.
+- `/scam-remove <md5> [md5 ...]` — remove entries by MD5 prefix.
+- `/scam-list` — view all blacklisted images.
+- `/scam-rename <md5> <name>` — give an entry a readable name.
+- `/scam-test <image>` — dry-run detection with match distances, no action taken.
 
 ### Message Mirror
 - Moderators can repost any message by pasting its Discord link alone in a message — the bot mirrors it via a temporary webhook using the original author's name and avatar in the current channel.
 
 ### Translation
-- `!t [language]` / `!translate [language]` — reply to a message to translate it to English.
+- **Translate** (right-click a message → Apps → Translate) — translates that message to English. If the language was detected wrong, press **Wrong language?** on the result and type the right one (e.g. `hindi`).
 - `/translate <language> <phrase>` — translate English text into any of 55 supported languages.
-- Auto-detects source language. Google Translate backend.
+- Auto-detects source language. Google Translate backend, throttled bot-wide with retry on rate limits and a MyMemory fallback; if both refuse, the user gets a "service is busy" message instead of a raw error.
 
 ### Counting Game
 - Sequential counting game in a designated channel — users send the next number in sequence, as a plain number or a basic arithmetic expression (`7*10` counts as `70`, evaluated by a safe `ast` parser). Off-sequence, repeat-user, or invalid messages are removed and the count is left unchanged.
@@ -243,8 +267,8 @@ Every user always has **4 active quests** — one daily and one weekly per categ
 - `/story-see` — view the current story. `/story-start`, `/story-end`, `/story-reset`, `/story-banword`, `/story-banchar` (Staff) — run and moderate stories.
 
 ### Sticky Messages
-- `!sticky <message>` — pin a message that reposts automatically when other messages are sent. Usable by Admins and Event Staff.
-- `!unsticky` — remove the active sticky message from a channel.
+- **Set Sticky** (right-click a message → Apps → Set Sticky) — make that message sticky so it reposts automatically when other messages are sent. Usable by Admins and Event Staff.
+- `/unsticky` — remove the active sticky message from a channel.
 
 ### Utility
 - `/convert-time <date> <time> <timezone>` — convert a date and time to all Discord timestamp formats. Supports 20+ timezone aliases (EST, PT, GMT, etc.) and IANA names.
@@ -313,13 +337,15 @@ The bot runs 24/7 on **RamNaym Cloud** (Nano plan, the lowest paid tier), deploy
 | **Plan specs** | 0.10 CPU · 256 MB RAM · 2 GB disk |
 | **Cost** | 4 EUR/year (≈ $4.55 USD as of now; paid $4.75) |
 
-**Current usage** (refresh if the plan or load changes materially):
+**Current usage** (last checked 2026-09-18; refresh if the plan or load changes materially):
 
 | Resource | Usage |
 |---|---|
-| vCPU load | 0.5% |
-| Memory | 126.6 / 256.0 MB |
-| Project storage | 2.1 MB / 2.00 GB |
+| vCPU load | 5.8% avg |
+| Memory | ~223 / 256.0 MB (typically ~87%) |
+| Project storage | 16 MB / 2.00 GB |
+
+Memory is the binding constraint — roughly 33 MB free — so anything that buffers in memory must be sized against that, not the 256 MB total.
 
 See [`docs/HOSTING.md`](docs/HOSTING.md) for the full hosting history and the reasoning behind the migration from the previous host.
 
@@ -366,7 +392,7 @@ Uses MongoDB database `r7_bot_db` with the following collections:
 | Role | Access |
 |---|---|
 | Admin | Full access to all commands |
-| Moderator | Economy oversight, security protocol |
+| Moderator | Redemption queue oversight, security protocol |
 | Tourney Admin | Tournament commands, ticket management |
 | Event Staff | Event channel cleanup, reward distribution, sticky messages |
 | Member | Economy, quests, brawl, translation, help |
