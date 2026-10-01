@@ -88,7 +88,8 @@ Remaining7-Discord-Bot/
         ├── version-check.yml        # Blocks PRs into main without a pyproject.toml version bump
         ├── pr-issue-reference-check.yml  # Verifies issue number matches across branch/title/body
         ├── pr-title-format-check.yml     # Enforces PR title shape on PRs into dev (no colon, lowercase verb)
-        └── strip-pr-footer.yml           # Strips the Claude Code footer from PR bodies targeting dev
+        ├── strip-pr-footer.yml           # Strips the Claude Code footer from PR bodies targeting dev
+        └── redeploy-website.yml          # Rebuilds the Netlify site (/privacy) on every push to main
 ```
 
 ---
