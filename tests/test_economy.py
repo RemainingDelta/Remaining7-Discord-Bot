@@ -1081,3 +1081,53 @@ async def test_claim_drop_records_claimer_via_setoninsert(monkeypatch):
     kwargs = fake_db.drop_claims.find_one_and_update.call_args.kwargs
     assert update["$setOnInsert"]["claimed_by"] == "u1"
     assert kwargs["upsert"] is True
+
+
+# --- Monthly rollover writes only the live budget settings (#481) ---
+
+
+async def test_month_rollover_resets_only_the_budget_settings(monkeypatch):
+    from features.economy import DEFAULT_MONTHLY_BUDGET, ensure_monthly_budget_state
+
+    set_setting = AsyncMock()
+    monkeypatch.setattr(
+        "features.economy.get_setting", AsyncMock(return_value="1999-01")
+    )
+    monkeypatch.setattr("features.economy.set_setting", set_setting)
+
+    await ensure_monthly_budget_state()
+
+    written = {call.args[0]: call.args[1] for call in set_setting.await_args_list}
+    assert set(written) == {"budget_month_key", "monthly_budget", "manual_total_spent"}
+    assert written["monthly_budget"] == f"{DEFAULT_MONTHLY_BUDGET:.2f}"
+    assert written["manual_total_spent"] == "0.00"
+
+
+async def test_the_same_month_writes_nothing(monkeypatch):
+    from features.economy import _budget_month_key, ensure_monthly_budget_state
+
+    set_setting = AsyncMock()
+    monkeypatch.setattr(
+        "features.economy.get_setting", AsyncMock(return_value=_budget_month_key())
+    )
+    monkeypatch.setattr("features.economy.set_setting", set_setting)
+
+    await ensure_monthly_budget_state()
+
+    set_setting.assert_not_awaited()
+
+
+async def test_fulfilling_a_queued_redemption_writes_no_settings(monkeypatch):
+    # The per-item *_redeemed_count counters were written here and never read.
+    category = _make_category_with_members([1])
+    cog, _ = _make_economy_cog(category)
+    create_ticket, _, _ = _patch_queue_helpers(
+        monkeypatch, [{"_id": "a1", "user_id": "1", "item": "brawl pass"}], [50.0]
+    )
+    set_setting = AsyncMock()
+    monkeypatch.setattr("features.economy.set_setting", set_setting)
+
+    await cog.process_redemption_queue()
+
+    create_ticket.assert_awaited_once()
+    set_setting.assert_not_awaited()

@@ -1310,28 +1310,17 @@ async def get_user_brawlers(user_id: str):
 # --- BRAWL CURRENCY HELPERS ---
 
 
-async def add_brawl_coins(user_id: str, amount: int):
-    """Adds (or removes) Brawl Coins."""
-    if db is None:
-        return
-    await db.users.update_one({"_id": user_id}, {"$inc": {"currencies.coins": amount}})
+BRAWL_CURRENCIES = ("coins", "power_points", "credits")
 
 
-async def add_power_points(user_id: str, amount: int):
-    """Adds Universal Power Points."""
-    if db is None:
-        return
-    await db.users.update_one(
-        {"_id": user_id}, {"$inc": {"currencies.power_points": amount}}
-    )
-
-
-async def add_credits(user_id: str, amount: int):
-    """Adds (or removes) Credits for unlocking Brawlers."""
+async def add_currency(user_id: str, currency: str, amount: int):
+    """Adds (or, with a negative amount, removes) one brawl currency."""
+    if currency not in BRAWL_CURRENCIES:
+        raise ValueError(f"Unknown brawl currency: {currency!r}")
     if db is None:
         return
     await db.users.update_one(
-        {"_id": user_id}, {"$inc": {"currencies.credits": amount}}
+        {"_id": user_id}, {"$inc": {f"currencies.{currency}": amount}}
     )
 
 
