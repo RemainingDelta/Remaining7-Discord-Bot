@@ -866,6 +866,7 @@ WRITE_HELPERS = (
     "add_issue_labels",
     "remove_issue_label",
     "set_issue_state",
+    "set_issue_title",
     "create_github_issue",
     "update_github_issue",
 )
@@ -1221,7 +1222,13 @@ async def test_a_right_click_edit_without_a_comment_still_attaches_the_message()
 def _validate(changes, issue=None):
     from features.github_tickets import validate_changes
 
-    return validate_changes(changes, issue or _issue(), REPO_LABELS)
+    return validate_changes(changes, issue or _issue(), REPO_LABELS).changes
+
+
+def _skipped(changes, issue=None):
+    from features.github_tickets import validate_changes
+
+    return validate_changes(changes, issue or _issue(), REPO_LABELS).skipped
 
 
 def test_labels_that_do_not_exist_in_the_repo_are_dropped():
@@ -1406,3 +1413,231 @@ async def test_an_edit_reply_without_a_changes_list_raises(mock_client):
 
     with pytest.raises(RuntimeError, match="Gemini"):
         await call_gemini_edit("close #540", _issue(), REPO_LABELS, [])
+
+
+# --- Edit does exactly what was asked (#252 follow-up) ---
+
+LOGGED_BODY = (
+    "### Overview\nRefunds crash the shop.\n\n"
+    "### Acceptance Criteria\n- [ ] one\n\n- [ ] two\n\n"
+    "### Screenshots/Logs\n<details>\n<summary>Attached log</summary>\n\n"
+    "```\nTraceback...\n```\n\n</details>\n\n"
+    "### Branch\n```\n540-Bug\n```"
+)
+
+
+def _logged_issue(**kwargs):
+    issue = _issue(**kwargs)
+    issue["body"] = LOGGED_BODY
+    return issue
+
+
+def test_the_choice_prompt_has_no_trailing_period_after_the_example():
+    from features.github_tickets import CHOICE_PROMPT
+
+    assert "#540)" in CHOICE_PROMPT
+    assert "#540.)" not in CHOICE_PROMPT
+
+
+def test_a_description_edit_is_kept():
+    new_body = LOGGED_BODY.replace("- [ ] one\n\n- [ ] two", "- [ ] one\n- [ ] two")
+    result = _validate([{"action": "edit_body", "body": new_body}], _logged_issue())
+    assert result == [{"action": "edit_body", "body": new_body}]
+
+
+def test_an_unchanged_description_is_dropped():
+    change = [{"action": "edit_body", "body": LOGGED_BODY}]
+    assert _validate(change, _logged_issue()) == []
+
+
+def test_an_empty_description_is_dropped():
+    assert _validate([{"action": "edit_body", "body": "  "}], _logged_issue()) == []
+
+
+def test_an_edited_logs_section_is_restored_verbatim():
+    rewritten = LOGGED_BODY.replace("- [ ] one\n\n- [ ] two", "- [ ] one\n- [ ] two")
+    rewritten = rewritten.replace("Traceback...", "A traceback happened")
+    [change] = _validate([{"action": "edit_body", "body": rewritten}], _logged_issue())
+    assert "Traceback..." in change["body"]
+    assert "A traceback happened" not in change["body"]
+    assert "- [ ] one\n- [ ] two" in change["body"]
+
+
+def test_an_edited_branch_block_is_restored_verbatim():
+    rewritten = LOGGED_BODY.replace("540-Bug", "540-Feature").replace(
+        "Refunds crash", "Refunds break"
+    )
+    [change] = _validate([{"action": "edit_body", "body": rewritten}], _logged_issue())
+    assert "540-Bug" in change["body"]
+    assert "540-Feature" not in change["body"]
+    assert "Refunds break" in change["body"]
+
+
+def test_a_dropped_logs_section_is_put_back():
+    without_logs = LOGGED_BODY.split("### Screenshots/Logs")[0] + (
+        "### Branch\n```\n540-Bug\n```"
+    )
+    without_logs = without_logs.replace("Refunds crash", "Refunds break")
+    [change] = _validate(
+        [{"action": "edit_body", "body": without_logs}], _logged_issue()
+    )
+    assert "Traceback..." in change["body"]
+    assert change["body"].index("Traceback...") < change["body"].index("### Branch")
+
+
+def test_a_title_edit_is_kept():
+    result = _validate([{"action": "edit_title", "title": "Bug: refunds crash"}])
+    assert result == [{"action": "edit_title", "title": "Bug: refunds crash"}]
+
+
+def test_the_same_title_is_dropped():
+    assert (
+        _validate([{"action": "edit_title", "title": "Bug: shop refund crash"}]) == []
+    )
+
+
+def test_an_empty_or_overlong_title_is_dropped():
+    assert _validate([{"action": "edit_title", "title": " "}]) == []
+    assert _validate([{"action": "edit_title", "title": "x" * 257}]) == []
+
+
+def test_a_title_at_the_256_character_limit_is_kept():
+    assert _validate([{"action": "edit_title", "title": "x" * 256}]) != []
+
+
+def test_an_unknown_label_is_reported_as_skipped():
+    skipped = _skipped([{"action": "add_labels", "labels": ["Ready"]}])
+    assert any('"Ready"' in reason and "does not exist" in reason for reason in skipped)
+
+
+def test_closing_a_closed_issue_is_reported_as_skipped():
+    change = [{"action": "close", "state_reason": "completed"}]
+    skipped = _skipped(change, _issue(state="closed"))
+    assert any("already closed" in reason for reason in skipped)
+
+
+def test_a_valid_change_reports_nothing_skipped():
+    assert _skipped([{"action": "add_labels", "labels": ["High Priority"]}]) == []
+
+
+@pytest.mark.asyncio
+async def test_nothing_to_change_says_why():
+    changes = [{"action": "add_labels", "labels": ["Ready"]}]
+    interaction, _, _, writes = await _press_edit(
+        "give #540 the Ready tag", changes=changes
+    )
+
+    content = _last_content(interaction)
+    assert "Nothing to change" in content
+    assert '"Ready"' in content
+    writes.assert_none()
+
+
+@pytest.mark.asyncio
+async def test_the_preview_lists_skipped_changes():
+    changes = [
+        {"action": "add_labels", "labels": ["Ready", "High Priority"]},
+    ]
+    interaction, _, _, _ = await _press_edit(
+        "give #540 Ready and High Priority", changes=changes
+    )
+
+    content = _last_content(interaction)
+    assert "High Priority" in content
+    assert "Skipped" in content
+    assert '"Ready"' in content
+
+
+@pytest.mark.asyncio
+async def test_the_preview_shows_the_description_as_a_diff():
+    issue = _logged_issue()
+    new_body = LOGGED_BODY.replace("- [ ] one\n\n- [ ] two", "- [ ] one\n- [ ] two")
+    interaction, _, _, _ = await _press_edit(
+        "in #540 remove the space between bullet points",
+        issue=issue,
+        changes=[{"action": "edit_body", "body": new_body}],
+    )
+
+    content = _last_content(interaction)
+    assert "```diff" in content
+    assert "\n-\n" in content, "the removed blank line is shown"
+    assert "Traceback" not in content, "unchanged lines are not repeated"
+
+
+@pytest.mark.asyncio
+async def test_a_large_description_rewrite_still_fits_in_one_discord_message():
+    issue = _issue()
+    issue["body"] = "\n".join(f"- [ ] old item {i}" for i in range(400))
+    new_body = "\n".join(f"- [ ] new item {i}" for i in range(400))
+    interaction, _, _, _ = await _press_edit(
+        "rewrite #540", issue=issue, changes=[{"action": "edit_body", "body": new_body}]
+    )
+
+    content = _last_content(interaction)
+    assert len(content) <= 2000
+    assert "more lines" in content
+
+
+@pytest.mark.asyncio
+async def test_applying_a_description_edit_patches_the_body_without_a_comment():
+    new_body = LOGGED_BODY.replace("- [ ] one\n\n- [ ] two", "- [ ] one\n- [ ] two")
+    view = _preview([{"action": "edit_body", "body": new_body}], issue=_logged_issue())
+    with _Writes() as writes:
+        await view.apply.callback(_creator_interaction())
+
+    writes.mocks["update_github_issue"].assert_awaited_once_with(540, new_body)
+    writes.mocks["add_issue_comment"].assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_applying_a_title_edit_patches_the_title():
+    view = _preview([{"action": "edit_title", "title": "Bug: refunds crash"}])
+    with _Writes() as writes:
+        await view.apply.callback(_creator_interaction())
+
+    writes.mocks["set_issue_title"].assert_awaited_once_with(540, "Bug: refunds crash")
+    writes.mocks["update_github_issue"].assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_comment_and_close_in_one_request_comment_first():
+    order = []
+    view = _preview(
+        [
+            {"action": "comment", "body": "fixed in v1.16"},
+            {"action": "close", "state_reason": "completed"},
+        ]
+    )
+    with _Writes() as writes:
+        writes.mocks["add_issue_comment"].side_effect = lambda *a: order.append(
+            "comment"
+        )
+        writes.mocks["set_issue_state"].side_effect = lambda *a: order.append("close")
+        await view.apply.callback(_creator_interaction())
+
+    assert order == ["comment", "close"]
+    writes.mocks["add_issue_comment"].assert_awaited_once_with(540, "fixed in v1.16")
+
+
+@pytest.mark.asyncio
+@patch("features.github_tickets.GEMINI_TOKEN", "fake-token")
+@patch("features.github_tickets.aiohttp.ClientSession")
+async def test_the_edit_prompt_carries_the_full_description(mock_client):
+    from features.github_tickets import call_gemini_edit
+
+    reply = {"changes": []}
+    gemini_response = {
+        "candidates": [{"content": {"parts": [{"text": json.dumps(reply)}]}}]
+    }
+    mock_client.return_value = _mock_session(
+        _mock_aiohttp_response(200, json_data=gemini_response)
+    )
+    issue = _issue()
+    issue["body"] = "x" * 5000 + "TAIL-MARKER"
+
+    await call_gemini_edit("in #540 fix the typo", issue, REPO_LABELS, [])
+
+    session = await mock_client.return_value.__aenter__()
+    prompt = session.post.call_args.kwargs["json"]["contents"][0]["parts"][0]["text"]
+    assert "TAIL-MARKER" in prompt
+    assert "edit_body" in prompt and "edit_title" in prompt

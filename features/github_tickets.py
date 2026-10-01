@@ -1,3 +1,4 @@
+import difflib
 import json
 import os
 import re
@@ -140,28 +141,48 @@ numbers in the branch):
 
 EDIT_PROMPT = """\
 You update an existing GitHub issue for a Discord bot project. The user wants \
-issue #{number} changed. Decide which of the allowed changes carry out their \
-request, and nothing more.
+issue #{number} changed. Carry out exactly what they ask, using the matching \
+changes below, and nothing more.
 
 ALLOWED CHANGES:
+- {{"action": "edit_body", "body": "<the full new description>"}}
+- {{"action": "edit_title", "title": "<the new title>"}}
 - {{"action": "comment", "body": "<markdown comment>"}}
 - {{"action": "add_labels", "labels": ["<label>", ...]}}
 - {{"action": "remove_labels", "labels": ["<label>", ...]}}
 - {{"action": "close", "state_reason": "completed" | "not_planned"}}
 - {{"action": "reopen"}}
 
+HOW REQUESTS MAP TO CHANGES:
+- Changing the description's content or formatting ("remove the space between \
+bullet points", "add an acceptance criterion", "tick the first box") -> edit_body
+- Renaming the issue -> edit_title
+- Adding a note, an update, or "with this comment ..." -> comment
+- "give it the X tag/label", "mark it X" -> add_labels; "remove the X tag" -> remove_labels
+- "close it" / "mark it done" -> close (completed); "won't do" / "not planned" -> \
+close (not_planned); "reopen it" -> reopen
+- One request can need several changes, e.g. "close it with this comment '...'" \
+-> comment, then close
+
 RULES:
 - Return ONLY a raw JSON object: {{"changes": [ ... ]}}
-- Use only labels from AVAILABLE LABELS
-- The title and description cannot be edited. If the user asks for that, write a \
-comment describing the requested change instead
+- NEVER write a comment in place of a change the user asked for. Only comment \
+when they ask for a comment or give new information to record
+- A comment the user quotes is posted word for word, without the quotes
+- edit_body returns the WHOLE description with the requested change applied. \
+Keep every other line exactly as it is, character for character
+- Use the label names exactly as the user gives them, even if they are not in \
+AVAILABLE LABELS. The bot checks them
 - Comments are concise and written for the issue's readers, not addressed to the user
 - Do NOT hallucinate specifics beyond what the request provides
 - Do NOT wrap the JSON in markdown code fences or add any preamble/explanation
 
 ISSUE #{number} ({state}): {title}
 Labels: {labels}
+DESCRIPTION (between the markers):
+<<<
 {body}
+>>>
 
 AVAILABLE LABELS: {available}
 {references}
@@ -303,6 +324,13 @@ def _render_artifacts(context: ReferencedContext | None) -> str | None:
     return "\n\n".join(parts)
 
 
+def _section_pattern(heading: str) -> re.Pattern:
+    """A ``### Heading`` section, up to the next ``### `` heading or the end."""
+    return re.compile(
+        rf"^{re.escape(heading)}[^\n]*\n.*?(?=^### |\Z)", re.MULTILINE | re.DOTALL
+    )
+
+
 def append_context(body: str, context: ReferencedContext | None) -> str:
     """Put the real artifacts in the Screenshots/Logs section of a Gemini body.
 
@@ -315,10 +343,7 @@ def append_context(body: str, context: ReferencedContext | None) -> str:
     just above ``### Branch``.
     """
     artifacts = _render_artifacts(context)
-    section = re.compile(
-        rf"^{re.escape(LOG_SECTION_HEADING)}[^\n]*\n.*?(?=^### |\Z)",
-        re.MULTILINE | re.DOTALL,
-    )
+    section = _section_pattern(LOG_SECTION_HEADING)
     if artifacts is None:
         return section.sub("", body, count=1).rstrip() + "\n"
     replacement = f"{LOG_SECTION_HEADING}\n{artifacts}\n\n"
@@ -545,6 +570,12 @@ async def remove_issue_label(issue_number: int, label: str) -> None:
     )
 
 
+async def set_issue_title(issue_number: int, title: str) -> None:
+    await _github_request(
+        "patch", f"{GITHUB_API_URL}/{issue_number}", 200, json={"title": title}
+    )
+
+
 async def set_issue_state(issue_number: int, state: str, reason: str) -> None:
     await _github_request(
         "patch",
@@ -556,8 +587,26 @@ async def set_issue_state(issue_number: int, state: str, reason: str) -> None:
 
 # --- EDITING AN EXISTING ISSUE (#252) ---
 
-EDIT_ACTIONS = ("comment", "add_labels", "remove_labels", "close", "reopen")
+# Also the order changes are applied and listed in.
+EDIT_ACTIONS = (
+    "edit_title",
+    "edit_body",
+    "comment",
+    "add_labels",
+    "remove_labels",
+    "close",
+    "reopen",
+)
 CLOSE_REASONS = ("completed", "not_planned")
+MAX_TITLE_CHARS = 256
+BRANCH_HEADING = "### Branch"
+# Sections the bot wrote verbatim. A description edit must not paraphrase them.
+PROTECTED_HEADINGS = (LOG_SECTION_HEADING, BRANCH_HEADING)
+
+
+class Validated(NamedTuple):
+    changes: list[dict]
+    skipped: list[str]
 
 
 async def call_gemini_edit(
@@ -565,15 +614,16 @@ async def call_gemini_edit(
 ) -> list[dict]:
     """Ask Gemini which changes to ``issue`` carry out the request.
 
-    The reply is untrusted: ``validate_changes`` filters it before anything
-    is shown or applied.
+    The target's full description is sent, since ``edit_body`` returns a
+    rewrite of it. The reply is untrusted: ``validate_changes`` filters it
+    before anything is shown or applied.
     """
     prompt = EDIT_PROMPT.format(
         number=issue["number"],
         state=issue["state"],
         title=issue["title"],
         labels=", ".join(issue["labels"]) or "(none)",
-        body=issue["body"][:MAX_REFERENCE_BODY_CHARS],
+        body=issue["body"],
         available=", ".join(repo_labels),
         references=_format_references(references),
         request=raw_text,
@@ -585,26 +635,80 @@ async def call_gemini_edit(
     return [change for change in changes if isinstance(change, dict)]
 
 
+def protect_sections(old: str, new: str) -> str:
+    """Put the old Screenshots/Logs and Branch sections back into ``new``.
+
+    Those sections hold verbatim logs and the branch name, which a rewrite
+    of the description could paraphrase or drop. A dropped Logs section goes
+    back just above ``### Branch``.
+    """
+    for heading in PROTECTED_HEADINGS:
+        pattern = _section_pattern(heading)
+        original = pattern.search(old)
+        if original is None:
+            continue
+        kept = original.group(0)
+        if pattern.search(new):
+            new = pattern.sub(lambda _: kept, new, count=1)
+            continue
+        branch = _section_pattern(BRANCH_HEADING).search(new)
+        if heading != BRANCH_HEADING and branch:
+            new = f"{new[: branch.start()]}{kept.rstrip()}\n\n{new[branch.start() :]}"
+        else:
+            new = f"{new.rstrip()}\n\n{kept.rstrip()}"
+    return new
+
+
 def validate_changes(
     changes: list[dict], issue: dict, repo_labels: list[str]
-) -> list[dict]:
+) -> Validated:
     """Keep only the changes that are allowed and would actually do something.
 
     Labels must exist in the repo (matched case-insensitively and returned in
     the repo's spelling), a label is only added if missing and only removed if
-    present, and a state change must differ from the current state. At most
-    one change of each kind is kept.
+    present, a state change must differ from the current state, and a title
+    or description must differ from the current one. At most one change of
+    each kind is kept. Anything the user asked for that cannot be done is
+    returned in ``skipped`` so the bot can say so instead of hiding it.
     """
+    number = issue["number"]
     canonical = {name.lower(): name for name in repo_labels}
     current = {name.lower() for name in issue["labels"]}
     kept: dict[str, dict] = {}
+    skipped: list[str] = []
 
     for change in changes:
         action = change.get("action")
-        if action not in EDIT_ACTIONS or action in kept:
+        if action not in EDIT_ACTIONS:
+            if isinstance(action, str):
+                skipped.append(f'"{action}" is not a supported change')
+            continue
+        if action in kept:
             continue
 
-        if action == "comment":
+        if action == "edit_body":
+            body = change.get("body")
+            if not isinstance(body, str) or not body.strip():
+                continue
+            body = protect_sections(issue["body"], body.strip())
+            if body.strip() == issue["body"].strip():
+                skipped.append("The description would not change")
+            else:
+                kept[action] = {"action": action, "body": body}
+
+        elif action == "edit_title":
+            title = change.get("title")
+            if not isinstance(title, str) or not title.strip():
+                continue
+            title = title.strip()
+            if len(title) > MAX_TITLE_CHARS:
+                skipped.append(f"The title is over {MAX_TITLE_CHARS} characters")
+            elif title == issue["title"]:
+                skipped.append("The title would not change")
+            else:
+                kept[action] = {"action": action, "title": title}
+
+        elif action == "comment":
             body = change.get("body")
             if isinstance(body, str) and body.strip():
                 kept[action] = {"action": action, "body": body.strip()}
@@ -613,34 +717,54 @@ def validate_changes(
             wanted = change.get("labels")
             if not isinstance(wanted, list):
                 continue
+            adding = action == "add_labels"
             labels: list[str] = []
             for name in wanted:
                 key = str(name).lower()
-                if key not in canonical or canonical[key] in labels:
+                if key not in canonical:
+                    skipped.append(f'Label "{name}" does not exist in the repo')
+                elif canonical[key] in labels:
                     continue
-                if (key in current) == (action == "remove_labels"):
+                elif adding and key in current:
+                    skipped.append(f'#{number} already has "{canonical[key]}"')
+                elif not adding and key not in current:
+                    skipped.append(f'#{number} does not have "{canonical[key]}"')
+                else:
                     labels.append(canonical[key])
             if labels:
                 kept[action] = {"action": action, "labels": labels}
 
-        elif action == "close" and issue["state"] == "open":
+        elif action == "close":
+            if issue["state"] != "open":
+                skipped.append(f"#{number} is already closed")
+                continue
             reason = change.get("state_reason")
             if reason not in CLOSE_REASONS:
                 reason = "completed"
             kept[action] = {"action": action, "state_reason": reason}
 
-        elif action == "reopen" and issue["state"] == "closed":
+        elif action == "reopen":
+            if issue["state"] != "closed":
+                skipped.append(f"#{number} is already open")
+                continue
             kept[action] = {"action": action}
 
-    return [kept[action] for action in EDIT_ACTIONS if action in kept]
+    ordered = [kept[action] for action in EDIT_ACTIONS if action in kept]
+    return Validated(ordered, skipped)
 
 
-# Keeps the preview under Discord's 2,000-character message limit.
+# Discord rejects a message over 2,000 characters.
+DISCORD_MESSAGE_LIMIT = 2_000
 MAX_PREVIEW_COMMENT_CHARS = 1_200
 
 
 def describe_change(change: dict, attaches_context: bool = False) -> str:
+    """One preview line. ``edit_body`` is rendered by ``render_body_diff``."""
     action = change["action"]
+    if action == "edit_body":
+        return "• Description:"
+    if action == "edit_title":
+        return f'• Rename to "{change["title"]}"'
     if action == "comment":
         text = change["body"]
         if len(text) > MAX_PREVIEW_COMMENT_CHARS:
@@ -658,6 +782,36 @@ def describe_change(change: dict, attaches_context: bool = False) -> str:
     return "• Reopen"
 
 
+def render_body_diff(old: str, new: str, budget: int) -> str:
+    """The changed lines of a description as a diff block within ``budget``."""
+    # One line of context, so a removed blank line reads next to its neighbours.
+    # Hunk headers mean nothing in Discord; a gap between hunks shows as "...".
+    diff = difflib.unified_diff(old.splitlines(), new.splitlines(), lineterm="", n=1)
+    lines: list[str] = []
+    for line in diff:
+        if line.startswith(("---", "+++")):
+            continue
+        if line.startswith("@@"):
+            if lines:
+                lines.append("...")
+            continue
+        lines.append(line)
+    longest = max((len(run) for run in re.findall(r"`+", new + old)), default=0)
+    fence = "`" * max(3, longest + 1)
+    opening, closing = f"{fence}diff\n", f"\n{fence}"
+
+    shown: list[str] = []
+    used = len(opening) + len(closing)
+    for i, line in enumerate(lines):
+        more = f"... {len(lines) - i} more lines"
+        if used + len(line) + 1 + len(more) + 1 > budget:
+            shown.append(more)
+            break
+        shown.append(line)
+        used += len(line) + 1
+    return opening + "\n".join(shown) + closing
+
+
 def _comment_body(text: str, context: ReferencedContext | None) -> str:
     """The comment text plus, from a right-click, the verbatim artifacts."""
     return "\n\n".join(part for part in (text, _render_artifacts(context)) if part)
@@ -666,10 +820,14 @@ def _comment_body(text: str, context: ReferencedContext | None) -> str:
 async def apply_changes(
     issue_number: int, changes: list[dict], context: ReferencedContext | None
 ) -> None:
-    """Apply validated changes: comment, then labels, then the state change."""
+    """Apply validated changes in ``EDIT_ACTIONS`` order."""
     for change in changes:
         action = change["action"]
-        if action == "comment":
+        if action == "edit_title":
+            await set_issue_title(issue_number, change["title"])
+        elif action == "edit_body":
+            await update_github_issue(issue_number, change["body"])
+        elif action == "comment":
             body = _comment_body(change["body"], context)
             await add_issue_comment(issue_number, body)
         elif action == "add_labels":
@@ -762,6 +920,12 @@ async def run_create(
         )
 
 
+def _skipped_text(skipped: list[str]) -> str:
+    if not skipped:
+        return ""
+    return "\nSkipped:\n" + "\n".join(f"• {reason}" for reason in skipped)
+
+
 EDIT_NEEDS_NUMBER = (
     'Editing needs an issue number in the message, e.g. "@me close #540".'
 )
@@ -793,18 +957,20 @@ async def run_edit(
         )
         return
 
-    changes = validate_changes(proposed, issue, repo_labels)
+    changes, skipped = validate_changes(proposed, issue, repo_labels)
     if not changes:
         await interaction.edit_original_response(
             content=f"Nothing to change on #{issue['number']} for that request."
+            + _skipped_text(skipped)
         )
         return
     # A right-click files the message against the issue, so it always lands
     # in a comment even when the request itself only relabels or closes.
-    if context is not None and changes[0]["action"] != "comment":
-        changes.insert(0, {"action": "comment", "body": ""})
+    if context is not None and all(c["action"] != "comment" for c in changes):
+        changes.append({"action": "comment", "body": ""})
+        changes.sort(key=lambda c: EDIT_ACTIONS.index(c["action"]))
 
-    view = EditPreviewView(issue, changes, author_id, context)
+    view = EditPreviewView(issue, changes, author_id, context, skipped)
     await interaction.edit_original_response(content=view.preview(), view=view)
     view.message = await interaction.original_response()
 
@@ -853,24 +1019,34 @@ class EditPreviewView(_OwnerView):
         changes: list[dict],
         author_id: int,
         context: ReferencedContext | None = None,
+        skipped: list[str] | None = None,
     ):
         super().__init__(author_id, timeout=120)
         self.issue = issue
         self.changes = changes
         self.context = context
+        self.skipped = skipped or []
 
-    def _lines(self) -> str:
-        return "\n".join(
-            describe_change(change, attaches_context=self.context is not None)
-            for change in self.changes
-        )
+    def _render(self, header: str, footer: str = "") -> str:
+        """Header, one line per change, then footer, within Discord's limit.
+
+        The description diff is the only part that can be long, so it gets
+        whatever room the rest leaves.
+        """
+        attaches = self.context is not None
+        lines = [describe_change(c, attaches_context=attaches) for c in self.changes]
+        fixed = len(header) + len(footer) + sum(len(line) + 1 for line in lines)
+        budget = DISCORD_MESSAGE_LIMIT - fixed - 1
+        for i, change in enumerate(self.changes):
+            if change["action"] == "edit_body":
+                diff = render_body_diff(self.issue["body"], change["body"], budget)
+                lines[i] = f"{lines[i]}\n{diff}"
+        return f"{header}\n" + "\n".join(lines) + footer
 
     def preview(self) -> str:
         issue = self.issue
-        return (
-            f'Edit #{issue["number"]} "{issue["title"]}" ({issue["state"]}):\n'
-            f"{self._lines()}"
-        )
+        header = f'Edit #{issue["number"]} "{issue["title"]}" ({issue["state"]}):'
+        return self._render(header, _skipped_text(self.skipped))
 
     @discord.ui.button(label="Apply", style=discord.ButtonStyle.green)
     async def apply(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -887,7 +1063,7 @@ class EditPreviewView(_OwnerView):
             )
             return
         await interaction.edit_original_response(
-            content=f"Updated #{number}: <{self.issue['html_url']}>\n{self._lines()}",
+            content=self._render(f"Updated #{number}: <{self.issue['html_url']}>"),
         )
 
     @discord.ui.button(label="Cancel", style=discord.ButtonStyle.red)
@@ -898,7 +1074,7 @@ class EditPreviewView(_OwnerView):
 
 CHOICE_PROMPT = (
     "Create a new GitHub issue, or edit an existing one?"
-    " (Editing needs an issue number like #540.)"
+    " (Editing needs an issue number like #540)"
 )
 
 

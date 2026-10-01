@@ -91,45 +91,63 @@ A create request can point at existing issues, e.g. "a new enhancement that bump
 
 ## Editing an Existing Issue
 
-**Edit** needs an issue number. The first `#N` or issue URL in the text is the target. Any others are passed to the prompt as references (e.g. "mark #540 as a duplicate of #12"). With no number, the bot replies with a hint and calls nothing.
+**Edit** does exactly what was asked to an existing issue, and never posts a comment in place of a requested change:
+
+| Request | Changes |
+|---|---|
+| "in #389, remove the space between bullet points" | `edit_body` |
+| "rename #540 to ..." | `edit_title` |
+| "close #540 with this comment "fixed in v1.16"" | `comment` (word for word), then `close` |
+| "give #540 the Ready tag" | `add_labels` |
+
+Edit needs an issue number. The first `#N` or issue URL in the text is the target. Any others are passed to the prompt as references (e.g. "mark #540 as a duplicate of #12"). With no number, the bot replies with a hint and calls nothing.
 
 1. `fetch_issue(N)` reads the title, body, state and labels. A missing issue or a pull request gets a plain message ("Issue #999 does not exist.") and stops there.
 2. `fetch_repo_labels()` reads the repo's labels.
-3. `call_gemini_edit()` sends `EDIT_PROMPT` and gets back `{"changes": [...]}`.
+3. `call_gemini_edit()` sends `EDIT_PROMPT` with the issue's **full** description and gets back `{"changes": [...]}`.
 4. `validate_changes()` filters that list (below).
 5. The bot shows a preview with **Apply** / **Cancel**:
    ```
-   Edit #540 "Bug: shop refund crash" (open):
-   • Comment:
-   > Fixed in v2.3
+   Edit #389 "Feature: Display Total Teams Checked In" (open):
+   • Description:
+   ````diff
+    - [ ] Count teams.
+   -
+    - [ ] Display it.
+   ````
    • Add labels: High Priority
-   • Close (completed)
+   Skipped:
+   • Label "Ready" does not exist in the repo
    ```
-6. **Apply** runs `apply_changes()` (comment, then labels, then state) and edits the message to `Updated #540: <link>` with the list of changes. **Cancel** writes nothing. The preview times out after 120 seconds.
+   A description change is shown as a diff of the changed lines with one line of context, trimmed with "... N more lines" so the message stays under Discord's 2,000-character limit. Anything requested that cannot be done is listed under **Skipped**.
+6. **Apply** runs `apply_changes()` (title, description, comment, labels, then state) and edits the message to `Updated #N: <link>` with the list of changes. **Cancel** writes nothing. The preview times out after 120 seconds.
 
 ### Allowed changes
 
 | Change | GitHub call |
 |---|---|
+| `edit_title` | `PATCH /issues/{n}` with `title` |
+| `edit_body` | `PATCH /issues/{n}` with `body` |
 | `comment` | `POST /issues/{n}/comments` |
 | `add_labels` | `POST /issues/{n}/labels` |
 | `remove_labels` | `DELETE /issues/{n}/labels/{name}`, once per label |
 | `close` (`completed` or `not_planned`) | `PATCH /issues/{n}` with `state` and `state_reason` |
 | `reopen` | `PATCH /issues/{n}` with `state: open`, `state_reason: reopened` |
 
-The title and description are never edited. Gemini would paraphrase the body and could drop checklists or the verbatim logs written by `append_context()`. If the user asks for a title or description change, the prompt tells Gemini to write a comment describing it instead.
+`edit_body` returns the whole new description. `protect_sections()` then puts the original `### Screenshots/Logs` and `### Branch` sections back word for word, so pasted logs and the branch name cannot be paraphrased or dropped. A dropped Logs section goes back above `### Branch`. Those two sections cannot be changed through Edit.
 
 ### Validation
 
-Gemini's reply is untrusted. `validate_changes()` keeps only changes that are allowed and would actually do something:
+Gemini's reply is untrusted. `validate_changes()` keeps only changes that are allowed and would actually do something, and returns a reason for each requested change it drops:
 
 - Unknown actions are dropped.
-- Labels must exist in the repo. They are matched case-insensitively and applied in the repo's spelling.
+- A title must be non-empty, at most 256 characters, and different from the current one. A description must differ from the current one after `protect_sections()`.
+- Labels must exist in the repo. They are matched case-insensitively and applied in the repo's spelling. The bot does not create labels; a missing one is reported as skipped.
 - A label is only added if the issue lacks it, and only removed if the issue has it.
 - `close` only on an open issue, `reopen` only on a closed one. An unrecognised close reason becomes `completed`.
 - Empty comments are dropped, and at most one change of each kind is kept.
 
-If nothing survives, the bot says "Nothing to change on #N for that request." and shows no buttons.
+If nothing survives, the bot says "Nothing to change on #N for that request." with the skipped reasons, and shows no buttons.
 
 ---
 
