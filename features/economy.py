@@ -732,17 +732,6 @@ class RedemptionQueueConfirmView(discord.ui.View):
         self.stop()
 
 
-# Helper
-async def shop_item_autocomplete(
-    interaction: discord.Interaction, current: str
-) -> list[app_commands.Choice[str]]:
-    choices = []
-    for key, data in SHOP_DATA.items():
-        if current.lower() in key.lower() or current.lower() in data["display"].lower():
-            choices.append(app_commands.Choice(name=data["display"], value=key))
-    return choices[:25]
-
-
 # --- VIEWS ---
 
 
