@@ -13,9 +13,8 @@ from features.config import (
     EMOJI_HYPERCHARGE_DEFAULT,
 )
 from database.mongo import (
-    add_brawl_coins,
-    add_power_points,
-    add_credits,
+    BRAWL_CURRENCIES,
+    add_currency,
     add_brawler_to_user,
     get_user_data,
     add_gadget_to_user,
@@ -39,15 +38,10 @@ async def process_reward(user_id: str, reward: dict):
     r_type = reward["type"]
 
     # --- Currency Handling ---
-    if r_type in ["coins", "power_points", "credits"]:
+    if r_type in BRAWL_CURRENCIES:
         icon = EMOJIS_CURRENCY.get(r_type, "")
         amount = reward["amount"]
-        if r_type == "coins":
-            await add_brawl_coins(user_id, amount)
-        elif r_type == "power_points":
-            await add_power_points(user_id, amount)
-        elif r_type == "credits":
-            await add_credits(user_id, amount)
+        await add_currency(user_id, r_type, amount)
         return f"{icon} **{amount} {r_type.replace('_', ' ').title()}**"
 
     # --- Specific Brawler Selection ---
@@ -75,7 +69,7 @@ async def process_reward(user_id: str, reward: dict):
             return f"{rarity_emoji} **NEW BRAWLER!** {b_emoji} **{selected_brawler.name}** ({formatted_rarity})"
         else:
             fb_amount = reward.get("fallback_credits", 100)
-            await add_credits(user_id, fb_amount)
+            await add_currency(user_id, "credits", fb_amount)
             credit_icon = EMOJIS_CURRENCY.get("credits", "💳")
             return f"{credit_icon} **{fb_amount} Credits** (Duplicate {selected_brawler.name})"
 
@@ -136,7 +130,7 @@ async def process_reward(user_id: str, reward: dict):
 
         if not eligible:
             coin_icon = EMOJIS_CURRENCY.get("coins", "💰")
-            await add_brawl_coins(user_id, 1000)
+            await add_currency(user_id, "coins", 1000)
             return f"{coin_icon} **1,000 Coins** (No eligible brawlers)"
 
         # Select winner

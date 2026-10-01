@@ -46,7 +46,7 @@ async def get_user_data(user_id: str):
         # New User: Create with Shelly Level 1 and empty lists
         new_user = {
             "_id": str(user_id),
-            "currencies": {"coins": 100, "power_points": 0, "credits": 0, "gems": 0},
+            "currencies": {"coins": 100, "power_points": 0, "credits": 0},
             "brawlers": {"shelly": {"level": 1, "gadgets": [], "star_powers": []}},
         }
         await db.users.insert_one(new_user)
@@ -305,20 +305,6 @@ async def get_booster_discount_month(user_id: str) -> str | None:
     """Returns the "YYYY-MM" month key of the user's last booster discount use."""
     doc = await get_user_data(user_id)
     return doc.get("booster_discount_month")
-
-
-async def set_booster_discount_month(user_id: str, month_key: str):
-    if db is None:
-        return
-    await db.users.update_one(
-        {"_id": user_id}, {"$set": {"booster_discount_month": month_key}}, upsert=True
-    )
-
-
-async def get_booster_shoutout_month(user_id: str) -> str | None:
-    """Returns the "YYYY-MM" month key of the user's last booster shoutout ticket."""
-    doc = await get_user_data(user_id)
-    return doc.get("booster_shoutout_month")
 
 
 async def set_booster_shoutout_month(user_id: str, month_key: str):
@@ -1324,77 +1310,18 @@ async def get_user_brawlers(user_id: str):
 # --- BRAWL CURRENCY HELPERS ---
 
 
-async def add_brawl_coins(user_id: str, amount: int):
-    """Adds (or removes) Brawl Coins."""
-    if db is None:
-        return
-    await db.users.update_one({"_id": user_id}, {"$inc": {"currencies.coins": amount}})
+BRAWL_CURRENCIES = ("coins", "power_points", "credits")
 
 
-async def add_power_points(user_id: str, amount: int):
-    """Adds Universal Power Points."""
-    if db is None:
-        return
-    await db.users.update_one(
-        {"_id": user_id}, {"$inc": {"currencies.power_points": amount}}
-    )
-
-
-async def add_brawl_gems(user_id: str, amount: int):
-    """Adds Brawl Gems."""
-    if db is None:
-        return
-    await db.users.update_one({"_id": user_id}, {"$inc": {"currencies.gems": amount}})
-
-
-async def add_credits(user_id: str, amount: int):
-    """Adds (or removes) Credits for unlocking Brawlers."""
+async def add_currency(user_id: str, currency: str, amount: int):
+    """Adds (or, with a negative amount, removes) one brawl currency."""
+    if currency not in BRAWL_CURRENCIES:
+        raise ValueError(f"Unknown brawl currency: {currency!r}")
     if db is None:
         return
     await db.users.update_one(
-        {"_id": user_id}, {"$inc": {"currencies.credits": amount}}
+        {"_id": user_id}, {"$inc": {f"currencies.{currency}": amount}}
     )
-
-
-async def get_brawl_currencies(user_id: str):
-    """Returns a dictionary of all brawl currencies."""
-    doc = await get_user_data(user_id)
-    return doc.get(
-        "currencies", {"coins": 0, "power_points": 0, "gems": 0, "credits": 0}
-    )
-
-
-async def deduct_credits(user_id: str, amount: int) -> bool:
-    """Deducts credits if user has enough. Returns True if successful."""
-    if db is None:
-        return False
-    user_data = await get_user_data(user_id)
-    current_credits = user_data.get("currencies", {}).get("credits", 0)
-
-    if current_credits < amount:
-        return False
-
-    await db.users.update_one(
-        {"_id": str(user_id)}, {"$inc": {"currencies.credits": -amount}}
-    )
-    return True
-
-
-async def deduct_coins(user_id, amount):
-    """Safely deducts coins if balance is sufficient."""
-    if db is None:
-        return False
-
-    user_data = await get_user_data(user_id)
-    current_coins = user_data.get("currencies", {}).get("coins", 0)
-
-    if current_coins >= amount:
-        new_balance = current_coins - amount
-        await db.users.update_one(
-            {"_id": str(user_id)}, {"$set": {"currencies.coins": new_balance}}
-        )
-        return True
-    return False
 
 
 async def purchase_brawler_ability(
