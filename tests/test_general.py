@@ -64,11 +64,13 @@ def _embed_text(interaction):
     return "\n".join(parts)
 
 
-async def test_admin_help_lists_create_github_issue(mock_bot, mock_interaction):
+async def test_admin_help_lists_github_issue_menu(mock_bot, mock_interaction):
     cog = General(mock_bot)
     await cog.admin_help.callback(cog, _as_admin(mock_interaction))
 
-    assert "Create GitHub Issue" in _embed_text(mock_interaction)
+    text = _embed_text(mock_interaction)
+    assert "**GitHub Issue**" in text
+    assert "edit" in text.lower()
 
 
 async def test_admin_help_lists_support_panel(mock_bot, mock_interaction):
