@@ -227,7 +227,11 @@ def test_leaderboard_group_exposes_token_and_level_subcommands():
 
     group = bot.tree.get_command("leaderboard")
     assert isinstance(group, discord.app_commands.Group)
-    assert {sub.name for sub in group.commands} == {"token", "level"}
+    assert {sub.name for sub in group.commands} == {
+        "token",
+        "level",
+        "supply-drops",
+    }
 
 
 def test_old_flat_leaderboard_commands_are_gone():
