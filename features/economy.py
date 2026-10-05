@@ -952,7 +952,7 @@ class ShopPaginationView(discord.ui.View):
 
 class DropClaimButton(
     discord.ui.DynamicItem[discord.ui.Button],
-    template=r"drop_claim:(?P<amount>\d+)",
+    template=r"drop_claim:(?P<amount>-?\d+)",
 ):
     """Persistent claim button for supply/booster/admin drops.
 
