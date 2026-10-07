@@ -99,7 +99,7 @@ Remaining7-Discord-Bot/
 ### R7 Token Economy
 - **Passive Income:** Users earn 2–5 R7 Tokens per message (20-second cooldown), restricted to the general and booster channels. Server Boosters get a ~10% increase in tokens on average.
 - **Daily Rewards:** `/daily` grants a random 80–160 tokens, increased 5% per level above 1. Requires 5 messages sent since last claim and a 24-hour cooldown.
-- **Supply Drop:** `/drop <amount>` (Admin) to force a token drop in general chat.
+- **Supply Drop:** `/drop <amount>` (Admin) to force a token drop in general chat. A negative amount deducts tokens from the claimer; staff can claim only negative drops.
 - **Balance & Ranking:** `/balance [user]`, `/leaderboard token`.
 - **Give & Set:** `/give <user> <token/xp/level> <amount>`, `/set-balance <user> <amount>` (Admin).
 - **Guide:** `/economy-help` for a full user-facing guide.

@@ -952,7 +952,7 @@ class ShopPaginationView(discord.ui.View):
 
 class DropClaimButton(
     discord.ui.DynamicItem[discord.ui.Button],
-    template=r"drop_claim:(?P<amount>\d+)",
+    template=r"drop_claim:(?P<amount>-?\d+)",
 ):
     """Persistent claim button for supply/booster/admin drops.
 
@@ -981,9 +981,12 @@ class DropClaimButton(
     async def callback(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
 
-        if any(role.id == MODERATOR_ROLE_ID for role in interaction.user.roles):
+        # Staff may claim negative drops (a deduction), never positive ones.
+        staff_roles = {TRIAL_MODERATOR_ROLE_ID, MODERATOR_ROLE_ID, ADMIN_ROLE_ID}
+        is_staff = any(role.id in staff_roles for role in interaction.user.roles)
+        if is_staff and self.amount >= 0:
             await interaction.followup.send(
-                "❌ Staff cannot claim supply drops!", ephemeral=False
+                "❌ Staff can only claim negative supply drops!", ephemeral=False
             )
             return
 
@@ -1017,9 +1020,11 @@ class DropClaimButton(
             f"**{self.amount} Tokens**!"
         )
         await interaction.edit_original_response(embed=embed, view=view)
-        await interaction.followup.send(
-            f"🎉 **+{self.amount} Tokens** added to your account!", ephemeral=True
-        )
+        if self.amount >= 0:
+            result = f"🎉 **+{self.amount} Tokens** added to your account!"
+        else:
+            result = f"💸 **{self.amount} Tokens** removed from your account!"
+        await interaction.followup.send(result, ephemeral=True)
 
 
 def build_drop_view(amount: int) -> discord.ui.View:
