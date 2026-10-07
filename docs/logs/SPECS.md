@@ -4716,7 +4716,7 @@ Implemented in `8393e39`. Files: `README.md`, `docs/BRAWL_COLLECTION.md`
 > ### Proposed Behavior
 > Both cover everything since `v1.15.0`: #252, #481, #579, #589, and the release tickets (#591, #597, #599)…(truncated)
 
-Implemented in `<pending — set to the 601-Enhancement doc commit sha once committed>`. Files: `docs/logs/SPECS.md`, `docs/logs/CHANGELOG.md`
+Implemented in `b5862ff`. Files: `docs/logs/SPECS.md`, `docs/logs/CHANGELOG.md`
 
 ✅ Reviewed against the diff: implementation matches the filed spec.
 
