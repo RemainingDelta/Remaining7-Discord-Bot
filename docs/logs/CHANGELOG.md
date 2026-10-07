@@ -1882,3 +1882,104 @@ Closes #582
 * Added the v1.15.0 section to `docs/logs/CHANGELOG.md`: the release notes and every PR description
 
 Closes #583
+
+## v1.15.1 — 2026-10-07
+
+# 🚀 Release Notes v1.15.1
+
+## 🤖 GitHub Actions
+- The website rebuilds whenever this bot repo's `main` branch is updated, so its privacy page matches the latest release
+
+## 🐛 Bug Fixes & Improvements
+- Edit existing GitHub issues from Discord by `#number`, with a preview before applying. The message command is now called **GitHub Issue**
+- **Negative `/drop` crashed:** negative amounts now work and take tokens from the claimer, and staff can claim only negative drops
+- Removed unused database code and the never-used Gems currency
+
+## 📝 Documentation
+- Privacy policy, README, docs and help commands updated
+
+**Full Changelog**: https://github.com/RemainingDelta/Remaining7-Discord-Bot/compare/v1.15.0...v1.15.1
+
+
+### PR Descriptions
+
+#### PR #590 — 252-Feature add editing of existing GitHub issues from Discord
+
+### Changes
+* Added a Create / Edit choice after an @mention or right-click
+* Added editing an existing issue by `#N` (description, title, comment, labels, close/reopen), previewed before applying
+* Added `#N` references as context when creating an issue
+* Renamed the "Create GitHub Issue" message command to "GitHub Issue"
+* Updated docs, `/admin-help`, and the privacy policy
+
+Closes #252
+
+#### PR #499 — 481-Enhancement remove dead DB helpers, gems currency, and write-only redeem counters
+
+### Changes
+* Removed unused `set_booster_discount_month`, `deduct_coins`, and `add_brawl_gems` helpers from `database/mongo.py`
+* Removed the always-zero `gems` currency from the user init and `get_brawl_currencies` default
+* Removed the write-only `_increment_redeem_counter` machinery, its call sites, and the monthly `*_redeemed_count` reset loop (including the orphan `pin_redeemed_count`)
+* Removed `deduct_credits`, `get_brawl_currencies`, and `get_booster_shoutout_month` from `database/mongo.py` and `shop_item_autocomplete` from `features/economy.py`, which have no callers left
+* Replaced `add_brawl_coins`, `add_power_points`, and `add_credits` with one `add_currency(user_id, currency, amount)`, removing the per-currency branches in `drops.py`
+* Updated `docs/DATABASE.md` and `docs/BRAWL_DROPS.md`
+* Added behavior tests for the new-user currencies, `add_currency`, drop rewards, and the monthly budget rollover
+
+Closes #481
+
+#### PR #594 — 579-Bug fix /drop ValueError on negative amounts and let staff claim negative drops
+
+### Changes
+* Fixed the `DropClaimButton` template to accept negative amounts (`drop_claim:(?P<amount>-?\d+)`), so `/drop -100` no longer raises a `ValueError`
+* Allowed staff (moderator, admin and trial moderator) to claim negative drops only; positive and zero drops still reject them
+* Updated the claim confirmation to show `-100 Tokens removed` instead of `+-100 Tokens added`
+* Added tests in `tests/test_drop_claim_negative.py` for each acceptance criterion, covering all three staff roles
+* Updated `docs/TOKEN_SYSTEM.md`, the README and `/admin-help` for negative drops and the staff rule
+
+Closes #579
+
+#### PR #592 — 589-Feature add workflow to redeploy the website on push to main
+
+### Changes
+* Added `redeploy-website.yml` to trigger the Netlify build hook on every push to `main`
+* Updated the README and `docs/PRIVACY_SYSTEM.md`
+
+### Notes
+Needs the `NETLIFY_BUILD_HOOK` repository secret before it can run.
+
+Closes #589
+
+#### PR #596 — 591-Enhancement update version to v1.15.1
+
+### Changes
+* Updated the version to `1.15.1` in `pyproject.toml` and `README.md`
+
+Closes #591
+
+#### PR #598 — 597-Enhancement correct the privacy policy for v1.15.1
+
+### Changes
+* Updated the GitHub issues disclosure: message content can go into a new issue, or into the title, description or a comment of an existing one (Edit from #252), not only a comment
+* Set "Last updated" to October 7, 2026 in the module, `PRIVACY_POLICY.md`, and the test
+* Added tests pinning the new wording in both copies
+
+### Notes
+`remaining7.netlify.app/privacy` rebuilds itself when this reaches `main` (#589's workflow, which needs the `NETLIFY_BUILD_HOOK` secret).
+
+Closes #597
+
+#### PR #600 — 599-Enhancement audit docs and help commands for v1.15.1
+
+### Changes
+* Removed Gems from the README Brawl currencies line and the `/profile` section of `docs/BRAWL_COLLECTION.md` (#481 removed the currency)
+* Checked the rest against the code with no other drift found: no removed #481 helper is named outside `docs/logs/`, every help embed describes the GitHub Issue command, negative `/drop` and the staff negative-only rule correctly, and the README tree lists `redeploy-website.yml`
+
+Closes #599
+
+#### PR #602 — 601-Enhancement update documentation for v1.15.1 release
+
+### Changes
+* Added the v1.15.1 section to `docs/logs/SPECS.md`: an as-implemented entry and verdict for #252, #481, #579, #589, #597, #599 and this ticket, plus the one-line bump entry for #591
+* Added the v1.15.1 section to `docs/logs/CHANGELOG.md`: the release notes and every PR description
+
+Closes #601

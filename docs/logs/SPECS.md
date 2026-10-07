@@ -4624,3 +4624,100 @@ Implemented in `3aeef91`. Files: `docs/logs/SPECS.md`, `docs/logs/CHANGELOG.md`
 ✅ Reviewed against the diff: implementation matches the filed spec.
 
 📝 Review note: Self-referential. This is the release-doc pass that wrote this v1.15.0 SPECS section, along with the v1.15.0 CHANGELOG release notes and PR descriptions. Epic #563 has no branch or commits of its own and is covered through its sub-issues.
+
+### v1.15.1 — 2026-10-07
+
+#### #252 — Feature: AI Classification for Editing Existing GitHub Issues (Feature)
+
+> ### Technical Requirements
+> - [ ] Implement AI logic to distinguish between requests for new tickets and requests to modify existing tickets.
+> - [ ] Develop AI capabilities to identify the relevant existing GitHub issue based on user input (e.g., keywords, issue ID, context).
+> - [ ] Integrate with GitHub API to allow the bot to update existing issue fields (e.g., comments, labels, status, description).
+> - [ ] Define rules or models for how the AI should generate edits based on the user's message.
+>
+> ### Acceptance Criteria
+> - [ ] The bot's AI correctly classifies user messages as requiring an edit to an existing issue…(truncated)
+
+Implemented in `8e9aa7f`, `9df8cd1`. Files: `features/github_tickets.py`, `features/general.py`, `features/privacy_policy.py`, `PRIVACY_POLICY.md`, `README.md`, `docs/GITHUB_TICKETS.md`, `docs/ERROR_REPORTING.md`, `tests/test_github_tickets.py`, `tests/test_general.py`, `tests/test_privacy_policy.py`
+
+⚠️ as-implemented differs from #252: the AI does not classify new vs edit. The user picks with Create / Edit / Cancel buttons after the trigger. The target issue is found only from the first `#N` or issue URL in the text, not from keywords or context; with no number the bot replies with a hint. Unspecced additions: a preview with Apply / Cancel before anything is written, title editing, close/reopen with a state reason, `#N` references as read-only context when creating, `protect_sections()` keeping the Logs and Branch sections word for word on a description rewrite, and the "Create GitHub Issue" message command renamed to "GitHub Issue".
+
+📝 Review note: A right-click edit always adds a comment carrying the original message, even when the request only relabels or closes. Gemini's edit reply is treated as untrusted and filtered by `validate_changes()` (labels must exist in the repo, titles at most 256 characters, no-op changes dropped). Only the ticket creator can use it, as with create.
+
+#### #481 — Enhancement: Remove dead DB helpers and write-only settings (unused mongo functions, uncredited "gems" currency, never-read redeemed_count counters) (Enhancement)
+
+> ### Technical Requirements
+> - [ ] Delete `set_booster_discount_month` (`mongo.py:310`) — the getter stays; the write already happens in `purchase_item`.
+> - [ ] Delete `deduct_coins` (`mongo.py:1383`).
+> - [ ] For `add_brawl_gems` / `currencies.gems`: decide whether gems are a planned currency. If not, delete `add_brawl_gems` and drop the `gems` field from the `currencies` init (`mongo.py:49`) and default (`mongo.py:1363`)…(truncated)
+
+Implemented in `d017e32`, `dc5d9bf`, `c46bdfd`. Files: `database/mongo.py`, `features/economy.py`, `features/brawl/drops.py`, `docs/DATABASE.md`, `docs/BRAWL_DROPS.md`, `tests/test_drops.py`, `tests/test_economy.py`, `tests/test_mongo_users.py`
+
+⚠️ as-implemented differs from #481: scope grew past the three named helpers. Four more uncalled functions were removed (`deduct_credits`, `get_brawl_currencies`, `get_booster_shoutout_month`, `shop_item_autocomplete`), and `add_brawl_coins`, `add_power_points` and `add_credits` were replaced by one `add_currency(user_id, currency, amount)` that raises on an unknown currency, which also rewrote the reward branches in `features/brawl/drops.py`. The tombstone tests added in `d017e32` (`tests/test_dead_code_removal.py`) were deleted again in `c46bdfd` in favor of behavior tests.
+
+📝 Review note: Both judgment calls went to delete: Gems were dropped rather than adopted, and the redeem counters were removed rather than given a reader. The first commit, `d017e32` (August 31), sat on the branch until the PR merged on October 1, so it lands in this release. `README.md` and `docs/BRAWL_COLLECTION.md` still listed Gems until #599.
+
+#### #579 — Bug: /drop command fails with ValueError when given negative amount (Bug)
+
+> ### Acceptance Criteria
+> - [ ] The command successfully processes negative numeric amounts for drop claims.
+> - [ ] No `ValueError` related to `custom_id 'drop_claim:-100'` occurs when attempting to use negative amounts…(truncated)
+
+Implemented in `b52ad53`, `71716c7`, `eff9e44`. Files: `features/economy.py`, `features/general.py`, `README.md`, `docs/TOKEN_SYSTEM.md`, `tests/test_drop_claim_negative.py`
+
+⚠️ as-implemented differs from #579: the filed bug asked only for negative amounts to stop crashing; its Impact section called staff claiming negative drops a future feature. That feature shipped here: moderators, admins and trial moderators (the same set `/buy` and `/redeem` block) can claim a negative drop but not a positive or zero one, where before all moderators were blocked from every drop and admins and trial moderators were not checked at all. The claim confirmation also changed from "+-100 Tokens added" to "-100 Tokens removed". The ticket's acceptance criteria were amended on October 7 to add these, after the first fix commit.
+
+📝 Review note: A negative claim is a plain `$inc`, so it can take a balance below zero. `b52ad53` does not follow the `<branch> <verb> <desc>` commit format.
+
+#### #589 — Feature: Automated Netlify Website Redeploy on Main Push (Feature)
+
+> ### Technical Requirements
+> - [ ] Create a new GitHub Actions workflow file at `.github/workflows/redeploy-website.yml`.
+> - [ ] Configure the workflow to run on every `push` event to the `main` branch.
+> - [ ] Implement a step to send a POST request to the Netlify build hook.
+> - [ ] Ensure the Netlify build hook URL is accessed via a repository secret named `NETLIFY_BUILD_HOOK`…(truncated)
+
+Implemented in `343d8b9`. Files: `.github/workflows/redeploy-website.yml`, `README.md`, `docs/PRIVACY_SYSTEM.md`
+
+✅ Reviewed against the diff: implementation matches the filed spec.
+
+📝 Review note: The acceptance criteria about a push actually rebuilding the site cannot be checked from the diff; the first push to `main` with this workflow is v1.15.1 itself, and it fails in the Actions tab if the `NETLIFY_BUILD_HOOK` secret is missing. This removes the manual Netlify update that #581 and #585 called for, so #597 needed none.
+
+#### #591 — Enhancement: Bump project version to v1.15.1 in pyproject.toml (Enhancement)
+
+Version bump only. Implemented in `5995fe8`.
+
+#### #597 — Enhancement: Correct the privacy policy for v1.15.1 (Enhancement)
+
+> ### Current Behavior
+> - #252 reworded the GitHub issues bullet but left "Last updated" at September 30, 2026.
+> - The bullet says message content ends up "on a new issue or as a comment on an existing one". Edit (#252) can also rewrite an existing issue's title or description from it…(truncated)
+
+Implemented in `66f2df7`. Files: `features/privacy_policy.py`, `PRIVACY_POLICY.md`, `tests/test_privacy_policy.py`
+
+✅ Reviewed against the diff: implementation matches the filed spec.
+
+📝 Review note: The title/description wording holds because a right-click edit sends the quoted message to Gemini as part of the request (`build_description`), so its rewrite can carry that text; the verbatim log block itself only ever goes into a comment. The ticket first said the Netlify copy needed a manual update; that was corrected the same day, since #589 rebuilds it.
+
+#### #599 — Enhancement: Full documentation & help-command audit for v1.15.1 (Enhancement)
+
+> ### Technical Requirements
+> - [ ] Remove Gems from the README Brawl currencies line and the `/profile` section of `docs/BRAWL_COLLECTION.md`
+> - [ ] No removed #481 helper (`add_brawl_gems`, `get_brawl_currencies`, `_increment_redeem_counter`, etc.) named outside `docs/logs/`…(truncated)
+
+Implemented in `8393e39`. Files: `README.md`, `docs/BRAWL_COLLECTION.md`
+
+✅ Reviewed against the diff: implementation matches the filed spec.
+
+📝 Review note: Gems was the only drift found; the rest of the audit was a check with no changes.
+
+#### #601 — Enhancement: Update documentation for v1.15.1 release (Enhancement)
+
+> ### Proposed Behavior
+> Both cover everything since `v1.15.0`: #252, #481, #579, #589, and the release tickets (#591, #597, #599)…(truncated)
+
+Implemented in `<pending — set to the 601-Enhancement doc commit sha once committed>`. Files: `docs/logs/SPECS.md`, `docs/logs/CHANGELOG.md`
+
+✅ Reviewed against the diff: implementation matches the filed spec.
+
+📝 Review note: This entry was written by the ticket it describes.
