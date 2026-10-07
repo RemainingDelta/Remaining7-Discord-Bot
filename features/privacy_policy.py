@@ -20,7 +20,7 @@ from discord.ext import commands
 from features.config import OTHER_TICKET_CHANNEL_ID, PRIVACY_CHANNEL_ID
 
 POLICY_TITLE = "Remaining 7 Bot Privacy Policy"
-LAST_UPDATED = "September 30, 2026"
+LAST_UPDATED = "October 7, 2026"
 
 # The same policy, hosted on the web. Linked at the foot of the last embed for
 # anyone who wants to read or share it outside Discord. This is the one external
@@ -179,8 +179,9 @@ POLICY_PARTS: tuple[PolicyPart, ...] = (
                     "a new issue or add it to an existing one. That message's "
                     "text, embed contents, attachment filenames and a link to "
                     "it, plus any notes they add, are sent to Google's Gemini "
-                    "API and to GitHub, where they appear on a new issue or as "
-                    "a comment on an existing one, both publicly visible. "
+                    "API and to GitHub, where they appear on a new issue, or in "
+                    "the title, description or a comment of an existing one, "
+                    "all publicly visible. "
                     "Attached log files are copied in full, so your "
                     "words and files can end up on a public page. They can also "
                     "@mention the bot with a description, which sends only "
