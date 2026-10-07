@@ -70,7 +70,7 @@ Tiers (lowest to highest): `Rare → Super Rare → Epic → Mythic → Legendar
 The central award function handles all reward types:
 
 ### Currencies (`coins`, `power_points`, `credits`)
-Direct DB write: `add_brawl_coins()`, `add_power_points()`, or `add_credits()`. Returns a formatted string with emoji and amount.
+Direct DB write: `add_currency(user_id, currency, amount)`, which rejects anything outside `BRAWL_CURRENCIES` (`coins`, `power_points`, `credits`). Returns a formatted string with emoji and amount.
 
 ### Brawler
 1. Filters `BRAWLER_ROSTER` by the reward's `rarity` field

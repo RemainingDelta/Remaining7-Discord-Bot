@@ -114,17 +114,6 @@ async def ensure_monthly_budget_state() -> None:
     await set_setting("monthly_budget", f"{DEFAULT_MONTHLY_BUDGET:.2f}")
     await set_setting("manual_total_spent", "0.00")
 
-    # Keep legacy counters aligned with month rollover.
-    for key in (
-        "brawlpass_redeemed_count",
-        "brawlpass+_redeemed_count",
-        "nitro_redeemed_count",
-        "paypal_redeemed_count",
-        "shoutout_redeemed_count",
-        "pin_redeemed_count",
-    ):
-        await set_setting(key, "0")
-
 
 async def get_budget_totals() -> tuple[float, float, float]:
     await ensure_monthly_budget_state()
@@ -291,20 +280,6 @@ def _redemption_instructions(item: str) -> str:
     if "shoutout" in item:
         return "- Provide the message you want to be shouted out."
     return "- Provide necessary details."
-
-
-async def _increment_redeem_counter(item: str) -> None:
-    tracking_keys = {
-        "brawl pass": "brawlpass_redeemed_count",
-        "brawl pass+": "brawlpass+_redeemed_count",
-        "nitro": "nitro_redeemed_count",
-        "paypal": "paypal_redeemed_count",
-        "shoutout": "shoutout_redeemed_count",
-    }
-    if item in tracking_keys:
-        key = tracking_keys[item]
-        current = int(await get_setting(key, "0"))
-        await set_setting(key, str(current + 1))
 
 
 async def create_redemption_ticket(
@@ -771,17 +746,6 @@ class RedemptionQueueConfirmView(discord.ui.View):
         self.stop()
 
 
-# Helper
-async def shop_item_autocomplete(
-    interaction: discord.Interaction, current: str
-) -> list[app_commands.Choice[str]]:
-    choices = []
-    for key, data in SHOP_DATA.items():
-        if current.lower() in key.lower() or current.lower() in data["display"].lower():
-            choices.append(app_commands.Choice(name=data["display"], value=key))
-    return choices[:25]
-
-
 # --- VIEWS ---
 
 
@@ -988,7 +952,7 @@ class ShopPaginationView(discord.ui.View):
 
 class DropClaimButton(
     discord.ui.DynamicItem[discord.ui.Button],
-    template=r"drop_claim:(?P<amount>\d+)",
+    template=r"drop_claim:(?P<amount>-?\d+)",
 ):
     """Persistent claim button for supply/booster/admin drops.
 
@@ -1017,9 +981,12 @@ class DropClaimButton(
     async def callback(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
 
-        if any(role.id == MODERATOR_ROLE_ID for role in interaction.user.roles):
+        # Staff may claim negative drops (a deduction), never positive ones.
+        staff_roles = {TRIAL_MODERATOR_ROLE_ID, MODERATOR_ROLE_ID, ADMIN_ROLE_ID}
+        is_staff = any(role.id in staff_roles for role in interaction.user.roles)
+        if is_staff and self.amount >= 0:
             await interaction.followup.send(
-                "❌ Staff cannot claim supply drops!", ephemeral=False
+                "❌ Staff can only claim negative supply drops!", ephemeral=False
             )
             return
 
@@ -1053,9 +1020,11 @@ class DropClaimButton(
             f"**{self.amount} Tokens**!"
         )
         await interaction.edit_original_response(embed=embed, view=view)
-        await interaction.followup.send(
-            f"🎉 **+{self.amount} Tokens** added to your account!", ephemeral=True
-        )
+        if self.amount >= 0:
+            result = f"🎉 **+{self.amount} Tokens** added to your account!"
+        else:
+            result = f"💸 **{self.amount} Tokens** removed from your account!"
+        await interaction.followup.send(result, ephemeral=True)
 
 
 def build_drop_view(amount: int) -> discord.ui.View:
@@ -1385,7 +1354,6 @@ class Economy(commands.Cog):
 
             try:
                 ch = await create_redemption_ticket(guild, member, item, cost)
-                await _increment_redeem_counter(item)
                 # Record the channel so a crash after this point is decidable on
                 # reconcile (channel present → ticket exists → no refund).
                 await set_redemption_queue_entry_channel(str(entry["_id"]), ch.id)
@@ -1827,7 +1795,6 @@ class Economy(commands.Cog):
             # Record the ticket so a crash after this point is decidable on
             # reconcile (ticket exists → no refund), then finish bookkeeping.
             await set_pending_redemption_channel(user_id, pending_id, ch.id)
-            await _increment_redeem_counter(item)
             await clear_pending_redemption(user_id, pending_id)
 
             instructions = _redemption_instructions(item)

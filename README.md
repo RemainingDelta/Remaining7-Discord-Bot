@@ -2,7 +2,7 @@
 
 ## Overview
 **Name:** Remaining7 Discord Bot
-**Version:** v1.15.0
+**Version:** v1.15.1
 **Contributors:** remainingdelta, nightwarrior5
 **Objective:** A feature-rich Discord bot for the Remaining7 community server (16k+ members). Handles an R7 Token economy, leveling, quests, a Brawl Stars collection minigame, tournament management with Matcherino integration, support tickets, event operations, a security protocol, and multi-language translation.
 **Server Link:** https://discord.gg/6MzrjS2X8k
@@ -52,7 +52,7 @@ Remaining7-Discord-Bot/
 │   ├── story.py                     # Collaborative one-word story game (staff-run, moderated)
 │   ├── sticky.py                    # "Set Sticky" message command / /unsticky persistent channel messages
 │   ├── support_tickets.py           # General support tickets (issues, support, apps, partnership)
-│   ├── github_tickets.py            # "Create GitHub Issue" message command & @mention issue creation (Gemini)
+│   ├── github_tickets.py            # "GitHub Issue" message command & @mention: create or edit issues (Gemini)
 │   ├── event_tickets.py             # Private event answer-submission tickets
 │   ├── ticket_command_router.py     # Routes /close, /delete, /reopen to every ticket type
 │   ├── interaction_context.py       # Runs ctx-based flows from slash commands (tourney, tickets)
@@ -88,7 +88,8 @@ Remaining7-Discord-Bot/
         ├── version-check.yml        # Blocks PRs into main without a pyproject.toml version bump
         ├── pr-issue-reference-check.yml  # Verifies issue number matches across branch/title/body
         ├── pr-title-format-check.yml     # Enforces PR title shape on PRs into dev (no colon, lowercase verb)
-        └── strip-pr-footer.yml           # Strips the Claude Code footer from PR bodies targeting dev
+        ├── strip-pr-footer.yml           # Strips the Claude Code footer from PR bodies targeting dev
+        └── redeploy-website.yml          # Rebuilds the Netlify site (/privacy) on every push to main
 ```
 
 ---
@@ -98,7 +99,7 @@ Remaining7-Discord-Bot/
 ### R7 Token Economy
 - **Passive Income:** Users earn 2–5 R7 Tokens per message (20-second cooldown), restricted to the general and booster channels. Server Boosters get a ~10% increase in tokens on average.
 - **Daily Rewards:** `/daily` grants a random 80–160 tokens, increased 5% per level above 1. Requires 5 messages sent since last claim and a 24-hour cooldown.
-- **Supply Drop:** `/drop <amount>` (Admin) to force a token drop in general chat.
+- **Supply Drop:** `/drop <amount>` (Admin) to force a token drop in general chat. A negative amount deducts tokens from the claimer; staff can claim only negative drops.
 - **Balance & Ranking:** `/balance [user]`, `/leaderboard token`.
 - **Give & Set:** `/give <user> <token/xp/level> <amount>`, `/set-balance <user> <amount>` (Admin).
 - **Guide:** `/economy-help` for a full user-facing guide.
@@ -148,7 +149,7 @@ Every user always has **4 active quests** — one daily and one weekly per categ
 - **Progression:**
   - `/upgrade <brawler>` — interactive upgrade dashboard (Level 1–11).
   - `/buy-ability <brawler>` — Gadgets (Lvl 7+), Star Powers (Lvl 9+), Hypercharges (Lvl 11+).
-- **Currencies:** Coins, Power Points, Credits, Gems (separate from R7 Tokens).
+- **Currencies:** Coins, Power Points, Credits (separate from R7 Tokens).
 - **Rarities:** Starting, Rare, Super Rare, Epic, Mythic, Legendary, Ultra Legendary, Chromatic.
 - New users auto-receive Shelly at Level 1. Duplicate brawlers convert to Power Points.
 
@@ -208,9 +209,11 @@ Every user always has **4 active quests** — one daily and one weekly per categ
 - Deleting saves a transcript to the event transcript channel and DMs a copy to the opener, re-uploading up to 25 images from the ticket so submissions survive the channel being deleted.
 
 ### GitHub Ticket Integration
-- AI-powered GitHub issue creation for one authorized staff member. Gemini classifies the description as a bug, enhancement, or feature and fills in the matching template.
-- **Create GitHub Issue** (right-click a message → Apps) — opens a modal for optional notes, then a Yes/No prompt. The message's text, embed contents, attached `.txt`/`.log` files (copied in verbatim), attachment filenames, and a permanent link back to it are attached to the issue. Turns a member's bug report or an error post in the bot logs channel into a filed issue in one step.
-- **@mention** the bot with a description as a fallback. Replying to a message while mentioning no longer pulls that message in; right-click it instead.
+- AI-powered GitHub issue management for one authorized staff member. After a mention or right-click the bot offers **Create new issue**, **Edit existing issue**, or **Cancel**, and each choice runs its own Gemini prompt.
+- **Create:** Gemini classifies the description as a bug, enhancement, or feature and fills in the matching template. Any `#N` in the text (e.g. "like #512") is read as a reference for the new issue and left unchanged.
+- **Edit:** needs an issue number (`#540` or an issue URL); the first one is the target. It does exactly what was asked: edit the description or title, comment, add or remove labels, and close (completed / not planned) or reopen, e.g. `@bot close #540 with this comment "fixed"`. The bot previews every change (a diff for the description) with **Apply** / **Cancel** before touching GitHub, and lists anything it can't do, like a label that doesn't exist, as skipped. Logs and the branch block are always kept word for word.
+- **GitHub Issue** (right-click a message → Apps): opens a modal for optional notes, then the choice. The message's text, embed contents, attached `.txt`/`.log` files (copied in verbatim), attachment filenames, and a permanent link back to it go into the new issue, or into a comment on the edited one. Turns a member's bug report or an error post in the bot logs channel into an issue or an update in one step.
+- **@mention** the bot with a description, e.g. `@bot close #540, fixed in v2.3`. Replying to a message while mentioning does not pull that message in; right-click it instead.
 - Requires `GEMINI_TOKEN` and `GITHUB_TOKEN` environment variables. See [`docs/GITHUB_TICKETS.md`](docs/GITHUB_TICKETS.md).
 
 ### Error Reporting

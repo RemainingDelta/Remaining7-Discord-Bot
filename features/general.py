@@ -184,7 +184,7 @@ class General(commands.Cog):
 
         # --- Economy Management ---
         economy_text = (
-            "`/drop <amount>` - Manual supply drop in general.\n"
+            "`/drop <amount>` - Manual supply drop in general (negative deducts; staff can claim only negative drops).\n"
             "`/give <user> <tokens/xp> <amount>` - Grant resources.\n"
             "`/set-balance <user> <amount>` - Hard reset of a user's tokens.\n"
             "`/set-budget <amount>` - Override the monthly reward budget."
@@ -225,7 +225,7 @@ class General(commands.Cog):
         # --- Quest Management ---
         tools_text = (
             "`/support-panel` - Post the support ticket panel.\n"
-            "**Create GitHub Issue** - Right-click a message → Apps to file it as a GitHub issue (ticket creator only)."
+            "**GitHub Issue** - Right-click a message → Apps, or @mention the bot, to create a GitHub issue or edit an existing one by its #number (ticket creator only)."
         )
         embed.add_field(name="🛠️ Server & Dev Tools", value=tools_text, inline=False)
 

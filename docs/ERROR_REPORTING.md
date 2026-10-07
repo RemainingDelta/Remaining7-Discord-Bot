@@ -96,7 +96,7 @@ The channel is resolved before the rate limiter is consulted, so an undeliverabl
 ## Notes
 - If `BOT_LOGS_CHANNEL_ID` does not resolve to a text channel, `report_error` returns silently. A misconfigured ID means no reports at all, with nothing to say so — verify the channel exists on both servers.
 - The channel is staff-only by design: tracebacks and exception strings can contain user IDs and command arguments. This is disclosed in `PRIVACY_POLICY.md`.
-- An error post is the intended input to `docs/GITHUB_TICKETS.md`'s reply flow — reply to one, @-mention the bot, and the traceback goes into the issue.
+- An error post is the intended input to `docs/GITHUB_TICKETS.md`: right-click it → Apps → GitHub Issue, and the error goes into a new issue, or into a comment on an existing one if you pick Edit and name its number.
 
 ---
 

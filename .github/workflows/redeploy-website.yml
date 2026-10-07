@@ -1,0 +1,14 @@
+# Rebuilds the Remaining7-Web site on Netlify whenever main changes,
+# so the website's /privacy page picks up the latest PRIVACY_POLICY.md.
+name: Redeploy website
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  trigger-netlify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Netlify build hook
+        run: curl -fsS -X POST -d '{}' "${{ secrets.NETLIFY_BUILD_HOOK }}"

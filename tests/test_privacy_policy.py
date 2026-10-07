@@ -161,7 +161,7 @@ def test_last_embed_carries_the_last_updated_date():
 
 
 def test_last_updated_matches_the_filed_date():
-    assert LAST_UPDATED == "September 30, 2026"
+    assert LAST_UPDATED == "October 7, 2026"
 
 
 def test_transcript_disclosure_names_every_kind_of_ticket():
@@ -210,9 +210,11 @@ def test_message_content_is_not_said_to_power_commands():
 
 def test_github_issue_disclosure_describes_the_right_click_command():
     # #575 replaced reply + @mention with a message command, and stopped
-    # reading replied-to messages.
+    # reading replied-to messages. #252 renamed it and added comments on
+    # existing issues, which are just as public.
     body = _section("When information leaves Discord").body
-    assert "Create GitHub Issue" in body
+    assert "choose GitHub Issue" in body
+    assert "a comment of an existing one" in body
     assert "as a reply" not in body
     assert "gemini" in body.lower() and "github" in body.lower()
 
@@ -227,7 +229,8 @@ def test_translation_providers_are_disclosed():
 
 def test_markdown_copy_carries_the_same_corrections():
     text = _markdown()
-    assert "Create GitHub Issue" in text
+    assert "choose GitHub Issue" in text
+    assert "a comment of an existing one" in text
     assert "MyMemory" in text
     assert "as a reply" not in text
     assert "features like commands" not in text
@@ -513,3 +516,19 @@ def test_privacy_channel_id_is_set_in_both_config_branches():
     )
     assert "PRIVACY_CHANNEL_ID" in assigned_names(split.body)
     assert "PRIVACY_CHANNEL_ID" in assigned_names(split.orelse)
+
+
+# --- v1.15.1 corrections (#597) ---
+
+
+def test_github_disclosure_covers_editing_an_existing_issue():
+    # #252's Edit can rewrite an existing issue's title or description from the
+    # message, not just comment on it. The policy said only "as a comment".
+    body = _section("When information leaves Discord").body
+    assert "title, description or a comment of an existing one" in body
+
+
+def test_markdown_copy_covers_editing_an_existing_issue():
+    text = _markdown()
+    assert "title, description or a comment of an existing one" in text
+    assert "Last updated: October 7, 2026" in text

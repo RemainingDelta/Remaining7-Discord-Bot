@@ -34,7 +34,7 @@ Each user has a brawler collection stored under `users.brawlers` in MongoDB — 
 
 Reads the full `users` document and displays:
 - R7 Token balance
-- Brawl currencies (Coins, Power Points, Credits, Gems)
+- Brawl currencies (Coins, Power Points, Credits)
 - Collection count: `owned / total` brawlers
 - Average brawler level
 - Level 11 brawler count
