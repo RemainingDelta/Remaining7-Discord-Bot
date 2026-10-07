@@ -982,7 +982,8 @@ class DropClaimButton(
         await interaction.response.defer(ephemeral=True)
 
         # Staff may claim negative drops (a deduction), never positive ones.
-        is_staff = any(role.id == MODERATOR_ROLE_ID for role in interaction.user.roles)
+        staff_roles = {TRIAL_MODERATOR_ROLE_ID, MODERATOR_ROLE_ID, ADMIN_ROLE_ID}
+        is_staff = any(role.id in staff_roles for role in interaction.user.roles)
         if is_staff and self.amount >= 0:
             await interaction.followup.send(
                 "❌ Staff can only claim negative supply drops!", ephemeral=False

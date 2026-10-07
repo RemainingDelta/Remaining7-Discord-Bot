@@ -14,7 +14,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import discord
 import pytest
 
-from features.config import MODERATOR_ROLE_ID
+from features.config import ADMIN_ROLE_ID, MODERATOR_ROLE_ID, TRIAL_MODERATOR_ROLE_ID
 from features.economy import DropClaimButton, build_drop_view
 
 
@@ -85,23 +85,33 @@ async def _click(button, interaction):
     return inc
 
 
+STAFF_ROLES = pytest.mark.parametrize(
+    "role_id",
+    [MODERATOR_ROLE_ID, ADMIN_ROLE_ID, TRIAL_MODERATOR_ROLE_ID],
+    ids=["moderator", "admin", "trial_moderator"],
+)
+
+
 @pytest.mark.asyncio
-async def test_staff_can_claim_negative_drop(mock_interaction):
-    interaction = _claim_interaction(mock_interaction, [MODERATOR_ROLE_ID])
+@STAFF_ROLES
+async def test_staff_can_claim_negative_drop(mock_interaction, role_id):
+    interaction = _claim_interaction(mock_interaction, [role_id])
     inc = await _click(DropClaimButton(-100), interaction)
     inc.assert_awaited_once_with("987654321", -100)
 
 
 @pytest.mark.asyncio
-async def test_staff_cannot_claim_positive_drop(mock_interaction):
-    interaction = _claim_interaction(mock_interaction, [MODERATOR_ROLE_ID])
+@STAFF_ROLES
+async def test_staff_cannot_claim_positive_drop(mock_interaction, role_id):
+    interaction = _claim_interaction(mock_interaction, [role_id])
     inc = await _click(DropClaimButton(100), interaction)
     inc.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_staff_cannot_claim_zero_drop(mock_interaction):
-    interaction = _claim_interaction(mock_interaction, [MODERATOR_ROLE_ID])
+@STAFF_ROLES
+async def test_staff_cannot_claim_zero_drop(mock_interaction, role_id):
+    interaction = _claim_interaction(mock_interaction, [role_id])
     inc = await _click(DropClaimButton(0), interaction)
     inc.assert_not_awaited()
 
