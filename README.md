@@ -149,7 +149,7 @@ Every user always has **4 active quests** — one daily and one weekly per categ
 - **Progression:**
   - `/upgrade <brawler>` — interactive upgrade dashboard (Level 1–11).
   - `/buy-ability <brawler>` — Gadgets (Lvl 7+), Star Powers (Lvl 9+), Hypercharges (Lvl 11+).
-- **Currencies:** Coins, Power Points, Credits, Gems (separate from R7 Tokens).
+- **Currencies:** Coins, Power Points, Credits (separate from R7 Tokens).
 - **Rarities:** Starting, Rare, Super Rare, Epic, Mythic, Legendary, Ultra Legendary, Chromatic.
 - New users auto-receive Shelly at Level 1. Duplicate brawlers convert to Power Points.
 
