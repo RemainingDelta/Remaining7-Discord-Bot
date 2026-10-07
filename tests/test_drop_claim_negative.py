@@ -9,8 +9,12 @@ Cases are derived from the issue's Acceptance Criteria:
 - no ValueError related to custom_id 'drop_claim:-100' occurs
 """
 
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import discord
 import pytest
 
+from features.config import MODERATOR_ROLE_ID
 from features.economy import DropClaimButton, build_drop_view
 
 
@@ -56,3 +60,64 @@ def test_positive_amount_still_works():
     match = DropClaimButton.__discord_ui_compiled_template__.match("drop_claim:250")
     assert match is not None
     assert int(match["amount"]) == 250
+
+
+# --- Staff may claim negative drops only (#579) ---
+
+
+def _claim_interaction(mock_interaction, role_ids):
+    mock_interaction.user.roles = [MagicMock(id=rid) for rid in role_ids]
+    mock_interaction.user.mention = "<@987654321>"
+    mock_interaction.message = MagicMock()
+    mock_interaction.message.id = 555
+    mock_interaction.message.channel.id = 0
+    mock_interaction.message.embeds = [discord.Embed()]
+    mock_interaction.edit_original_response = AsyncMock()
+    return mock_interaction
+
+
+async def _click(button, interaction):
+    with (
+        patch("features.economy.claim_drop", AsyncMock(return_value=True)),
+        patch("features.economy.increment_user_balance", AsyncMock()) as inc,
+    ):
+        await button.callback(interaction)
+    return inc
+
+
+@pytest.mark.asyncio
+async def test_staff_can_claim_negative_drop(mock_interaction):
+    interaction = _claim_interaction(mock_interaction, [MODERATOR_ROLE_ID])
+    inc = await _click(DropClaimButton(-100), interaction)
+    inc.assert_awaited_once_with("987654321", -100)
+
+
+@pytest.mark.asyncio
+async def test_staff_cannot_claim_positive_drop(mock_interaction):
+    interaction = _claim_interaction(mock_interaction, [MODERATOR_ROLE_ID])
+    inc = await _click(DropClaimButton(100), interaction)
+    inc.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_staff_cannot_claim_zero_drop(mock_interaction):
+    interaction = _claim_interaction(mock_interaction, [MODERATOR_ROLE_ID])
+    inc = await _click(DropClaimButton(0), interaction)
+    inc.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("amount", [100, -100])
+async def test_non_staff_can_claim_any_drop(mock_interaction, amount):
+    interaction = _claim_interaction(mock_interaction, [])
+    inc = await _click(DropClaimButton(amount), interaction)
+    inc.assert_awaited_once_with("987654321", amount)
+
+
+@pytest.mark.asyncio
+async def test_negative_claim_message_shows_signed_amount(mock_interaction):
+    interaction = _claim_interaction(mock_interaction, [])
+    await _click(DropClaimButton(-100), interaction)
+    sent = interaction.followup.send.await_args.args[0]
+    assert "-100 Tokens" in sent
+    assert "+-100" not in sent

@@ -184,7 +184,7 @@ class General(commands.Cog):
 
         # --- Economy Management ---
         economy_text = (
-            "`/drop <amount>` - Manual supply drop in general.\n"
+            "`/drop <amount>` - Manual supply drop in general (negative deducts; staff can claim only negative drops).\n"
             "`/give <user> <tokens/xp> <amount>` - Grant resources.\n"
             "`/set-balance <user> <amount>` - Hard reset of a user's tokens.\n"
             "`/set-budget <amount>` - Override the monthly reward budget."
