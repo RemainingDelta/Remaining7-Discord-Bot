@@ -31,7 +31,6 @@ class General(commands.Cog):
 
         economy_text = (
             "`/balance` - View your token total\n"
-            "`/token-sources` - See where your tokens came from\n"
             "`/daily` - Claim daily tokens & check progress\n"
             "`/quests` - View active daily and weekly quests\n"
             "`/leaderboard token` - See top token holders\n"
@@ -119,7 +118,8 @@ class General(commands.Cog):
         # Economy Oversight
         economy_text = (
             "`/redemption-queue-list` - View queued redemptions awaiting budget.\n"
-            "`/redemption-queue-remove <entry_id>` - Remove a queued redemption."
+            "`/redemption-queue-remove <entry_id>` - Remove a queued redemption.\n"
+            "`/token-sources [user]` - Private breakdown of where a user's tokens came from (also auto-posted in redeem tickets)."
         )
         embed.add_field(name="💰 Economy Oversight", value=economy_text, inline=False)
 

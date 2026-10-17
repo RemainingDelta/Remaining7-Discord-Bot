@@ -52,7 +52,7 @@ On claim:
 |---------|-----|-------|
 | `/balance [user]` | Anyone | Shows token balance; defaults to self |
 | `/economy-stats [days]` | Admin only | Server-wide earned tokens by source over the last `days` UTC days (1-365, default 30); ephemeral |
-| `/token-sources [user]` | Anyone | Percentage breakdown of a user's earned tokens by source; defaults to self (see below) |
+| `/token-sources [user]` | Moderator / Admin | Percentage breakdown of a user's earned tokens by source; defaults to self; ephemeral (see below) |
 | `/give <user> <tokens/xp/levels> <amount>` | Admin only | Grants tokens via atomic `increment_user_balance()` tagged `admin`; no transfer from the caller |
 | `/set-balance <user> <amount>` | Admin only | Directly sets balance, no transfer logic |
 | `/leaderboard token` | Anyone | Paginated 10-per-page view using `LeaderboardView`; shows your rank in the footer |
@@ -112,7 +112,9 @@ Rules:
 - Only **positive** grants count. A negative drop or negative `/give` moves the balance but doesn't reduce "earned".
 - Tracking starts at deploy. Tokens earned before it are not in anyone's breakdown, so the command's footer says it counts tokens "since tracking began".
 
-`/token-sources [user]` (anyone, defaults to self) reads the map with `get_token_sources()`, which reads the doc directly rather than through `get_user_data()` so looking someone up doesn't create a brawl profile. `token_source_breakdown()` turns it into `(source, tokens, percent)` rows, largest first, dropping zero and unknown keys so the percentages always sum to 100 over what's shown.
+`/token-sources [user]` is limited to Moderators and Admins (`_is_redemption_staff`; trial moderators and DMs are denied) and replies ephemerally, so only the caller sees it. It defaults to self and reads the map with `get_token_sources()`, which reads the doc directly rather than through `get_user_data()` so looking someone up doesn't create a brawl profile. `token_source_breakdown()` turns it into `(source, tokens, percent)` rows, largest first, dropping zero and unknown keys so the percentages always sum to 100 over what's shown. `_token_sources_embed()` builds the embed for both uses below.
+
+**Redemption tickets:** `create_redemption_ticket()` posts the opener's breakdown as a normal message right after the opening embed, so staff see it on every ticket (from `/redeem` and from the monthly queue). The opener can see it too, since it's their own ticket. The post is wrapped in `try/except`: callers record the returned channel right after, and a raise would make the reconcile treat the ticket as missing and refund it.
 
 ### Server-wide log (`/economy-stats`)
 

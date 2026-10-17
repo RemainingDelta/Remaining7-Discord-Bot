@@ -351,6 +351,15 @@ async def create_redemption_ticket(
         inline=True,
     )
     await ch.send(content=member.mention, embed=ticket_embed)
+
+    # Show staff where the opener's tokens came from. Best-effort: callers record
+    # the returned channel right after this, and a raise here would make the
+    # reconcile think no ticket exists and refund a redemption that went through.
+    try:
+        counts = await get_token_sources(str(member.id))
+        await ch.send(embed=_token_sources_embed(member, counts))
+    except Exception as e:
+        print(f"⚠️ Token sources post failed for ticket {ch.id}: {e}")
     return ch
 
 
@@ -806,6 +815,23 @@ def _token_breakdown_lines(counts: dict) -> str:
         f"{TOKEN_SOURCE_LABELS[source]}: **{tokens}** ({pct:.1f}%)"
         for source, tokens, pct in token_source_breakdown(counts)
     )
+
+
+def _token_sources_embed(target: discord.abc.User, counts: dict) -> discord.Embed:
+    """The per-user breakdown shown by /token-sources and on redemption tickets."""
+    lines = _token_breakdown_lines(counts)
+    embed = discord.Embed(
+        title=f"📊 {target.display_name}'s Token Sources",
+        description=lines or "No tracked token earnings yet.",
+        color=discord.Color.blue(),
+    )
+    if lines:
+        total = sum(n for _, n, _ in token_source_breakdown(counts))
+        embed.add_field(name="Total Earned", value=f"**{total}** R7 tokens")
+    embed.set_footer(
+        text="Counts tokens earned since tracking began. Refunds aren't counted."
+    )
+    return embed
 
 
 def _leaderboard_footer(page: int, rank: int) -> str:
@@ -1984,28 +2010,24 @@ class Economy(commands.Cog):
 
     @app_commands.command(
         name="token-sources",
-        description="See where your or another user's R7 tokens came from.",
+        description="STAFF ONLY: See where a user's R7 tokens came from.",
     )
     @app_commands.describe(user="The user to check (leave blank for yourself)")
     async def token_sources(
         self, interaction: discord.Interaction, user: Optional[discord.User] = None
     ):
-        await interaction.response.defer()
+        if not _is_redemption_staff(interaction.user):
+            await interaction.response.send_message(
+                "❌ Permission Denied: This command is for Moderators and Admins only.",
+                ephemeral=True,
+            )
+            return
+        await interaction.response.defer(ephemeral=True)
         target = user or interaction.user
         counts = await get_token_sources(str(target.id))
-        lines = _token_breakdown_lines(counts)
-        embed = discord.Embed(
-            title=f"📊 {target.display_name}'s Token Sources",
-            description=lines or "No tracked token earnings yet.",
-            color=discord.Color.blue(),
+        await interaction.followup.send(
+            embed=_token_sources_embed(target, counts), ephemeral=True
         )
-        if lines:
-            total = sum(n for _, n, _ in token_source_breakdown(counts))
-            embed.add_field(name="Total Earned", value=f"**{total}** R7 tokens")
-        embed.set_footer(
-            text="Counts tokens earned since tracking began. Refunds aren't counted."
-        )
-        await interaction.followup.send(embed=embed)
 
     @app_commands.command(
         name="economy-stats",
@@ -2386,7 +2408,6 @@ class Economy(commands.Cog):
         cmd_text = (
             "**Standard Commands:**\n"
             "`/balance` - View your token total\n"
-            "`/token-sources` - See where your tokens came from\n"
             "`/daily` - Claim daily tokens & check progress\n"
             "`/quests` - View active daily and weekly quests\n"
             "`/leaderboard token` - See top token holders\n"
