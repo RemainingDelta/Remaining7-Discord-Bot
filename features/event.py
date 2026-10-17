@@ -210,7 +210,7 @@ class PayoutConfirmView(discord.ui.View):
                 skipped += 1
                 continue
 
-            await increment_user_balance(user_id, amount)
+            await increment_user_balance(user_id, amount, source="event")
             await mark_reward_paid(mid, user_id)  # commit point
 
             paid_log.append(f"<@{user_id}>: +{amount}")
@@ -316,7 +316,7 @@ class PollPayoutConfirmView(discord.ui.View):
             ):
                 skipped += 1
                 continue
-            await increment_user_balance(uid, self.amount)
+            await increment_user_balance(uid, self.amount, source="poll")
             await mark_reward_paid(mid, uid)  # commit point
             paid_count += 1
 

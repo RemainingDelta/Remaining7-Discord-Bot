@@ -31,6 +31,7 @@ Key fields:
 | Field | Type | Purpose |
 |-------|------|---------|
 | `balance` | int | R7 Token balance |
+| `token_sources` | dict | Earned tokens per source (`chat`, `daily`, `drop`, `booster_drop`, `event`, `poll`, `quest`, `admin`). Bumped in the same `$inc` as `balance`; only positive grants count, refunds and `/set-balance` never touch it. See `TOKEN_SYSTEM.md`. |
 | `level` | int | Server level |
 | `exp` | int | Total XP |
 | `daily_last_claimed` | datetime | Last `/daily` claim timestamp |
@@ -174,6 +175,35 @@ The payout loop **claims → pays → commits** per recipient: the claim writes 
 
 ---
 
+### `user_token_days`
+Per-user earning history by UTC day, used to explain how a purchase was paid for (see `TOKEN_SYSTEM.md`, Purchase breakdown). `_id = "{user_id}:{YYYY-MM-DD}"`.
+
+| Field | Type | Purpose |
+|-------|------|---------|
+| `user_id` | str | Earner |
+| `day` | str | UTC day, `YYYY-MM-DD` |
+| `<source>` | int | Tokens earned that day from each source in `TOKEN_SOURCES` |
+
+Upserted `$inc` by `_record_earning()` after each earning grant; best-effort and not atomic with the balance. Index `(user_id, day desc)` from `ensure_token_history_indexes()` (called in `Economy.cog_load`). Not pruned: a 30,000-token item can take months to earn.
+
+---
+
+### `purchase_snapshots`
+One document per `/buy`: how the tokens spent were earned, shown on that item's redemption ticket.
+
+| Field | Type | Purpose |
+|-------|------|---------|
+| `user_id` | str | Buyer |
+| `item` | str | Shop item key |
+| `price` | int | Tokens actually paid (after booster discount) |
+| `breakdown` | dict | `source -> tokens`, summing to `price`; `untracked` for tokens earned before tracking began |
+| `created_at` | datetime | Purchase time (UTC) |
+| `used_channel_id` | int \| null | Ticket that showed it; `null` until claimed |
+
+`claim_purchase_snapshot()` atomically takes the oldest unused snapshot for a user and item. Index `(user_id, item, created_at)`.
+
+---
+
 ### `drop_claims`
 Atomic single-claim guard for token supply/booster/admin drops. One document per drop **message**, keyed by the drop message's ID, recording the first (and only) claimer. Replaces the old in-memory `DropView.claimed` flag so the guard survives a restart and serializes two near-simultaneous clicks.
 
@@ -185,6 +215,15 @@ Atomic single-claim guard for token supply/booster/admin drops. One document per
 | `ts` | datetime | Claim time; a TTL index (`expireAfterSeconds=604800`) auto-expires the record after 7 days |
 
 `claim_drop(message_id, user_id)` does a `find_one_and_update` + `$setOnInsert`: `None` returned means no prior record (this caller won and gets paid via `increment_user_balance`); a returned doc means it was already claimed. `ensure_drop_claims_ttl_index()` (called from `Economy.cog_load`) creates the TTL index.
+
+---
+
+### `token_stats`
+Server-wide log of R7 token generation (#607). One document per UTC day, bumped by every earning grant alongside the user's `token_sources` counter.
+
+`_id = "YYYY-MM-DD"` (UTC). Every other field is a source from `TOKEN_SOURCES` (`chat`, `daily`, `drop`, `booster_drop`, `event`, `poll`, `quest`, `admin`) holding that day's total, e.g. `{"_id": "2026-10-17", "daily": 4200, "chat": 1310}`.
+
+Written by `_log_token_generation()` with an upserted `$inc`, **after** the balance write. It's a separate collection so it can't be atomic with the payout; a failed write is printed and swallowed so analytics never break a payout that already landed. Refunds, deductions and lost `/daily` claims are never logged. `get_token_stats(days)` sums every doc with `_id >= today - (days - 1)`, so `days=1` is today only. Docs are small (one per day) and not pruned.
 
 ---
 
