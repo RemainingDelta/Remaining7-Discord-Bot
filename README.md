@@ -101,6 +101,7 @@ Remaining7-Discord-Bot/
 - **Daily Rewards:** `/daily` grants a random 80–160 tokens, increased 5% per level above 1. Requires 5 messages sent since last claim and a 24-hour cooldown.
 - **Supply Drop:** `/drop <amount>` (Admin) to force a token drop in general chat. A negative amount deducts tokens from the claimer; staff can claim only negative drops.
 - **Balance & Ranking:** `/balance [user]`, `/leaderboard token`.
+- **Token Sources:** `/token-sources [user]` (Mod/Admin, private reply) shows the percentage of a user's earned tokens that came from chatting, daily rewards, supply drops, booster drops, events, polls, quests and staff grants. Refunds aren't counted. Every new redemption ticket automatically shows how the opener earned the tokens they spent on that item, measured back from the purchase.
 - **Give & Set:** `/give <user> <token/xp/level> <amount>`, `/set-balance <user> <amount>` (Admin).
 - **Guide:** `/economy-help` for a full user-facing guide.
 
@@ -368,6 +369,8 @@ Uses MongoDB database `r7_bot_db` with the following collections:
 | `tourney_staff_stats` | Staff performance metrics |
 | `support_ticket_counters` | Ticket counters per type |
 | `settings` | Global bot settings (budget, etc.) |
+| `user_token_days` | Per-user earned tokens per source, one doc per UTC day |
+| `purchase_snapshots` | How the tokens for each `/buy` were earned, shown on the redemption ticket |
 
 ---
 
