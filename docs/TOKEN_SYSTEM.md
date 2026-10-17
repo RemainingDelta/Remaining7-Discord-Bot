@@ -113,7 +113,15 @@ Rules:
 
 `/token-sources [user]` is limited to Moderators and Admins (`_is_redemption_staff`; trial moderators and DMs are denied) and replies ephemerally, so only the caller sees it. It defaults to self and reads the map with `get_token_sources()`, which reads the doc directly rather than through `get_user_data()` so looking someone up doesn't create a brawl profile. `token_source_breakdown()` turns it into `(source, tokens, percent)` rows, largest first, dropping zero and unknown keys so the percentages always sum to 100 over what's shown. `_token_sources_embed()` builds the embed for both uses below.
 
-**Redemption tickets:** `create_redemption_ticket()` posts the opener's breakdown as a normal message right after the opening embed, so staff see it on every ticket (from `/redeem` and from the monthly queue). The opener can see it too, since it's their own ticket. The post is wrapped in `try/except`: callers record the returned channel right after, and a raise would make the reconcile treat the ticket as missing and refund it.
+### Purchase breakdown (redemption tickets)
+
+Lifetime counters can't say how someone got the tokens they spent on a particular item, so each earning grant is also added to a per-user, per-UTC-day history (`user_token_days`, written by `_record_earning()` after the balance write; best-effort, a failure is printed and swallowed). Refunds, deductions and lost `/daily` claims are not recorded, same rules as the counters.
+
+1. **On `/buy`**, after the purchase succeeds and the response is sent, `recent_earnings_breakdown(user_id, price)` walks the user's days newest first until it covers the **price actually paid** (after any booster discount). `split_recent_earnings()` takes whole days, splits the oldest day needed proportionally (order within a day isn't recorded; rounding remainders go to that day's largest source), and puts any shortfall under `untracked` ("⏳ Before tracking"). The result always sums to the price and is saved with `save_purchase_snapshot()`. This is best-effort and never affects the purchase.
+2. **When a redemption ticket opens** (from `/redeem` or the monthly queue), `create_redemption_ticket()` claims the **oldest unused** snapshot for that user and item with `claim_purchase_snapshot()` (atomic, so two copies of one item get one snapshot each) and posts "How {member} earned the {price} tokens for this item" as a normal message after the opening embed. The opener can see it too.
+3. **No snapshot** (the item was granted, or bought before this shipped): the lifetime `/token-sources` breakdown is posted instead, with a note saying so.
+
+Because the history is per day, earnings on the purchase day are split proportionally rather than ordered: if someone gets a staff grant and chats on the same day they buy, both appear in proportion. The whole post is wrapped in `try/except`: callers record the returned channel right after, and a raise would make the reconcile treat the ticket as missing and refund it.
 
 ---
 
