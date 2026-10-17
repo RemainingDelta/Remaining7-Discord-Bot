@@ -15,8 +15,20 @@ import discord
 import pytest
 
 import database.mongo as mongo
-from features.config import BOOSTER_CHANNEL_ID, GENERAL_CHANNEL_ID
-from features.economy import DropClaimButton, Economy, token_source_breakdown
+from features.config import (
+    ADMIN_ROLE_ID,
+    BOOSTER_CHANNEL_ID,
+    GENERAL_CHANNEL_ID,
+    MODERATOR_ROLE_ID,
+    SERVER_BOOSTER_ROLE_ID,
+    TRIAL_MODERATOR_ROLE_ID,
+)
+from features.economy import (
+    DropClaimButton,
+    Economy,
+    create_redemption_ticket,
+    token_source_breakdown,
+)
 from features.event import PayoutConfirmView, PollPayoutConfirmView
 
 
@@ -304,19 +316,81 @@ async def test_poll_payout_is_tagged_poll(monkeypatch):
     increment.assert_awaited_once_with("u1", 5, source="poll")
 
 
-# --- /token-sources ---
+# --- /token-sources (Mod/Admin only, private reply) ---
+
+
+def _as_staff(interaction, *role_ids):
+    interaction.user.roles = [MagicMock(id=rid) for rid in role_ids]
+    interaction.user.display_avatar = MagicMock(url="")
+    return interaction
+
+
+async def _run_command(interaction, monkeypatch, target=None, counts=None):
+    lookup = AsyncMock(return_value=counts or {})
+    monkeypatch.setattr("features.economy.get_token_sources", lookup)
+    await Economy.token_sources.callback(Economy.__new__(Economy), interaction, target)
+    return lookup
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "role_id", [MODERATOR_ROLE_ID, ADMIN_ROLE_ID], ids=["moderator", "admin"]
+)
+async def test_staff_can_use_token_sources(mock_interaction, monkeypatch, role_id):
+    interaction = _as_staff(mock_interaction, role_id)
+
+    lookup = await _run_command(interaction, monkeypatch, counts={"chat": 10})
+
+    lookup.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "role_ids",
+    [(), (TRIAL_MODERATOR_ROLE_ID,), (SERVER_BOOSTER_ROLE_ID,)],
+    ids=["member", "trial_moderator", "booster"],
+)
+async def test_non_staff_are_denied_token_sources(
+    mock_interaction, monkeypatch, role_ids
+):
+    interaction = _as_staff(mock_interaction, *role_ids)
+
+    lookup = await _run_command(interaction, monkeypatch)
+
+    lookup.assert_not_awaited()
+    assert interaction.response.send_message.await_args.kwargs["ephemeral"] is True
+
+
+@pytest.mark.asyncio
+async def test_token_sources_is_denied_in_dms(mock_interaction, monkeypatch):
+    # In a DM the user is a plain discord.User with no roles.
+    mock_interaction.user = MagicMock(spec=discord.User)
+    mock_interaction.user.id = 987654321
+
+    lookup = await _run_command(mock_interaction, monkeypatch)
+
+    lookup.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_token_sources_reply_is_only_visible_to_the_caller(
+    mock_interaction, monkeypatch
+):
+    interaction = _as_staff(mock_interaction, MODERATOR_ROLE_ID)
+
+    await _run_command(interaction, monkeypatch, counts={"chat": 10})
+
+    assert interaction.response.defer.await_args.kwargs["ephemeral"] is True
+    assert interaction.followup.send.await_args.kwargs["ephemeral"] is True
 
 
 @pytest.mark.asyncio
 async def test_token_sources_command_defaults_to_the_caller(
     mock_interaction, monkeypatch
 ):
-    cog = Economy.__new__(Economy)
-    lookup = AsyncMock(return_value={"chat": 10})
-    monkeypatch.setattr("features.economy.get_token_sources", lookup)
-    mock_interaction.user.display_avatar = MagicMock(url="")
+    interaction = _as_staff(mock_interaction, MODERATOR_ROLE_ID)
 
-    await Economy.token_sources.callback(cog, mock_interaction, None)
+    lookup = await _run_command(interaction, monkeypatch, counts={"chat": 10})
 
     lookup.assert_awaited_once_with("987654321")
 
@@ -325,12 +399,69 @@ async def test_token_sources_command_defaults_to_the_caller(
 async def test_token_sources_command_looks_up_the_named_user(
     mock_interaction, monkeypatch
 ):
-    cog = Economy.__new__(Economy)
-    lookup = AsyncMock(return_value={})
-    monkeypatch.setattr("features.economy.get_token_sources", lookup)
-    mock_interaction.user.display_avatar = MagicMock(url="")
+    interaction = _as_staff(mock_interaction, ADMIN_ROLE_ID)
     target = MagicMock(id=42, display_name="Someone")
 
-    await Economy.token_sources.callback(cog, mock_interaction, target)
+    lookup = await _run_command(interaction, monkeypatch, target=target)
 
     lookup.assert_awaited_once_with("42")
+
+
+# --- auto-post on redemption ticket open ---
+
+
+def _ticket_guild():
+    guild = MagicMock(spec=discord.Guild)
+    guild.default_role = MagicMock()
+    guild.get_role = MagicMock(return_value=None)
+    guild.get_channel = MagicMock(return_value=MagicMock(spec=discord.CategoryChannel))
+    channel = MagicMock(spec=discord.TextChannel)
+    channel.set_permissions = AsyncMock()
+    channel.edit = AsyncMock()
+    channel.send = AsyncMock()
+    guild.create_text_channel = AsyncMock(return_value=channel)
+    return guild, channel
+
+
+def _opener():
+    member = MagicMock(spec=discord.Member)
+    member.id = 42
+    member.name = "opener"
+    member.display_name = "Opener"
+    member.mention = "<@42>"
+    return member
+
+
+async def _open_ticket(monkeypatch, lookup):
+    guild, channel = _ticket_guild()
+    monkeypatch.setattr("features.economy.REDEMPTION_TICKET_CATEGORY_ID", 1)
+    monkeypatch.setattr(
+        "features.economy.get_user_balance", AsyncMock(return_value=100)
+    )
+    monkeypatch.setattr("features.economy.get_token_sources", lookup)
+    result = await create_redemption_ticket(guild, _opener(), "nitro", 5.0)
+    return result, channel
+
+
+@pytest.mark.asyncio
+async def test_ticket_open_posts_the_openers_breakdown(monkeypatch):
+    lookup = AsyncMock(return_value={"daily": 300, "chat": 100})
+
+    _, channel = await _open_ticket(monkeypatch, lookup)
+
+    lookup.assert_awaited_once_with("42")
+    embeds = [c.kwargs.get("embed") for c in channel.send.await_args_list]
+    breakdown = [e for e in embeds if e and "Token Sources" in e.title]
+    assert len(breakdown) == 1
+    assert "75.0%" in breakdown[0].description
+
+
+@pytest.mark.asyncio
+async def test_ticket_still_opens_if_the_breakdown_fails(monkeypatch):
+    # Callers record the returned channel; raising here would make reconcile
+    # think no ticket exists and refund a redemption that went through.
+    lookup = AsyncMock(side_effect=RuntimeError("mongo down"))
+
+    result, channel = await _open_ticket(monkeypatch, lookup)
+
+    assert result is channel
