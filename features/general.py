@@ -119,7 +119,7 @@ class General(commands.Cog):
         economy_text = (
             "`/redemption-queue-list` - View queued redemptions awaiting budget.\n"
             "`/redemption-queue-remove <entry_id>` - Remove a queued redemption.\n"
-            "`/token-sources [user]` - Private breakdown of where a user's tokens came from (also auto-posted in redeem tickets)."
+            "`/token-sources [user]` - Private breakdown of where a user's tokens came from (redeem tickets also show how the item's tokens were earned)."
         )
         embed.add_field(name="💰 Economy Oversight", value=economy_text, inline=False)
 

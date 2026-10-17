@@ -16,6 +16,10 @@ from database.mongo import (
     TOKEN_SOURCES,
     get_token_sources,
     get_token_stats,
+    recent_earnings_breakdown,
+    save_purchase_snapshot,
+    claim_purchase_snapshot,
+    ensure_token_history_indexes,
     claim_daily_reward,
     claim_redemption_closure,
     get_leveling_data,
@@ -352,12 +356,24 @@ async def create_redemption_ticket(
     )
     await ch.send(content=member.mention, embed=ticket_embed)
 
-    # Show staff where the opener's tokens came from. Best-effort: callers record
-    # the returned channel right after this, and a raise here would make the
-    # reconcile think no ticket exists and refund a redemption that went through.
+    # Show staff how the tokens for this item were earned. Best-effort: callers
+    # record the returned channel right after this, and a raise here would make
+    # the reconcile think no ticket exists and refund a redemption that went through.
     try:
-        counts = await get_token_sources(str(member.id))
-        await ch.send(embed=_token_sources_embed(member, counts))
+        snapshot = await claim_purchase_snapshot(str(member.id), item, ch.id)
+        if snapshot:
+            embed = _purchase_breakdown_embed(
+                member, snapshot["price"], snapshot["breakdown"]
+            )
+        else:
+            counts = await get_token_sources(str(member.id))
+            embed = _token_sources_embed(member, counts)
+            embed.description = (
+                "*No purchase record for this item (granted, or bought before "
+                "tracking began). Showing lifetime earnings instead.*\n\n"
+                + embed.description
+            )
+        await ch.send(embed=embed)
     except Exception as e:
         print(f"⚠️ Token sources post failed for ticket {ch.id}: {e}")
     return ch
@@ -834,6 +850,28 @@ def _token_sources_embed(target: discord.abc.User, counts: dict) -> discord.Embe
     return embed
 
 
+def _purchase_breakdown_embed(
+    member: discord.abc.User, price: int, breakdown: dict
+) -> discord.Embed:
+    """How the most recent `price` tokens were earned when the item was bought."""
+    labels = {**TOKEN_SOURCE_LABELS, "untracked": "⏳ Before tracking"}
+    rows = sorted(breakdown.items(), key=lambda row: row[1], reverse=True)
+    lines = "\n".join(
+        f"{labels.get(source, source)}: **{tokens}** ({tokens / price * 100:.1f}%)"
+        for source, tokens in rows
+        if tokens > 0
+    )
+    embed = discord.Embed(
+        title=f"📊 How {member.display_name} earned the {price:,} tokens for this item",
+        description=lines,
+        color=discord.Color.blue(),
+    )
+    embed.set_footer(
+        text="Most recent earnings before the purchase, by UTC day. Refunds aren't counted."
+    )
+    return embed
+
+
 def _leaderboard_footer(page: int, rank: int) -> str:
     return f"Page {page + 1} | Your Rank: #{rank}"
 
@@ -1128,6 +1166,10 @@ class Economy(commands.Cog):
             await ensure_drop_claims_ttl_index()
         except Exception as e:
             print(f"⚠️ Economy: could not create drop_claims TTL index: {e}")
+        try:
+            await ensure_token_history_indexes()
+        except Exception as e:
+            print(f"⚠️ Economy: could not create token history indexes: {e}")
 
     def cog_unload(self):
         self.supply_drop_task.cancel()
@@ -1761,6 +1803,15 @@ class Economy(commands.Cog):
         )
         embed.set_footer(text=f"Your new balance: {int(new_balance)} R7 tokens")
         await interaction.response.send_message(embed=embed)
+
+        # Snapshot how the spent tokens were earned, for this item's redemption
+        # ticket. After the response so the history read can't time out the
+        # interaction; best-effort so it can never affect a completed purchase.
+        try:
+            breakdown = await recent_earnings_breakdown(user_id, price)
+            await save_purchase_snapshot(user_id, item, price, breakdown)
+        except Exception as e:
+            print(f"⚠️ Purchase snapshot failed for {user_id} ({item}): {e}")
 
     @app_commands.command(name="redeem", description="Redeem an item you own.")
     @app_commands.describe(item="Select the item you want to redeem.")

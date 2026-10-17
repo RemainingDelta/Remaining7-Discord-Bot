@@ -175,6 +175,35 @@ The payout loop **claims → pays → commits** per recipient: the claim writes 
 
 ---
 
+### `user_token_days`
+Per-user earning history by UTC day, used to explain how a purchase was paid for (see `TOKEN_SYSTEM.md`, Purchase breakdown). `_id = "{user_id}:{YYYY-MM-DD}"`.
+
+| Field | Type | Purpose |
+|-------|------|---------|
+| `user_id` | str | Earner |
+| `day` | str | UTC day, `YYYY-MM-DD` |
+| `<source>` | int | Tokens earned that day from each source in `TOKEN_SOURCES` |
+
+Upserted `$inc` by `_record_earning()` after each earning grant; best-effort and not atomic with the balance. Index `(user_id, day desc)` from `ensure_token_history_indexes()` (called in `Economy.cog_load`). Not pruned: a 30,000-token item can take months to earn.
+
+---
+
+### `purchase_snapshots`
+One document per `/buy`: how the tokens spent were earned, shown on that item's redemption ticket.
+
+| Field | Type | Purpose |
+|-------|------|---------|
+| `user_id` | str | Buyer |
+| `item` | str | Shop item key |
+| `price` | int | Tokens actually paid (after booster discount) |
+| `breakdown` | dict | `source -> tokens`, summing to `price`; `untracked` for tokens earned before tracking began |
+| `created_at` | datetime | Purchase time (UTC) |
+| `used_channel_id` | int \| null | Ticket that showed it; `null` until claimed |
+
+`claim_purchase_snapshot()` atomically takes the oldest unused snapshot for a user and item. Index `(user_id, item, created_at)`.
+
+---
+
 ### `drop_claims`
 Atomic single-claim guard for token supply/booster/admin drops. One document per drop **message**, keyed by the drop message's ID, recording the first (and only) claimer. Replaces the old in-memory `DropView.claimed` flag so the guard survives a restart and serializes two near-simultaneous clicks.
 
