@@ -188,7 +188,8 @@ class General(commands.Cog):
             "`/drop <amount>` - Manual supply drop in general (negative deducts; staff can claim only negative drops).\n"
             "`/give <user> <tokens/xp> <amount>` - Grant resources.\n"
             "`/set-balance <user> <amount>` - Hard reset of a user's tokens.\n"
-            "`/set-budget <amount>` - Override the monthly reward budget."
+            "`/set-budget <amount>` - Override the monthly reward budget.\n"
+            "`/economy-stats [days]` - Server-wide breakdown of where tokens came from (default 30 days)."
         )
         embed.add_field(name="💰 Economy Management", value=economy_text, inline=False)
 

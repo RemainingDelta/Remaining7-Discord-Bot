@@ -51,6 +51,7 @@ On claim:
 | Command | Who | Notes |
 |---------|-----|-------|
 | `/balance [user]` | Anyone | Shows token balance; defaults to self |
+| `/economy-stats [days]` | Admin only | Server-wide earned tokens by source over the last `days` UTC days (1-365, default 30); ephemeral |
 | `/token-sources [user]` | Anyone | Percentage breakdown of a user's earned tokens by source; defaults to self (see below) |
 | `/give <user> <tokens/xp/levels> <amount>` | Admin only | Grants tokens via atomic `increment_user_balance()` tagged `admin`; no transfer from the caller |
 | `/set-balance <user> <amount>` | Admin only | Directly sets balance, no transfer logic |
@@ -112,6 +113,12 @@ Rules:
 - Tracking starts at deploy. Tokens earned before it are not in anyone's breakdown, so the command's footer says it counts tokens "since tracking began".
 
 `/token-sources [user]` (anyone, defaults to self) reads the map with `get_token_sources()`, which reads the doc directly rather than through `get_user_data()` so looking someone up doesn't create a brawl profile. `token_source_breakdown()` turns it into `(source, tokens, percent)` rows, largest first, dropping zero and unknown keys so the percentages always sum to 100 over what's shown.
+
+### Server-wide log (`/economy-stats`)
+
+Each earning grant also bumps that UTC day's `token_stats` doc (`_id = "YYYY-MM-DD"`, one field per source) via `_log_token_generation()`. This runs **after** the balance write and isn't atomic with it (different collection); a failure is printed and swallowed so it can never break a payout. The same rules apply as for the per-user map: no source, a non-positive amount, or a `/daily` claim that lost its cooldown predicate logs nothing.
+
+`/economy-stats [days]` (Admin, `has_permission`) sums the last `days` buckets including today with `get_token_stats()` and renders them with the same `token_source_breakdown()` as `/token-sources`. Like the per-user map, the log starts at deploy, so earlier months can't be reconstructed.
 
 ---
 

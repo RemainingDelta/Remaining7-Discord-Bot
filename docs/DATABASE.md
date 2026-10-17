@@ -189,6 +189,15 @@ Atomic single-claim guard for token supply/booster/admin drops. One document per
 
 ---
 
+### `token_stats`
+Server-wide log of R7 token generation (#607). One document per UTC day, bumped by every earning grant alongside the user's `token_sources` counter.
+
+`_id = "YYYY-MM-DD"` (UTC). Every other field is a source from `TOKEN_SOURCES` (`chat`, `daily`, `drop`, `booster_drop`, `event`, `poll`, `quest`, `admin`) holding that day's total, e.g. `{"_id": "2026-10-17", "daily": 4200, "chat": 1310}`.
+
+Written by `_log_token_generation()` with an upserted `$inc`, **after** the balance write. It's a separate collection so it can't be atomic with the payout; a failed write is printed and swallowed so analytics never break a payout that already landed. Refunds, deductions and lost `/daily` claims are never logged. `get_token_stats(days)` sums every doc with `_id >= today - (days - 1)`, so `days=1` is today only. Docs are small (one per day) and not pruned.
+
+---
+
 ### `redemption_queue`
 FIFO queue of redemptions deferred to next month when `/redeem` exceeds the available budget. One document per queued item; `_id` is an ObjectId.
 

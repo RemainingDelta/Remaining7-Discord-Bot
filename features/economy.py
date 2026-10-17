@@ -15,6 +15,7 @@ from database.mongo import (
     increment_user_balance,
     TOKEN_SOURCES,
     get_token_sources,
+    get_token_stats,
     claim_daily_reward,
     claim_redemption_closure,
     get_leveling_data,
@@ -2005,6 +2006,37 @@ class Economy(commands.Cog):
             text="Counts tokens earned since tracking began. Refunds aren't counted."
         )
         await interaction.followup.send(embed=embed)
+
+    @app_commands.command(
+        name="economy-stats",
+        description="Server-wide breakdown of where R7 tokens came from (Admin).",
+    )
+    @app_commands.describe(days="How many days back to include, today counted (1-365)")
+    async def economy_stats(
+        self,
+        interaction: discord.Interaction,
+        days: app_commands.Range[int, 1, 365] = 30,
+    ):
+        if not await self.has_permission(interaction):
+            await interaction.response.send_message(
+                "❌ Permission Denied", ephemeral=True
+            )
+            return
+        await interaction.response.defer(ephemeral=True)
+        totals = await get_token_stats(days)
+        lines = _token_breakdown_lines(totals)
+        embed = discord.Embed(
+            title=f"📈 R7 Token Economy: Last {days} Day{'s' if days != 1 else ''}",
+            description=lines or "No token generation logged in this window.",
+            color=discord.Color.gold(),
+        )
+        if lines:
+            total = sum(n for _, n, _ in token_source_breakdown(totals))
+            embed.add_field(name="Total Generated", value=f"**{total}** R7 tokens")
+        embed.set_footer(
+            text="UTC days. Counts earned tokens only, not refunds or deductions."
+        )
+        await interaction.followup.send(embed=embed, ephemeral=True)
 
     @app_commands.command(
         name="level", description="Check your or another user's level and progress."

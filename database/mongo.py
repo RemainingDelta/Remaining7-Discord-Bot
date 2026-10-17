@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 import hashlib
 import os
 import re
@@ -126,6 +126,43 @@ async def increment_user_balance(user_id: str, amount: int, source: str | None =
     if db is None:
         return
     await db.users.update_one({"_id": str(user_id)}, {"$inc": inc}, upsert=True)
+    if len(inc) > 1:
+        await _log_token_generation(source, amount)
+
+
+async def _log_token_generation(source: str, amount: int):
+    """Add an earned grant to today's server-wide `token_stats` bucket (#607).
+
+    One doc per UTC day (`_id = "YYYY-MM-DD"`), so a window is a cheap range read.
+    Called after the balance write and never atomic with it, since it's a separate
+    collection: a failure here is logged and swallowed so analytics can never break
+    a payout that has already landed.
+    """
+    day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    try:
+        await db.token_stats.update_one(
+            {"_id": day}, {"$inc": {source: amount}}, upsert=True
+        )
+    except Exception as e:
+        print(f"⚠️ token_stats write failed ({source} +{amount}): {e}")
+
+
+async def get_token_stats(days: int, today: date | None = None) -> dict:
+    """Server-wide earned tokens by source over the last `days` UTC days.
+
+    The window includes today, so `days=1` is today only.
+    """
+    if db is None:
+        return {}
+    today = today or datetime.now(timezone.utc).date()
+    start = (today - timedelta(days=days - 1)).isoformat()
+    docs = await db.token_stats.find({"_id": {"$gte": start}}).to_list(length=None)
+    totals: dict = {}
+    for doc in docs:
+        for source, amount in doc.items():
+            if source != "_id":
+                totals[source] = totals.get(source, 0) + amount
+    return totals
 
 
 async def get_token_sources(user_id: str) -> dict:
@@ -159,7 +196,7 @@ async def claim_daily_reward(
     """
     if db is None:
         return None
-    return await db.users.find_one_and_update(
+    updated = await db.users.find_one_and_update(
         {
             "_id": str(user_id),
             "$or": [
@@ -173,6 +210,9 @@ async def claim_daily_reward(
         },
         return_document=True,  # AFTER — surface the new balance for the embed
     )
+    if updated is not None and amount > 0:
+        await _log_token_generation("daily", int(amount))
+    return updated
 
 
 # --- POLL REWARD HELPERS ---
@@ -1743,6 +1783,8 @@ async def add_quest_reward(user_id: str, tokens: int, exp: int):
     if not inc:
         return
     await db.users.update_one({"_id": str(user_id)}, {"$inc": inc}, upsert=True)
+    if tokens > 0:
+        await _log_token_generation("quest", tokens)
 
 
 async def mark_quest_rewarded(user_id: str, q_key: str):
