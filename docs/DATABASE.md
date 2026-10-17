@@ -31,6 +31,7 @@ Key fields:
 | Field | Type | Purpose |
 |-------|------|---------|
 | `balance` | int | R7 Token balance |
+| `token_sources` | dict | Earned tokens per source (`chat`, `daily`, `drop`, `booster_drop`, `event`, `poll`, `quest`, `admin`). Bumped in the same `$inc` as `balance`; only positive grants count, refunds and `/set-balance` never touch it. See `TOKEN_SYSTEM.md`. |
 | `level` | int | Server level |
 | `exp` | int | Total XP |
 | `daily_last_claimed` | datetime | Last `/daily` claim timestamp |

@@ -83,13 +83,61 @@ async def update_user_balance(user_id: str, amount: int):
     )
 
 
-async def increment_user_balance(user_id: str, amount: int):
-    """Atomically increments a user's balance using $inc."""
+# Where an earned token came from (#606). Each one is a counter under the user
+# doc's `token_sources` map, bumped in the same $inc as `balance` so a user's
+# breakdown can never disagree with what they were actually paid. Add a source
+# here to start tracking a new earning path.
+TOKEN_SOURCES = (
+    "chat",
+    "daily",
+    "drop",
+    "booster_drop",
+    "event",
+    "poll",
+    "quest",
+    "admin",
+)
+
+
+def _token_source_inc(source: str | None, amount: int) -> dict:
+    """The `token_sources` part of a balance $inc.
+
+    Only positive grants count as earned: a negative drop or admin deduction moves
+    the balance but doesn't un-earn anything. `source=None` means "not earning",
+    which is what redemption refunds pass, since those tokens were already counted
+    under their real source when first earned.
+    """
+    if source is None:
+        return {}
+    if source not in TOKEN_SOURCES:
+        raise ValueError(f"Unknown token source: {source}")
+    if amount <= 0:
+        return {}
+    return {f"token_sources.{source}": amount}
+
+
+async def increment_user_balance(user_id: str, amount: int, source: str | None = None):
+    """Atomically increments a user's balance using $inc.
+
+    Pass `source` (one of TOKEN_SOURCES) when the tokens are earned, so the grant
+    is recorded in the user's per-source breakdown.
+    """
+    inc = {"balance": amount, **_token_source_inc(source, amount)}
     if db is None:
         return
-    await db.users.update_one(
-        {"_id": str(user_id)}, {"$inc": {"balance": amount}}, upsert=True
-    )
+    await db.users.update_one({"_id": str(user_id)}, {"$inc": inc}, upsert=True)
+
+
+async def get_token_sources(user_id: str) -> dict:
+    """A user's earned tokens by source, e.g. {"chat": 120, "daily": 900}.
+
+    Reads the doc directly rather than through get_user_data so looking someone up
+    doesn't create a brawl profile for them. Empty for untracked users.
+    """
+    if db is None:
+        return {}
+    doc = await db.users.find_one({"_id": str(user_id)}, {"token_sources": 1})
+    return (doc or {}).get("token_sources", {})
 
 
 async def claim_daily_reward(
@@ -119,7 +167,10 @@ async def claim_daily_reward(
                 {"daily_last_claimed": {"$lt": cutoff_ts}},
             ],
         },
-        {"$inc": {"balance": int(amount)}, "$set": {"daily_last_claimed": now_ts}},
+        {
+            "$inc": {"balance": int(amount), **_token_source_inc("daily", int(amount))},
+            "$set": {"daily_last_claimed": now_ts},
+        },
         return_document=True,  # AFTER — surface the new balance for the embed
     )
 
@@ -1686,6 +1737,7 @@ async def add_quest_reward(user_id: str, tokens: int, exp: int):
     inc = {}
     if tokens:
         inc["balance"] = tokens
+        inc.update(_token_source_inc("quest", tokens))
     if exp:
         inc["exp"] = exp
     if not inc:

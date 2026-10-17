@@ -31,6 +31,7 @@ class General(commands.Cog):
 
         economy_text = (
             "`/balance` - View your token total\n"
+            "`/token-sources` - See where your tokens came from\n"
             "`/daily` - Claim daily tokens & check progress\n"
             "`/quests` - View active daily and weekly quests\n"
             "`/leaderboard token` - See top token holders\n"

@@ -13,6 +13,8 @@ from database.mongo import (
     get_user_data,
     update_user_balance,
     increment_user_balance,
+    TOKEN_SOURCES,
+    get_token_sources,
     claim_daily_reward,
     claim_redemption_closure,
     get_leveling_data,
@@ -771,6 +773,40 @@ def _format_level_line(index: int, user_doc: dict) -> str:
     )
 
 
+TOKEN_SOURCE_LABELS = {
+    "chat": "💬 Chatting",
+    "daily": "📅 Daily Rewards",
+    "drop": "📦 Supply Drops",
+    "booster_drop": "🚀 Booster Drops",
+    "event": "🏆 Events",
+    "poll": "🗳️ Polls",
+    "quest": "📜 Quests",
+    "admin": "🛠️ Staff Grants",
+}
+
+
+def token_source_breakdown(counts: dict) -> list[tuple[str, int, float]]:
+    """(source, tokens, percent of total) per earning source, largest first.
+
+    Keys that aren't a known source and zero counts are dropped, so the
+    percentages always sum to 100 over what's shown.
+    """
+    counts = {s: int(counts.get(s, 0)) for s in TOKEN_SOURCES}
+    counts = {s: n for s, n in counts.items() if n > 0}
+    total = sum(counts.values())
+    if total == 0:
+        return []
+    rows = [(s, n, n / total * 100) for s, n in counts.items()]
+    return sorted(rows, key=lambda row: row[1], reverse=True)
+
+
+def _token_breakdown_lines(counts: dict) -> str:
+    return "\n".join(
+        f"{TOKEN_SOURCE_LABELS[source]}: **{tokens}** ({pct:.1f}%)"
+        for source, tokens, pct in token_source_breakdown(counts)
+    )
+
+
 def _leaderboard_footer(page: int, rank: int) -> str:
     return f"Page {page + 1} | Your Rank: #{rank}"
 
@@ -998,7 +1034,10 @@ class DropClaimButton(
             return
 
         # 1. Pay atomically ($inc) — no read-modify-write.
-        await increment_user_balance(str(interaction.user.id), self.amount)
+        source = "booster_drop" if message.channel.id == BOOSTER_CHANNEL_ID else "drop"
+        await increment_user_balance(
+            str(interaction.user.id), self.amount, source=source
+        )
 
         # 2. Clear the booster-drop marker if this was the live booster drop. The
         #    persistent button has no on_claim closure, so do it here directly.
@@ -1453,7 +1492,7 @@ class Economy(commands.Cog):
                 # NOTE: this deliberately reverses #412's paid-first choice; there the
                 # reward was large enough to prioritize never-lose over never-double.
                 await set_setting(f"last_message_{user_id}", str(current_timestamp))
-                await increment_user_balance(user_id, earned_tokens)
+                await increment_user_balance(user_id, earned_tokens, source="chat")
 
             # --- PART 2: XP & LEVELING ---
             EXP_PER_MESSAGE = 10
@@ -1943,6 +1982,31 @@ class Economy(commands.Cog):
         await interaction.followup.send(embed=embed)
 
     @app_commands.command(
+        name="token-sources",
+        description="See where your or another user's R7 tokens came from.",
+    )
+    @app_commands.describe(user="The user to check (leave blank for yourself)")
+    async def token_sources(
+        self, interaction: discord.Interaction, user: Optional[discord.User] = None
+    ):
+        await interaction.response.defer()
+        target = user or interaction.user
+        counts = await get_token_sources(str(target.id))
+        lines = _token_breakdown_lines(counts)
+        embed = discord.Embed(
+            title=f"📊 {target.display_name}'s Token Sources",
+            description=lines or "No tracked token earnings yet.",
+            color=discord.Color.blue(),
+        )
+        if lines:
+            total = sum(n for _, n, _ in token_source_breakdown(counts))
+            embed.add_field(name="Total Earned", value=f"**{total}** R7 tokens")
+        embed.set_footer(
+            text="Counts tokens earned since tracking began. Refunds aren't counted."
+        )
+        await interaction.followup.send(embed=embed)
+
+    @app_commands.command(
         name="level", description="Check your or another user's level and progress."
     )
     @app_commands.describe(user="The user whose level you want to check")
@@ -2203,8 +2267,7 @@ class Economy(commands.Cog):
 
         uid = str(user.id)
         if resource_type == "tokens":
-            cur = await get_user_balance(uid)
-            await update_user_balance(uid, cur + amount)
+            await increment_user_balance(uid, amount, source="admin")
             msg = f"Gave **{amount} tokens** to {user.mention}."
         elif resource_type == "xp":
             lvl, exp = await get_leveling_data(uid)
@@ -2291,6 +2354,7 @@ class Economy(commands.Cog):
         cmd_text = (
             "**Standard Commands:**\n"
             "`/balance` - View your token total\n"
+            "`/token-sources` - See where your tokens came from\n"
             "`/daily` - Claim daily tokens & check progress\n"
             "`/quests` - View active daily and weekly quests\n"
             "`/leaderboard token` - See top token holders\n"
