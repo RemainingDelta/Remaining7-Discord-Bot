@@ -58,6 +58,7 @@ FEATURE_EXTENSIONS = [
     ("features.github_tickets", "GitHub Tickets"),
     ("features.sticky", "Sticky Messages"),
     ("features.counting", "Counting"),
+    ("features.clubs", "Club Tracking"),
     ("features.story", "Story"),
     ("features.message_mirror", "Message Mirror"),
     ("features.tourney.tourney_reports", "Tourney Reports"),
