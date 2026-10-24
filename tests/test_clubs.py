@@ -401,3 +401,11 @@ async def test_add_errors_are_public(cog, manager, db, api, error):
     api.side_effect = error
     await _add(cog, manager)
     assert _none_ephemeral(manager)
+
+
+async def test_add_saves_and_replies_with_clean_name(cog, manager, db, api):
+    api.return_value = {"tag": "#ABC", "name": "<c4>Toxic灵</c>"}
+    await _add(cog, manager)
+    db.add.assert_awaited_once_with("#ABC", "Toxic灵")
+    text = _sent_text(manager)
+    assert "Toxic灵" in text and "<c4>" not in text

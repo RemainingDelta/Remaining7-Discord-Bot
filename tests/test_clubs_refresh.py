@@ -526,3 +526,42 @@ def test_country_codes_are_unique_two_letter_codes():
     assert len(set(COUNTRY_CODES)) == len(COUNTRY_CODES)
     assert all(len(c) == 2 and c.isalpha() and c.isupper() for c in COUNTRY_CODES)
     assert {"US", "IN", "BR", "DE", "PH"} <= set(COUNTRY_CODES)
+
+
+# --- Name cleaning ---
+
+
+@pytest.mark.parametrize(
+    "raw, clean",
+    [
+        ("<c4>Toxic灵</c>", "Toxic灵"),
+        ("<c2>Sp</c><c5>5der</c>", "Sp5der"),
+        ("𝓛𝓲𝓪𝓻𝓼🥀", "Liars🥀"),
+        ("𝒮𝓊𝓅𝑒𝓇", "Super"),
+        ("R7|Cordite💙王嘉尔", "R7|Cordite💙王嘉尔"),
+        ("  7 Dwarves ", "7 Dwarves"),
+    ],
+)
+def test_clean_name(raw, clean):
+    from features.clubs import clean_name
+
+    assert clean_name(raw) == clean
+
+
+def test_clean_name_never_returns_blank():
+    from features.clubs import clean_name
+
+    assert clean_name("<c4></c>") == "<c4></c>"
+    assert clean_name(None) is None
+
+
+async def test_refresh_saves_clean_club_and_president_names(cog, db, api):
+    db.list.return_value = [_tracked("#A")]
+    api.clubs["#A"] = _api_club(
+        "#A", [_member("#P", "president")], name="<c4>𝓛𝓲𝓪𝓻𝓼</c>"
+    )
+    api.clubs["#A"]["members"][0]["name"] = "𝒮𝓊𝓅𝑒𝓇"
+    await cog.refresh_clubs()
+    tag, name, snapshot = db.save.await_args.args
+    assert name == "Liars"
+    assert snapshot["president"] == "Super"

@@ -12,7 +12,9 @@ slash commands. Three background jobs keep their data current (#616):
 """
 
 import asyncio
+import re
 import time
+import unicodedata
 from datetime import datetime, timedelta, timezone
 
 import discord
@@ -323,7 +325,7 @@ def build_snapshot(club: dict, country_rank, global_rank) -> dict:
         "trophies": club.get("trophies", 0),
         "required_trophies": club.get("requiredTrophies", 0),
         "member_count": len(members),
-        "president": president.get("name") if president else None,
+        "president": clean_name(president.get("name")) if president else None,
         "vice_presidents": sum(1 for m in members if m.get("role") == "vicePresident"),
         "seniors": sum(1 for m in members if m.get("role") == "senior"),
         "min_member_trophies": min(trophies) if trophies else None,
@@ -356,6 +358,21 @@ def build_ranked(players: list[dict]) -> dict | None:
         "tier_counts": tiers,
         "players_counted": len(ranked),
     }
+
+
+_COLOR_TAG = re.compile(r"</?c[0-9a-fA-F]*>")
+
+
+def clean_name(name: str | None) -> str | None:
+    """Display form of an in-game name, matching how BrawlTools showed it.
+
+    Strips color codes like <c4>...</c> and turns decorative letters
+    (e.g. math-script) into normal ones. Emoji and other scripts are kept.
+    """
+    if not name:
+        return name
+    cleaned = unicodedata.normalize("NFKC", _COLOR_TAG.sub("", name)).strip()
+    return cleaned or name
 
 
 def _rank_lookup(items: list[dict]) -> dict[str, int]:
@@ -475,7 +492,7 @@ class ClubTracking(commands.Cog):
                     continue
                 await save_club_refresh(
                     tag,
-                    club.get("name") or tracked.get("name") or tag,
+                    clean_name(club.get("name")) or tracked.get("name") or tag,
                     build_snapshot(club, country_rank, global_rank),
                 )
 
@@ -633,7 +650,7 @@ class ClubTracking(commands.Cog):
             await interaction.followup.send(API_UNAVAILABLE)
             return
 
-        name = club.get("name") or tag
+        name = clean_name(club.get("name")) or tag
         if not await add_tracked_club(tag, name):
             await interaction.followup.send(
                 f"❌ **{name}** (`{tag}`) is already tracked."
