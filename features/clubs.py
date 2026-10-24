@@ -393,7 +393,8 @@ def _rank_lookup(items: list[dict]) -> dict[str, int]:
 
 CLUB_MESSAGES = 6
 CLUB_CAPACITY = 30
-BOARD_MESSAGES_SETTING = "club_list_message_ids"
+# Keyed by channel: DEV and PROD share one database, so each keeps its own IDs.
+BOARD_MESSAGES_SETTING = f"club_list_message_ids:{CLUB_LIST_CHANNEL_ID}"
 BOARD_TITLE = "Remaining 7 Esports"
 BOARD_FOOTER = f"Updating every 30 minutes · {SUPERCELL_DISCLAIMER}"
 BOARD_COLOR = discord.Color.gold()

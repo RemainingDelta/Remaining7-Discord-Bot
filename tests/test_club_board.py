@@ -9,6 +9,9 @@ import pytest
 
 from features.config import CLUB_LIST_CHANNEL_ID
 
+# Keyed by channel so DEV and PROD, which share one database, never clash.
+BOARD_KEY = f"club_list_message_ids:{CLUB_LIST_CHANNEL_ID}"
+
 MAX_EMBED_CHARS = 6000
 
 
@@ -313,7 +316,7 @@ def board(mock_bot):
 
 
 def _stored_ids(board):
-    return [int(i) for i in json.loads(board.settings["club_list_message_ids"])]
+    return [int(i) for i in json.loads(board.settings[BOARD_KEY])]
 
 
 async def test_first_run_posts_exactly_seven_messages_in_order(board):
@@ -373,7 +376,7 @@ async def test_missing_channel_does_nothing(board):
     board.bot.get_channel = MagicMock(return_value=None)
     await board.cog.update_club_board()
     assert board.channel.sends == 0
-    assert "club_list_message_ids" not in board.settings
+    assert BOARD_KEY not in board.settings
 
 
 async def test_refresh_completion_updates_the_board(board):
