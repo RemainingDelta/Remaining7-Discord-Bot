@@ -2,6 +2,7 @@
 
 import itertools
 import json
+import re
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import discord
@@ -66,6 +67,13 @@ def _embed_chars(embed: discord.Embed) -> int:
     return len(embed)
 
 
+def _card_name(field) -> str:
+    """The club name from a card's first line, '**[Name](link)**'."""
+    match = re.match(r"\*\*\[(.+?)\]\(", field.value)
+    assert match, field.value
+    return match.group(1)
+
+
 # --- Club embeds ---
 
 
@@ -85,8 +93,8 @@ def test_clubs_appear_in_descending_trophy_order():
         _club("#B", "High", 6_000_000),
         _club("#C", "Mid", 3_000_000),
     ]
-    names = [f.name for e in build_club_embeds(clubs) for f in e.fields]
-    assert [n for n in names if n in ("Low", "High", "Mid")] == ["High", "Mid", "Low"]
+    names = [_card_name(f) for e in build_club_embeds(clubs) for f in e.fields]
+    assert names == ["High", "Mid", "Low"]
 
 
 def test_45_clubs_spread_evenly_and_all_shown_once():
@@ -97,7 +105,7 @@ def test_45_clubs_spread_evenly_and_all_shown_once():
     sizes = [len(e.fields) for e in embeds]
     assert sum(sizes) == 45
     assert max(sizes) - min(sizes) <= 1
-    names = [f.name for e in embeds for f in e.fields]
+    names = [_card_name(f) for e in embeds for f in e.fields]
     assert len(set(names)) == 45
 
 
@@ -115,21 +123,22 @@ def test_club_card_shows_stats():
         ranked=_ranked("SILVER I", "MASTERS II", {"SILVER": 20, "MASTERS": 1}),
     )
     field = build_club_embeds([club])[0].fields[0]
-    assert field.name == "7 Dwarves"
+    assert _card_name(field) == "7 Dwarves"
     for expected in (
-        "R7 | SPARTAN",
-        "6,072,652",
-        "3 in 🇺🇸",
-        "10",
-        "99.4k",
-        "252.9k",
-        "100,000",
-        "30/30",
-        "Silver I",
-        "Masters II",
+        "R7 \\| SPARTAN",  # escaped so it can't start markdown; Discord shows "R7 | SPARTAN"
+        "`6,072,652`",
+        "`3` in 🇺🇸",
+        "`10`",
+        "`99.4k`",
+        "`252.9k`",
+        "`100,000`",
+        "`30/30`",
+        "`Silver I`",
+        "`Masters II`",
+        "`6`",
+        "`18`",
     ):
         assert expected in field.value, expected
-    assert "6" in field.value and "18" in field.value
 
 
 def test_unranked_club_shows_not_ranked():
@@ -160,7 +169,7 @@ def test_club_not_fetched_yet_is_still_listed():
     from features.clubs import build_club_embeds
 
     field = build_club_embeds([_club("#A", "New Club", None)])[0].fields[0]
-    assert field.name == "New Club"
+    assert _card_name(field) == "New Club"
     assert "not fetched yet" in field.value.lower()
 
 
@@ -176,6 +185,7 @@ def test_fifty_long_named_clubs_fit_discord_limits():
             country_rank=200,
             global_rank=200,
             president="P" * 32,
+            president_tag="#" + "Q" * 10,
             ranked=_ranked("LEGENDARY III", "LEGENDARY III", {"LEGENDARY": 30}),
         )
         for i in range(50)
@@ -184,6 +194,52 @@ def test_fifty_long_named_clubs_fit_discord_limits():
         assert _embed_chars(embed) <= MAX_EMBED_CHARS
         assert len(embed.fields) <= 25
         assert all(len(f.value) <= 1024 and len(f.name) <= 256 for f in embed.fields)
+
+
+def test_club_name_links_to_brawlify():
+    from features.clubs import build_club_embeds
+
+    field = build_club_embeds([_club("#2YYJJV9PC", "7 Dwarves", 1)])[0].fields[0]
+    first_line = field.value.splitlines()[0]
+    assert first_line == "**[7 Dwarves](https://brawlify.com/club/2YYJJV9PC)**"
+
+
+def test_club_name_shows_on_card_not_field_title():
+    from features.clubs import build_club_embeds
+
+    field = build_club_embeds([_club("#A", "7 Dwarves", 1)])[0].fields[0]
+    assert field.name.strip("\u200b") == ""
+
+
+def test_president_links_to_brawlify_player():
+    from features.clubs import build_club_embeds
+
+    club = _club("#A", "X", 1, president="R7 | SPARTAN", president_tag="#QQ0Y9PC")
+    value = build_club_embeds([club])[0].fields[0].value
+    assert "[R7 \\| SPARTAN](https://brawlify.com/player/QQ0Y9PC)" in value
+
+
+def test_president_without_tag_is_not_linked():
+    from features.clubs import build_club_embeds
+
+    club = _club("#A", "X", 1, president="Old Prez")
+    value = build_club_embeds([club])[0].fields[0].value
+    president_line = next(line for line in value.splitlines() if "Old Prez" in line)
+    assert "brawlify.com/player" not in president_line
+
+
+def test_names_are_escaped_so_links_stay_intact():
+    from features.clubs import build_club_embeds
+
+    club = _club(
+        "#A", "*Bold* _x_ [7]", 1, president="[evil](https://x.y)", president_tag="#P1"
+    )
+    value = build_club_embeds([club])[0].fields[0].value
+    first_line = value.splitlines()[0]
+    assert first_line.endswith("](https://brawlify.com/club/A)**")
+    assert "\\*Bold\\*" in first_line and "\\[7\\]" in first_line
+    assert "](https://brawlify.com/player/P1)" in value
+    assert "[evil](https://x.y)" not in value
 
 
 def test_club_embeds_carry_disclaimer_and_update_note():
@@ -214,11 +270,11 @@ def test_overview_totals_and_averages():
         ),
     ]
     text = _text(build_overview_embed(clubs))
-    assert "8,000,000" in text  # total trophies
-    assert "4,000,000" in text  # average trophies
-    assert "50/60" in text  # members vs capacity
-    assert "75,000" in text  # average required
-    assert "25/30" in text  # average members
+    assert "`8,000,000`" in text  # total trophies
+    assert "`4,000,000`" in text  # average trophies
+    assert "`50/60`" in text  # members vs capacity
+    assert "`75,000`" in text  # average required
+    assert "`25/30`" in text  # average members
 
 
 def test_overview_ranked_distribution_adds_to_100():
@@ -247,8 +303,8 @@ def test_overview_skips_clubs_without_snapshot_in_averages():
 
     clubs = [_club("#A", "A", 4_000_000), _club("#B", "B", None)]
     fields = {f.name: f.value for f in build_overview_embed(clubs).fields}
-    assert fields["Average Trophies"].endswith("4,000,000")
-    assert fields["Total Clubs"].endswith("2")
+    assert fields["Average Trophies"].endswith("`4,000,000`")
+    assert fields["Total Clubs"].endswith("`2`")
 
 
 # --- Board messages: posted once, then edited in place ---
@@ -351,7 +407,7 @@ async def test_edit_shows_new_data(board):
     board.list.return_value = [_club("#NEW", "Fresh Club", 9_000_000)]
     await board.cog.update_club_board()
     first_club_msg = board.channel.messages[_stored_ids(board)[1]]
-    assert first_club_msg.kwargs["embed"].fields[0].name == "Fresh Club"
+    assert _card_name(first_club_msg.kwargs["embed"].fields[0]) == "Fresh Club"
 
 
 async def test_deleted_message_is_the_only_one_replaced(board):

@@ -333,6 +333,7 @@ def build_snapshot(club: dict, country_rank, global_rank) -> dict:
         "required_trophies": club.get("requiredTrophies", 0),
         "member_count": len(members),
         "president": clean_name(president.get("name")) if president else None,
+        "president_tag": president.get("tag") if president else None,
         "vice_presidents": sum(1 for m in members if m.get("role") == "vicePresident"),
         "seniors": sum(1 for m in members if m.get("role") == "senior"),
         "min_member_trophies": min(trophies) if trophies else None,
@@ -433,39 +434,67 @@ def _sorted_by_trophies(clubs: list[dict]) -> list[dict]:
     )
 
 
+BRAWLIFY_CLUB_URL = "https://brawlify.com/club/{}"
+BRAWLIFY_PLAYER_URL = "https://brawlify.com/player/{}"
+
+
+def _box(value) -> str:
+    """Show a value in a code box, like BrawlTools' number pills."""
+    return f"`{value}`"
+
+
+_MARKDOWN_CHARS = re.compile(r"([\\*_~`|>\[\]])")
+
+
+def _link_text(name: str) -> str:
+    """Escape a name so markdown or brackets in it can't break a [text](url) link."""
+    return _MARKDOWN_CHARS.sub(r"\\\1", name)
+
+
 def _club_card(club: dict) -> str:
     e = CLUB_EMOJIS
+    name = _link_text(club.get("name") or club["_id"])
+    header = f"**[{name}]({BRAWLIFY_CLUB_URL.format(club['_id'].lstrip('#'))})**"
     snap = club.get("snapshot")
     if not snap:
-        return "Not fetched yet"
+        return f"{header}\nNot fetched yet"
+
+    president = _link_text(snap.get("president") or "—")
+    if snap.get("president_tag"):
+        tag = snap["president_tag"].lstrip("#")
+        president = f"[{president}]({BRAWLIFY_PLAYER_URL.format(tag)})"
 
     ranks = []
     if snap.get("country_rank") and club.get("country_code"):
-        ranks.append(f"{snap['country_rank']} in {_flag(club['country_code'])}")
+        ranks.append(f"{_box(snap['country_rank'])} in {_flag(club['country_code'])}")
     if snap.get("global_rank"):
-        ranks.append(f"{e['global']} {snap['global_rank']}")
+        ranks.append(f"{e['global']} {_box(snap['global_rank'])}")
 
+    trophies = snap.get("trophies", 0)
+    required = snap.get("required_trophies", 0)
+    members = snap.get("member_count", 0)
     lines = [
-        f"{e['president']} {snap.get('president') or '—'}",
-        f"{e['trophy']} {snap.get('trophies', 0):,}",
-        f"{e['rank']} {' | '.join(ranks) if ranks else 'Not Ranked'}",
+        header,
+        f"{e['president']} {president}",
+        f"{e['trophy']} {_box(f'{trophies:,}')}",
+        f"{e['rank']} {' | '.join(ranks) if ranks else _box('Not Ranked')}",
     ]
     if snap.get("min_member_trophies") is not None:
         lines.append(
-            f"{e['range']} {_thousands(snap['min_member_trophies'])} - "
-            f"{_thousands(snap['max_member_trophies'])}"
+            f"{e['range']} {_box(_thousands(snap['min_member_trophies']))} - "
+            f"{_box(_thousands(snap['max_member_trophies']))}"
         )
     ranked = club.get("ranked")
     if ranked:
         lines.append(
-            f"{e['ranked']} {_rank_label(ranked['min_rank_name'])} - "
-            f"{_rank_label(ranked['max_rank_name'])}"
+            f"{e['ranked']} {_box(_rank_label(ranked['min_rank_name']))} - "
+            f"{_box(_rank_label(ranked['max_rank_name']))}"
         )
     lines += [
-        f"{e['required']} Req: {snap.get('required_trophies', 0):,}",
-        f"{e['vice_president']} {snap.get('vice_presidents', 0)}  "
-        f"{e['senior']} {snap.get('seniors', 0)}",
-        f"{e['members']} {snap.get('member_count', 0)}/{CLUB_CAPACITY}",
+        f"{e['required']} **Req:** {_box(f'{required:,}')}",
+        f"{e['vice_president']} {_box(snap.get('vice_presidents', 0))}  "
+        f"{e['senior']} {_box(snap.get('seniors', 0))}",
+        f"{e['members']} {_box(f'{members}/{CLUB_CAPACITY}')}",
     ]
     return "\n".join(lines)
 
@@ -484,11 +513,8 @@ def build_club_embeds(clubs: list[dict]) -> list[discord.Embed]:
             color=BOARD_COLOR,
         )
         for club in chunk:
-            embed.add_field(
-                name=(club.get("name") or club["_id"])[:256],
-                value=_club_card(club)[:1024],
-                inline=True,
-            )
+            # Field names can't hold links, so the linked name leads the value.
+            embed.add_field(name="\u200b", value=_club_card(club)[:1024], inline=True)
         if not chunk:
             embed.description = "—"
         embeds.append(embed)
@@ -524,23 +550,24 @@ def build_overview_embed(clubs: list[dict]) -> discord.Embed:
 
     members = total("member_count")
     embed = discord.Embed(title=f"{BOARD_TITLE} | Overview", color=BOARD_COLOR)
+    total_trophies = total("trophies")
+    avg_trophies = round(total_trophies / n)
+    avg_required = round(total("required_trophies") / n)
+    capacity = len(clubs) * CLUB_CAPACITY
     fields = [
-        ("Total Clubs", f"{e['clubs']} {len(clubs)}"),
-        ("Total Trophies", f"{e['trophy']} {total('trophies'):,}"),
-        ("Members", f"{e['members']} {members}/{len(clubs) * CLUB_CAPACITY}"),
-        ("Average Trophies", f"{e['trophy']} {round(total('trophies') / n):,}"),
-        (
-            "Average Required",
-            f"{e['required']} {round(total('required_trophies') / n):,}",
-        ),
+        ("Total Clubs", f"{e['clubs']} {_box(len(clubs))}"),
+        ("Total Trophies", f"{e['trophy']} {_box(f'{total_trophies:,}')}"),
+        ("Members", f"{e['members']} {_box(f'{members}/{capacity}')}"),
+        ("Average Trophies", f"{e['trophy']} {_box(f'{avg_trophies:,}')}"),
+        ("Average Required", f"{e['required']} {_box(f'{avg_required:,}')}"),
         (
             "Average Vice-Presidents",
-            f"{e['vice_president']} {round(total('vice_presidents') / n)}",
+            f"{e['vice_president']} {_box(round(total('vice_presidents') / n))}",
         ),
-        ("Average Seniors", f"{e['senior']} {round(total('seniors') / n)}"),
+        ("Average Seniors", f"{e['senior']} {_box(round(total('seniors') / n))}"),
         (
             "Average Members",
-            f"{e['members']} {round(members / n)}/{CLUB_CAPACITY}",
+            f"{e['members']} {_box(f'{round(members / n)}/{CLUB_CAPACITY}')}",
         ),
     ]
     for name, value in fields:

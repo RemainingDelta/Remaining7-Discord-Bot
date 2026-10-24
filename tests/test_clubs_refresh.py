@@ -155,6 +155,7 @@ def test_snapshot_counts_roles_and_trophy_range():
     ]
     snap = build_snapshot(_api_club("#X", members), country_rank=3, global_rank=11)
     assert snap["president"] == "P#A"
+    assert snap["president_tag"] == "#A"
     assert snap["vice_presidents"] == 2
     assert snap["seniors"] == 1
     assert snap["member_count"] == 5
