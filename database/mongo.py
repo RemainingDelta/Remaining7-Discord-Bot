@@ -7,6 +7,7 @@ import motor.motor_asyncio
 import certifi
 from bson import ObjectId
 from bson.errors import InvalidId
+from pymongo.errors import DuplicateKeyError
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -469,6 +470,52 @@ async def set_setting(key: str, value: str):
     if db is None:
         return
     await db.settings.update_one({"_id": key}, {"$set": {"value": value}}, upsert=True)
+
+
+# --- TRACKED BRAWL STARS CLUBS (#595) ---
+# One document per club, keyed by normalized tag. Removing a club deletes only
+# this document; its history lives in other collections and is kept.
+
+
+async def add_tracked_club(tag: str, name: str) -> bool:
+    """Start tracking a club. Returns False if the tag is already tracked."""
+    if db is None:
+        return False
+    try:
+        await db.tracked_clubs.insert_one(
+            {
+                "_id": tag,
+                "name": name,
+                "added_at": datetime.utcnow(),
+                "country_code": None,
+                "snapshot": None,
+                "fetched_at": None,
+                "failing_since": None,
+            }
+        )
+    except DuplicateKeyError:
+        return False
+    return True
+
+
+async def remove_tracked_club(tag: str) -> bool:
+    """Stop tracking a club. Returns False if it was not tracked."""
+    if db is None:
+        return False
+    result = await db.tracked_clubs.delete_one({"_id": tag})
+    return result.deleted_count == 1
+
+
+async def list_tracked_clubs() -> list[dict]:
+    if db is None:
+        return []
+    return await db.tracked_clubs.find({}).to_list(length=None)
+
+
+async def count_tracked_clubs() -> int:
+    if db is None:
+        return 0
+    return await db.tracked_clubs.count_documents({})
 
 
 async def ensure_drop_claims_ttl_index():
