@@ -121,9 +121,3 @@ async def get_global_club_rankings() -> list[dict]:
 async def get_country_club_rankings(country_code: str) -> list[dict]:
     """Top 200 clubs in one country, e.g. 'US'."""
     return (await _request(f"/rankings/{country_code.strip().upper()}/clubs"))["items"]
-
-
-async def get_locations() -> list[dict]:
-    """Every country the rankings cover, as items with a 'countryCode'."""
-    items = (await _request("/locations"))["items"]
-    return [loc for loc in items if loc.get("isCountry") and loc.get("countryCode")]

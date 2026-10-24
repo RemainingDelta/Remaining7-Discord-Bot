@@ -12,6 +12,7 @@ slash commands. Three background jobs keep their data current (#616):
 """
 
 import asyncio
+import time
 from datetime import datetime, timedelta, timezone
 
 import discord
@@ -44,9 +45,268 @@ COUNTRY_SCAN_INTERVAL = timedelta(hours=24)
 COUNTRY_SCAN_SPACING_SECONDS = 1
 COUNTRY_SCAN_SETTING = "club_country_scan_at"
 
+# ISO 3166-1 alpha-2 codes. The Brawl Stars API has no endpoint that lists
+# countries, so the daily scan walks this list; codes the rankings do not
+# cover return 404 and are skipped.
+COUNTRY_CODES = (
+    "AD",
+    "AE",
+    "AF",
+    "AG",
+    "AI",
+    "AL",
+    "AM",
+    "AO",
+    "AQ",
+    "AR",
+    "AS",
+    "AT",
+    "AU",
+    "AW",
+    "AX",
+    "AZ",
+    "BA",
+    "BB",
+    "BD",
+    "BE",
+    "BF",
+    "BG",
+    "BH",
+    "BI",
+    "BJ",
+    "BL",
+    "BM",
+    "BN",
+    "BO",
+    "BQ",
+    "BR",
+    "BS",
+    "BT",
+    "BV",
+    "BW",
+    "BY",
+    "BZ",
+    "CA",
+    "CC",
+    "CD",
+    "CF",
+    "CG",
+    "CH",
+    "CI",
+    "CK",
+    "CL",
+    "CM",
+    "CN",
+    "CO",
+    "CR",
+    "CU",
+    "CV",
+    "CW",
+    "CX",
+    "CY",
+    "CZ",
+    "DE",
+    "DJ",
+    "DK",
+    "DM",
+    "DO",
+    "DZ",
+    "EC",
+    "EE",
+    "EG",
+    "EH",
+    "ER",
+    "ES",
+    "ET",
+    "FI",
+    "FJ",
+    "FK",
+    "FM",
+    "FO",
+    "FR",
+    "GA",
+    "GB",
+    "GD",
+    "GE",
+    "GF",
+    "GG",
+    "GH",
+    "GI",
+    "GL",
+    "GM",
+    "GN",
+    "GP",
+    "GQ",
+    "GR",
+    "GS",
+    "GT",
+    "GU",
+    "GW",
+    "GY",
+    "HK",
+    "HM",
+    "HN",
+    "HR",
+    "HT",
+    "HU",
+    "ID",
+    "IE",
+    "IL",
+    "IM",
+    "IN",
+    "IO",
+    "IQ",
+    "IR",
+    "IS",
+    "IT",
+    "JE",
+    "JM",
+    "JO",
+    "JP",
+    "KE",
+    "KG",
+    "KH",
+    "KI",
+    "KM",
+    "KN",
+    "KP",
+    "KR",
+    "KW",
+    "KY",
+    "KZ",
+    "LA",
+    "LB",
+    "LC",
+    "LI",
+    "LK",
+    "LR",
+    "LS",
+    "LT",
+    "LU",
+    "LV",
+    "LY",
+    "MA",
+    "MC",
+    "MD",
+    "ME",
+    "MF",
+    "MG",
+    "MH",
+    "MK",
+    "ML",
+    "MM",
+    "MN",
+    "MO",
+    "MP",
+    "MQ",
+    "MR",
+    "MS",
+    "MT",
+    "MU",
+    "MV",
+    "MW",
+    "MX",
+    "MY",
+    "MZ",
+    "NA",
+    "NC",
+    "NE",
+    "NF",
+    "NG",
+    "NI",
+    "NL",
+    "NO",
+    "NP",
+    "NR",
+    "NU",
+    "NZ",
+    "OM",
+    "PA",
+    "PE",
+    "PF",
+    "PG",
+    "PH",
+    "PK",
+    "PL",
+    "PM",
+    "PN",
+    "PR",
+    "PS",
+    "PT",
+    "PW",
+    "PY",
+    "QA",
+    "RE",
+    "RO",
+    "RS",
+    "RU",
+    "RW",
+    "SA",
+    "SB",
+    "SC",
+    "SD",
+    "SE",
+    "SG",
+    "SH",
+    "SI",
+    "SJ",
+    "SK",
+    "SL",
+    "SM",
+    "SN",
+    "SO",
+    "SR",
+    "SS",
+    "ST",
+    "SV",
+    "SX",
+    "SY",
+    "SZ",
+    "TC",
+    "TD",
+    "TF",
+    "TG",
+    "TH",
+    "TJ",
+    "TK",
+    "TL",
+    "TM",
+    "TN",
+    "TO",
+    "TR",
+    "TT",
+    "TV",
+    "TW",
+    "TZ",
+    "UA",
+    "UG",
+    "UM",
+    "US",
+    "UY",
+    "UZ",
+    "VA",
+    "VC",
+    "VE",
+    "VG",
+    "VI",
+    "VN",
+    "VU",
+    "WF",
+    "WS",
+    "YE",
+    "YT",
+    "ZA",
+    "ZM",
+    "ZW",
+)
+
 
 async def _pause(seconds: float) -> None:
     await asyncio.sleep(seconds)
+
+
+def _monotonic() -> float:
+    return time.monotonic()
 
 
 def _utcnow() -> datetime:
@@ -243,6 +503,10 @@ class ClubTracking(commands.Cog):
 
         total = sum(len(tags) for tags in members_by_club.values())
         spacing = RANKED_SPREAD_SECONDS / total if total else 0
+        # Each request gets a fixed slot on a schedule, so the time a request
+        # takes counts toward its slot and the whole update fits the window.
+        start = _monotonic()
+        done = 0
         for club_tag, member_tags in members_by_club.items():
             players = []
             for member_tag in member_tags:
@@ -250,7 +514,8 @@ class ClubTracking(commands.Cog):
                     players.append(await bs.get_player(member_tag))
                 except bs.BrawlStarsError as e:
                     print(f"Ranked update: player {member_tag} failed: {e}")
-                await _pause(spacing)
+                done += 1
+                await _pause(max(0.0, start + done * spacing - _monotonic()))
             await save_club_ranked(club_tag, build_ranked(players))
 
     @tasks.loop(hours=3)
@@ -268,27 +533,28 @@ class ClubTracking(commands.Cog):
         if last and _utcnow() - datetime.fromisoformat(last) < COUNTRY_SCAN_INTERVAL:
             return False
 
-        try:
-            locations = await bs.get_locations()
-        except bs.BrawlStarsError as e:
-            print(f"Country scan: locations failed: {e}")
-            return False
-
         clubs = await list_tracked_clubs()
         tracked_tags = {c["_id"] for c in clubs}
         found: dict[str, str] = {}
         failed: set[str] = set()
-        for location in locations:
-            code = location["countryCode"]
+        for code in COUNTRY_CODES:
             try:
                 for item in await bs.get_country_club_rankings(code):
                     tag = bs.normalize_tag(item["tag"])
                     if tag in tracked_tags:
                         found[tag] = code
+            except bs.NotFoundError:
+                pass  # The rankings do not cover this country.
             except bs.BrawlStarsError as e:
                 print(f"Country scan: {code} failed: {e}")
                 failed.add(code)
             await _pause(COUNTRY_SCAN_SPACING_SECONDS)
+
+        if len(failed) == len(COUNTRY_CODES):
+            # The API was down or rejected the key: keep every country as it
+            # is and try again next hour instead of waiting a day.
+            print("Country scan: every country failed, will retry")
+            return False
 
         countries = {}
         for club in clubs:

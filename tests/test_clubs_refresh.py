@@ -84,6 +84,11 @@ def api():
             raise value
         return value
 
+    clock = [0.0]
+
+    async def advance(seconds):
+        clock[0] += seconds
+
     async def get_global():
         if isinstance(global_list, Exception):
             raise global_list
@@ -102,10 +107,11 @@ def api():
             new=AsyncMock(side_effect=get_global),
         ) as ggc,
         patch("features.brawl_stars_client.get_player", new=AsyncMock()) as gp,
-        patch(
-            "features.brawl_stars_client.get_locations", new=AsyncMock(return_value=[])
-        ) as gl,
-        patch("features.clubs._pause", new=AsyncMock()) as sleep,
+        patch("features.clubs.COUNTRY_CODES", ("US", "IN")),
+        # A fake clock: pausing moves it forward, requests take no time unless a
+        # test advances it.
+        patch("features.clubs._monotonic", new=lambda: clock[0]),
+        patch("features.clubs._pause", new=AsyncMock(side_effect=advance)) as sleep,
     ):
         yield MagicMock(
             clubs=clubs,
@@ -115,7 +121,7 @@ def api():
             get_country=gcc,
             get_global=ggc,
             get_player=gp,
-            get_locations=gl,
+            clock=clock,
             sleep=sleep,
         )
 
@@ -353,6 +359,25 @@ async def test_ranked_update_skips_failed_player_and_saves_aggregate(cog, db, ap
     assert total_sleep == pytest.approx(RANKED_SPREAD_SECONDS, rel=0.01)
 
 
+async def test_ranked_update_counts_request_time_toward_spacing(cog, db, api):
+    from features.clubs import RANKED_SPREAD_SECONDS
+
+    members = [_member(f"#P{i}") for i in range(4)]
+    db.list.return_value = [_tracked("#A")]
+    api.clubs["#A"] = _api_club("#A", members)
+    spacing = RANKED_SPREAD_SECONDS / len(members)
+
+    async def slow_player(tag):
+        api.clock[0] += spacing  # each request uses its whole slot
+        return _player(4, "SILVER I")
+
+    api.get_player.side_effect = slow_player
+    await cog.run_ranked_update()
+    total_sleep = sum(c.args[0] for c in api.sleep.await_args_list)
+    assert total_sleep == pytest.approx(0, abs=1e-6)
+    assert api.clock[0] == pytest.approx(RANKED_SPREAD_SECONDS)
+
+
 async def test_ranked_update_skips_failed_club(cog, db, api):
     db.list.return_value = [_tracked("#A"), _tracked("#BAD")]
     api.clubs.update({"#A": _api_club("#A"), "#BAD": bs.ApiUnavailableError("down")})
@@ -366,7 +391,6 @@ async def test_ranked_update_skips_failed_club(cog, db, api):
 
 async def test_country_scan_sets_found_country_and_none_otherwise(cog, db, api):
     db.list.return_value = [_tracked("#US1"), _tracked("#IN1"), _tracked("#NONE")]
-    api.get_locations.return_value = [{"countryCode": "US"}, {"countryCode": "IN"}]
     api.country_lists.update(
         {"US": [{"tag": "#US1", "rank": 3}], "IN": [{"tag": "#IN1", "rank": 34}]}
     )
@@ -383,7 +407,7 @@ async def test_country_scan_sets_found_country_and_none_otherwise(cog, db, api):
 async def test_country_scan_skips_when_last_scan_under_a_day(cog, db, api):
     db.get_setting.return_value = (_utcnow() - timedelta(hours=23)).isoformat()
     assert await cog.run_country_scan_if_due() is False
-    api.get_locations.assert_not_awaited()
+    api.get_country.assert_not_awaited()
     db.countries.assert_not_awaited()
 
 
@@ -391,24 +415,35 @@ async def test_country_scan_runs_when_last_scan_over_a_day(cog, db, api):
     db.get_setting.return_value = (_utcnow() - timedelta(hours=25)).isoformat()
     db.list.return_value = [_tracked("#A")]
     assert await cog.run_country_scan_if_due() is True
-    api.get_locations.assert_awaited_once()
+    assert sorted(c.args[0] for c in api.get_country.await_args_list) == ["IN", "US"]
 
 
 async def test_country_scan_failed_list_keeps_previous_country(cog, db, api):
     db.list.return_value = [_tracked("#US1", "US"), _tracked("#X", "IN")]
-    api.get_locations.return_value = [{"countryCode": "US"}, {"countryCode": "IN"}]
     api.country_lists.update({"US": bs.ApiUnavailableError("down"), "IN": []})
     await cog.run_country_scan_if_due()
     assert db.countries.await_args.args[0] == {"#US1": "US", "#X": None}
 
 
-async def test_country_scan_without_locations_changes_nothing(cog, db, api):
+async def test_country_scan_skips_countries_the_rankings_do_not_cover(cog, db, api):
+    # A 404 means the rankings don't cover that country: it is not a failure,
+    # so a club last seen there is cleared instead of kept.
+    db.list.return_value = [_tracked("#IN1", "US"), _tracked("#OLD", "US")]
+    api.country_lists.update(
+        {"US": bs.NotFoundError("no such country"), "IN": [{"tag": "#IN1", "rank": 5}]}
+    )
+    assert await cog.run_country_scan_if_due() is True
+    assert db.countries.await_args.args[0] == {"#IN1": "IN", "#OLD": None}
+
+
+async def test_country_scan_changes_nothing_when_every_country_fails(cog, db, api):
     db.list.return_value = [_tracked("#US1", "US")]
-
-    async def boom():
-        raise bs.ApiUnavailableError("down")
-
-    api.get_locations.side_effect = boom
+    api.country_lists.update(
+        {
+            "US": bs.ApiUnavailableError("down"),
+            "IN": bs.AccessDeniedError("ip", "accessDenied.invalidIp"),
+        }
+    )
     assert await cog.run_country_scan_if_due() is False
     db.countries.assert_not_awaited()
     db.set_setting.assert_not_awaited()
@@ -482,3 +517,12 @@ async def test_country_scan_loop_skips_refresh_when_not_due(cog):
     cog.refresh_clubs = AsyncMock()
     await cog.country_scan_loop.coro(cog)
     cog.refresh_clubs.assert_not_awaited()
+
+
+def test_country_codes_are_unique_two_letter_codes():
+    from features.clubs import COUNTRY_CODES
+
+    assert 240 <= len(COUNTRY_CODES) <= 252
+    assert len(set(COUNTRY_CODES)) == len(COUNTRY_CODES)
+    assert all(len(c) == 2 and c.isalpha() and c.isupper() for c in COUNTRY_CODES)
+    assert {"US", "IN", "BR", "DE", "PH"} <= set(COUNTRY_CODES)
