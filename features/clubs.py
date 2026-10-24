@@ -1,22 +1,34 @@
 """Brawl Stars club tracking (#595): the clubs shown in the club-list channel.
 
 Community Managers (plus Admins and Founders) add and remove tracked clubs with
-slash commands. A club's country is never entered: the refresh loop (#616)
-detects it from the country rankings, since a club only has a country rank
-when it appears in that country's top 200.
+slash commands. Three background jobs keep their data current (#616):
+
+- every 30 minutes, each club's stats plus its country and global rank;
+- every 3 hours, each member's current ranked rank, reduced to per-club
+  aggregates and spread out so ~1,350 player requests never burst;
+- once a day, each club's country. The API has no country field, and a club
+  only has a country rank when it is in that country's top 200, so the bot
+  scans every country's top 200 and records where each club appears.
 """
 
-from datetime import datetime, timezone
+import asyncio
+from datetime import datetime, timedelta, timezone
 
 import discord
 from discord import app_commands
-from discord.ext import commands
+from discord.ext import commands, tasks
 
 from database.mongo import (
     add_tracked_club,
     count_tracked_clubs,
+    get_setting,
     list_tracked_clubs,
+    mark_club_failing,
     remove_tracked_club,
+    save_club_countries,
+    save_club_ranked,
+    save_club_refresh,
+    set_setting,
 )
 from features import brawl_stars_client as bs
 from features.config import CLUB_MANAGER_ROLES, MAX_TRACKED_CLUBS
@@ -25,6 +37,69 @@ EMBED_DESCRIPTION_LIMIT = 4096
 EMBEDS_PER_MESSAGE = 10
 NO_PERMISSION = "❌ You don't have permission to manage tracked clubs."
 API_UNAVAILABLE = "❌ The Brawl Stars API is unavailable right now. Try again later."
+
+# Player requests for the ranked update are spread evenly over this window.
+RANKED_SPREAD_SECONDS = 2 * 60 * 60
+COUNTRY_SCAN_INTERVAL = timedelta(hours=24)
+COUNTRY_SCAN_SPACING_SECONDS = 1
+COUNTRY_SCAN_SETTING = "club_country_scan_at"
+
+
+async def _pause(seconds: float) -> None:
+    await asyncio.sleep(seconds)
+
+
+def _utcnow() -> datetime:
+    # Naive UTC, matching what Mongo stores and returns.
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+def build_snapshot(club: dict, country_rank, global_rank) -> dict:
+    """The stats shown for one club. Member names and tags are not kept."""
+    members = club.get("members") or []
+    trophies = [m.get("trophies", 0) for m in members]
+    president = next((m for m in members if m.get("role") == "president"), None)
+    return {
+        "trophies": club.get("trophies", 0),
+        "required_trophies": club.get("requiredTrophies", 0),
+        "member_count": len(members),
+        "president": president.get("name") if president else None,
+        "vice_presidents": sum(1 for m in members if m.get("role") == "vicePresident"),
+        "seniors": sum(1 for m in members if m.get("role") == "senior"),
+        "min_member_trophies": min(trophies) if trophies else None,
+        "max_member_trophies": max(trophies) if trophies else None,
+        "country_rank": country_rank,
+        "global_rank": global_rank,
+    }
+
+
+def build_ranked(players: list[dict]) -> dict | None:
+    """Lowest and highest current rank plus members per tier, or None with no data."""
+    ranked = [
+        p
+        for p in players
+        if p.get("rankedRank") is not None and p.get("rankedRankName")
+    ]
+    if not ranked:
+        return None
+    lowest = min(ranked, key=lambda p: p["rankedRank"])
+    highest = max(ranked, key=lambda p: p["rankedRank"])
+    tiers: dict[str, int] = {}
+    for p in ranked:
+        tier = p["rankedRankName"].split()[0]
+        tiers[tier] = tiers.get(tier, 0) + 1
+    return {
+        "min_rank": lowest["rankedRank"],
+        "min_rank_name": lowest["rankedRankName"],
+        "max_rank": highest["rankedRank"],
+        "max_rank_name": highest["rankedRankName"],
+        "tier_counts": tiers,
+        "players_counted": len(ranked),
+    }
+
+
+def _rank_lookup(items: list[dict]) -> dict[str, int]:
+    return {bs.normalize_tag(item["tag"]): item["rank"] for item in items}
 
 
 def is_club_manager(member) -> bool:
@@ -67,12 +142,180 @@ def _chunk_lines(lines: list[str], limit: int = EMBED_DESCRIPTION_LIMIT) -> list
 class ClubTracking(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
+        # The 30-minute loop and /club-add or /club-remove share this, so two
+        # refreshes never run (or edit the club-list messages) at once.
+        self._refresh_lock = asyncio.Lock()
+
+    async def cog_load(self):
+        self.club_refresh_loop.start()
+        self.ranked_loop.start()
+        self.country_scan_loop.start()
 
     async def cog_unload(self):
+        self.club_refresh_loop.cancel()
+        self.ranked_loop.cancel()
+        self.country_scan_loop.cancel()
         await bs.close()
 
+    # --- 30-minute club refresh ---
+
     async def request_refresh(self):
-        """Refresh the club-list channel now. Filled in by the refresh loop (#616)."""
+        """Refresh now, after /club-add or /club-remove."""
+        await self.refresh_clubs()
+
+    async def on_refresh_complete(self):
+        """Runs after every refresh. History (#617) and the embeds (#618) hook in here."""
+
+    async def refresh_clubs(self):
+        async with self._refresh_lock:
+            clubs = await list_tracked_clubs()
+
+            global_ranks = None
+            try:
+                global_ranks = _rank_lookup(await bs.get_global_club_rankings())
+            except bs.BrawlStarsError as e:
+                print(f"Club refresh: global rankings failed: {e}")
+
+            country_ranks: dict[str, dict[str, int] | None] = {}
+            for code in sorted(
+                {c["country_code"] for c in clubs if c.get("country_code")}
+            ):
+                try:
+                    country_ranks[code] = _rank_lookup(
+                        await bs.get_country_club_rankings(code)
+                    )
+                except bs.BrawlStarsError as e:
+                    print(f"Club refresh: {code} rankings failed: {e}")
+                    country_ranks[code] = None
+
+            for tracked in clubs:
+                tag = tracked["_id"]
+                previous = tracked.get("snapshot") or {}
+                code = tracked.get("country_code")
+                # A failed rankings call keeps the previous rank instead of
+                # showing the club as unranked.
+                if code is None:
+                    country_rank = None
+                elif country_ranks.get(code) is None:
+                    country_rank = previous.get("country_rank")
+                else:
+                    country_rank = country_ranks[code].get(tag)
+                if global_ranks is None:
+                    global_rank = previous.get("global_rank")
+                else:
+                    global_rank = global_ranks.get(tag)
+
+                try:
+                    club = await bs.get_club(tag)
+                except bs.BrawlStarsError as e:
+                    print(
+                        f"Club refresh: {tag} failed: {type(e).__name__} ({e.reason})"
+                    )
+                    await mark_club_failing(tag)
+                    continue
+                await save_club_refresh(
+                    tag,
+                    club.get("name") or tracked.get("name") or tag,
+                    build_snapshot(club, country_rank, global_rank),
+                )
+
+            await self.on_refresh_complete()
+
+    @tasks.loop(minutes=30)
+    async def club_refresh_loop(self):
+        try:
+            await self.refresh_clubs()
+        except Exception as e:
+            print(f"Club refresh loop error: {e}")
+
+    # --- Ranked update ---
+
+    async def run_ranked_update(self):
+        members_by_club: dict[str, list[str]] = {}
+        for tracked in await list_tracked_clubs():
+            tag = tracked["_id"]
+            try:
+                club = await bs.get_club(tag)
+            except bs.BrawlStarsError as e:
+                print(f"Ranked update: {tag} failed: {e}")
+                continue
+            members_by_club[tag] = [m["tag"] for m in club.get("members") or []]
+
+        total = sum(len(tags) for tags in members_by_club.values())
+        spacing = RANKED_SPREAD_SECONDS / total if total else 0
+        for club_tag, member_tags in members_by_club.items():
+            players = []
+            for member_tag in member_tags:
+                try:
+                    players.append(await bs.get_player(member_tag))
+                except bs.BrawlStarsError as e:
+                    print(f"Ranked update: player {member_tag} failed: {e}")
+                await _pause(spacing)
+            await save_club_ranked(club_tag, build_ranked(players))
+
+    @tasks.loop(hours=3)
+    async def ranked_loop(self):
+        try:
+            await self.run_ranked_update()
+        except Exception as e:
+            print(f"Ranked update loop error: {e}")
+
+    # --- Daily country scan ---
+
+    async def run_country_scan_if_due(self) -> bool:
+        """Detect each club's country if the last scan was a day ago. Returns True if it ran."""
+        last = await get_setting(COUNTRY_SCAN_SETTING)
+        if last and _utcnow() - datetime.fromisoformat(last) < COUNTRY_SCAN_INTERVAL:
+            return False
+
+        try:
+            locations = await bs.get_locations()
+        except bs.BrawlStarsError as e:
+            print(f"Country scan: locations failed: {e}")
+            return False
+
+        clubs = await list_tracked_clubs()
+        tracked_tags = {c["_id"] for c in clubs}
+        found: dict[str, str] = {}
+        failed: set[str] = set()
+        for location in locations:
+            code = location["countryCode"]
+            try:
+                for item in await bs.get_country_club_rankings(code):
+                    tag = bs.normalize_tag(item["tag"])
+                    if tag in tracked_tags:
+                        found[tag] = code
+            except bs.BrawlStarsError as e:
+                print(f"Country scan: {code} failed: {e}")
+                failed.add(code)
+            await _pause(COUNTRY_SCAN_SPACING_SECONDS)
+
+        countries = {}
+        for club in clubs:
+            previous = club.get("country_code")
+            # Keep a country we could not re-check rather than clearing it.
+            keep = previous if previous in failed else None
+            countries[club["_id"]] = found.get(club["_id"], keep)
+
+        await save_club_countries(countries)
+        await set_setting(COUNTRY_SCAN_SETTING, _utcnow().isoformat())
+        return True
+
+    @tasks.loop(hours=1)
+    async def country_scan_loop(self):
+        try:
+            # Refresh straight after a scan so new country ranks show without
+            # waiting up to 30 minutes for the next club refresh.
+            if await self.run_country_scan_if_due():
+                await self.refresh_clubs()
+        except Exception as e:
+            print(f"Country scan loop error: {e}")
+
+    @club_refresh_loop.before_loop
+    @ranked_loop.before_loop
+    @country_scan_loop.before_loop
+    async def _wait_until_ready(self):
+        await self.bot.wait_until_ready()
 
     async def club_tag_autocomplete(
         self, interaction: discord.Interaction, current: str
