@@ -245,3 +245,25 @@ async def test_close_closes_shared_session():
     await bs.close()
     session.close.assert_awaited_once()
     assert bs._session is None
+
+
+# --- Locations (#616) ---
+
+
+async def test_get_locations_returns_only_countries(env):
+    items = [
+        {"id": 32000000, "name": "Europe", "isCountry": False},
+        {
+            "id": 32000249,
+            "name": "United States",
+            "isCountry": True,
+            "countryCode": "US",
+        },
+        {"id": 32000113, "name": "India", "isCountry": True, "countryCode": "IN"},
+        {"id": 32000999, "name": "Odd", "isCountry": True},
+    ]
+    session = _FakeSession((200, {"items": items, "paging": {}}))
+    with _use(session):
+        result = await bs.get_locations()
+    assert [loc["countryCode"] for loc in result] == ["US", "IN"]
+    assert session.calls[0]["url"] == "https://api.brawlstars.com/v1/locations"
