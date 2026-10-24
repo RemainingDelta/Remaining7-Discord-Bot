@@ -12,6 +12,7 @@ slash commands. Three background jobs keep their data current (#616):
 """
 
 import asyncio
+import json
 import re
 import time
 import unicodedata
@@ -34,7 +35,13 @@ from database.mongo import (
     set_setting,
 )
 from features import brawl_stars_client as bs
-from features.config import CLUB_MANAGER_ROLES, MAX_TRACKED_CLUBS
+from features.brawl.commands import SUPERCELL_DISCLAIMER
+from features.config import (
+    CLUB_EMOJIS,
+    CLUB_LIST_CHANNEL_ID,
+    CLUB_MANAGER_ROLES,
+    MAX_TRACKED_CLUBS,
+)
 
 EMBED_DESCRIPTION_LIMIT = 4096
 EMBEDS_PER_MESSAGE = 10
@@ -379,6 +386,174 @@ def _rank_lookup(items: list[dict]) -> dict[str, int]:
     return {bs.normalize_tag(item["tag"]): item["rank"] for item in items}
 
 
+# --- Club-list board (#618) ---
+# One overview message plus a fixed set of club messages, posted once and then
+# edited in place on every refresh. The count never changes, so adding or
+# removing a club only changes what each message holds.
+
+CLUB_MESSAGES = 6
+CLUB_CAPACITY = 30
+BOARD_MESSAGES_SETTING = "club_list_message_ids"
+BOARD_TITLE = "Remaining 7 Esports"
+BOARD_FOOTER = f"Updating every 30 minutes · {SUPERCELL_DISCLAIMER}"
+BOARD_COLOR = discord.Color.gold()
+RANKED_TIERS = (
+    "BRONZE",
+    "SILVER",
+    "GOLD",
+    "DIAMOND",
+    "MYTHIC",
+    "LEGENDARY",
+    "MASTERS",
+    "PRO",
+)
+
+
+def _thousands(n: int) -> str:
+    return f"{n / 1000:.1f}k"
+
+
+def _flag(country_code: str) -> str:
+    """'US' -> the US flag emoji."""
+    return "".join(chr(0x1F1E6 + ord(ch) - ord("A")) for ch in country_code.upper())
+
+
+def _rank_label(rank_name: str) -> str:
+    """'SILVER I' -> 'Silver I'."""
+    tier, _, division = rank_name.partition(" ")
+    return f"{tier.title()} {division}".strip()
+
+
+def _sorted_by_trophies(clubs: list[dict]) -> list[dict]:
+    return sorted(
+        clubs,
+        key=lambda c: (c.get("snapshot") or {}).get("trophies") or 0,
+        reverse=True,
+    )
+
+
+def _club_card(club: dict) -> str:
+    e = CLUB_EMOJIS
+    snap = club.get("snapshot")
+    if not snap:
+        return "Not fetched yet"
+
+    ranks = []
+    if snap.get("country_rank") and club.get("country_code"):
+        ranks.append(f"{snap['country_rank']} in {_flag(club['country_code'])}")
+    if snap.get("global_rank"):
+        ranks.append(f"{e['global']} {snap['global_rank']}")
+
+    lines = [
+        f"{e['president']} {snap.get('president') or '—'}",
+        f"{e['trophy']} {snap.get('trophies', 0):,}",
+        f"{e['rank']} {' | '.join(ranks) if ranks else 'Not Ranked'}",
+    ]
+    if snap.get("min_member_trophies") is not None:
+        lines.append(
+            f"{e['range']} {_thousands(snap['min_member_trophies'])} - "
+            f"{_thousands(snap['max_member_trophies'])}"
+        )
+    ranked = club.get("ranked")
+    if ranked:
+        lines.append(
+            f"{e['ranked']} {_rank_label(ranked['min_rank_name'])} - "
+            f"{_rank_label(ranked['max_rank_name'])}"
+        )
+    lines += [
+        f"{e['required']} Req: {snap.get('required_trophies', 0):,}",
+        f"{e['vice_president']} {snap.get('vice_presidents', 0)}  "
+        f"{e['senior']} {snap.get('seniors', 0)}",
+        f"{e['members']} {snap.get('member_count', 0)}/{CLUB_CAPACITY}",
+    ]
+    return "\n".join(lines)
+
+
+def build_club_embeds(clubs: list[dict]) -> list[discord.Embed]:
+    """CLUB_MESSAGES embeds with the clubs spread evenly, highest trophies first."""
+    ordered = _sorted_by_trophies(clubs)
+    per_message, extra = divmod(len(ordered), CLUB_MESSAGES)
+    embeds, start = [], 0
+    for i in range(CLUB_MESSAGES):
+        size = per_message + (1 if i < extra else 0)
+        chunk = ordered[start : start + size]
+        start += size
+        embed = discord.Embed(
+            title=f"{BOARD_TITLE} | Club Stats" if i == 0 else None,
+            color=BOARD_COLOR,
+        )
+        for club in chunk:
+            embed.add_field(
+                name=(club.get("name") or club["_id"])[:256],
+                value=_club_card(club)[:1024],
+                inline=True,
+            )
+        if not chunk:
+            embed.description = "—"
+        embeds.append(embed)
+    embeds[-1].set_footer(text=BOARD_FOOTER)
+    embeds[-1].timestamp = datetime.now(timezone.utc)
+    return embeds
+
+
+def _ranked_distribution(clubs: list[dict]) -> str:
+    totals: dict[str, int] = {}
+    for club in clubs:
+        for tier, count in (
+            (club.get("ranked") or {}).get("tier_counts") or {}
+        ).items():
+            totals[tier] = totals.get(tier, 0) + count
+    players = sum(totals.values())
+    if not players:
+        return "No ranked data yet"
+    order = {tier: i for i, tier in enumerate(RANKED_TIERS)}
+    return " · ".join(
+        f"{tier.title()} {round(100 * count / players)}%"
+        for tier, count in sorted(totals.items(), key=lambda t: order.get(t[0], 99))
+    )
+
+
+def build_overview_embed(clubs: list[dict]) -> discord.Embed:
+    e = CLUB_EMOJIS
+    snaps = [c["snapshot"] for c in clubs if c.get("snapshot")]
+    n = len(snaps) or 1
+
+    def total(key):
+        return sum(s.get(key) or 0 for s in snaps)
+
+    members = total("member_count")
+    embed = discord.Embed(title=f"{BOARD_TITLE} | Overview", color=BOARD_COLOR)
+    fields = [
+        ("Total Clubs", f"{e['clubs']} {len(clubs)}"),
+        ("Total Trophies", f"{e['trophy']} {total('trophies'):,}"),
+        ("Members", f"{e['members']} {members}/{len(clubs) * CLUB_CAPACITY}"),
+        ("Average Trophies", f"{e['trophy']} {round(total('trophies') / n):,}"),
+        (
+            "Average Required",
+            f"{e['required']} {round(total('required_trophies') / n):,}",
+        ),
+        (
+            "Average Vice-Presidents",
+            f"{e['vice_president']} {round(total('vice_presidents') / n)}",
+        ),
+        ("Average Seniors", f"{e['senior']} {round(total('seniors') / n)}"),
+        (
+            "Average Members",
+            f"{e['members']} {round(members / n)}/{CLUB_CAPACITY}",
+        ),
+    ]
+    for name, value in fields:
+        embed.add_field(name=name, value=value, inline=True)
+    embed.add_field(
+        name=f"{e['ranked']} Ranked Distribution",
+        value=_ranked_distribution(clubs),
+        inline=False,
+    )
+    embed.set_footer(text=BOARD_FOOTER)
+    embed.timestamp = datetime.now(timezone.utc)
+    return embed
+
+
 def is_club_manager(member) -> bool:
     """Community Managers, Admins and Founders can manage tracked clubs."""
     if not isinstance(member, discord.Member):
@@ -441,7 +616,52 @@ class ClubTracking(commands.Cog):
         await self.refresh_clubs()
 
     async def on_refresh_complete(self):
-        """Runs after every refresh. History (#617) and the embeds (#618) hook in here."""
+        """Runs after every refresh. History (#617) also hooks in here."""
+        try:
+            await self.update_club_board()
+        except Exception as e:
+            print(f"Club board update error: {e}")
+
+    async def update_club_board(self):
+        """Edit the club-list messages in place, posting only ones that don't exist yet."""
+        channel = self.bot.get_channel(CLUB_LIST_CHANNEL_ID)
+        if channel is None:
+            print(f"Club board: channel {CLUB_LIST_CHANNEL_ID} not found")
+            return
+
+        clubs = await list_tracked_clubs()
+        embeds = [build_overview_embed(clubs), *build_club_embeds(clubs)]
+        try:
+            stored = [
+                int(i)
+                for i in json.loads(await get_setting(BOARD_MESSAGES_SETTING) or "[]")
+            ]
+        except (TypeError, ValueError):
+            stored = []
+
+        message_ids = []
+        for i, embed in enumerate(embeds):
+            message_id = stored[i] if i < len(stored) else None
+            if message_id is not None:
+                try:
+                    message = await channel.fetch_message(message_id)
+                    await message.edit(embed=embed)
+                    message_ids.append(message_id)
+                    continue
+                except discord.NotFound:
+                    pass  # Deleted by hand: post a replacement below.
+                except discord.HTTPException as e:
+                    # Keep the message and try again next refresh.
+                    print(f"Club board: could not edit {message_id}: {e}")
+                    message_ids.append(message_id)
+                    continue
+            message = await channel.send(embed=embed)
+            message_ids.append(message.id)
+
+        if message_ids != stored:
+            await set_setting(
+                BOARD_MESSAGES_SETTING, json.dumps([str(i) for i in message_ids])
+            )
 
     async def refresh_clubs(self):
         async with self._refresh_lock:
