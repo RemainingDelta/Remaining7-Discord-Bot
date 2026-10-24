@@ -1,8 +1,6 @@
-"""Tests for features/clubs.py and scripts/seed_tracked_clubs.py, from #615's acceptance criteria."""
+"""Tests for features/clubs.py and the tracked club helpers, from #615's acceptance criteria."""
 
-import importlib.util
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import discord
@@ -15,10 +13,6 @@ from features.config import (
     FOUNDER_ROLE_ID,
     MAX_TRACKED_CLUBS,
     MEMBER_ROLE_ID,
-)
-
-SCRIPT_PATH = (
-    Path(__file__).resolve().parent.parent / "scripts" / "seed_tracked_clubs.py"
 )
 
 
@@ -340,65 +334,6 @@ async def test_autocomplete_returns_empty_on_error(cog, mock_interaction, db):
     assert await cog.club_tag_autocomplete(mock_interaction, "x") == []
 
 
-# --- Seed script ---
-
-
-def _load_seed():
-    spec = importlib.util.spec_from_file_location("seed_tracked_clubs", SCRIPT_PATH)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-def test_seed_list_has_45_unique_tags():
-    seed = _load_seed()
-    normalized = [bs.normalize_tag(t) for t in seed.CLUB_TAGS]
-    assert len(normalized) == 45
-    assert len(set(normalized)) == 45
-
-
-async def test_seed_reports_each_outcome():
-    seed = _load_seed()
-
-    async def fake_get_club(tag):
-        if tag == "#NAH":
-            raise bs.NotFoundError("not found")
-        if tag == "#DWN":
-            raise bs.ApiUnavailableError("down")
-        return {"tag": tag, "name": f"Club {tag}"}
-
-    add = AsyncMock(side_effect=lambda tag, name: tag != "#DUP")
-    with (
-        patch.object(seed.bs, "get_club", new=fake_get_club),
-        patch.object(seed, "add_tracked_club", new=add),
-        patch.object(seed, "count_tracked_clubs", new=AsyncMock(return_value=0)),
-    ):
-        results = dict(await seed.seed(["GUD", "NAH", "DUP", "DWN"]))
-    assert results == {
-        "#GUD": "added",
-        "#NAH": "not found",
-        "#DUP": "already tracked",
-        "#DWN": "API error",
-    }
-
-
-async def test_seed_stops_at_cap():
-    seed = _load_seed()
-    add = AsyncMock(return_value=True)
-    with (
-        patch.object(seed.bs, "get_club", new=AsyncMock(return_value={"name": "X"})),
-        patch.object(seed, "add_tracked_club", new=add),
-        patch.object(
-            seed,
-            "count_tracked_clubs",
-            new=AsyncMock(return_value=MAX_TRACKED_CLUBS - 1),
-        ),
-    ):
-        results = dict(await seed.seed(["AAA", "BBB"]))
-    assert results == {"#AAA": "added", "#BBB": "skipped: 50-club limit reached"}
-    assert add.await_count == 1
-
-
 # --- Mongo helpers ---
 
 
@@ -451,18 +386,6 @@ async def test_remove_untracked_club_returns_false():
     fake.tracked_clubs.delete_one.return_value = MagicMock(deleted_count=0)
     with patch.object(mongo, "db", fake):
         assert await mongo.remove_tracked_club("#ABC") is False
-
-
-async def test_seed_refuses_to_run_without_database():
-    seed = _load_seed()
-    get_club = AsyncMock()
-    with (
-        patch.object(seed.mongo, "db", None),
-        patch.object(seed.bs, "get_club", new=get_club),
-        pytest.raises(SystemExit),
-    ):
-        await seed.main()
-    get_club.assert_not_awaited()
 
 
 async def test_list_reply_is_public(cog, manager, db, api):
