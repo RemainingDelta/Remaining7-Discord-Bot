@@ -99,43 +99,40 @@ class ClubTracking(commands.Cog):
         if not is_club_manager(interaction.user):
             await interaction.response.send_message(NO_PERMISSION, ephemeral=True)
             return
-        await interaction.response.defer(ephemeral=True, thinking=True)
+        await interaction.response.defer(thinking=True)
 
         try:
             tag = bs.normalize_tag(tag)
         except ValueError:
-            await interaction.followup.send("❌ Enter a club tag.", ephemeral=True)
+            await interaction.followup.send("❌ Enter a club tag.")
             return
 
         if await count_tracked_clubs() >= MAX_TRACKED_CLUBS:
             await interaction.followup.send(
                 f"❌ The club list is full ({MAX_TRACKED_CLUBS} clubs). "
-                "Remove a club before adding another.",
-                ephemeral=True,
+                "Remove a club before adding another."
             )
             return
 
         try:
             club = await bs.get_club(tag)
         except bs.NotFoundError:
-            await interaction.followup.send(
-                f"❌ No club with tag `{tag}` exists.", ephemeral=True
-            )
+            await interaction.followup.send(f"❌ No club with tag `{tag}` exists.")
             return
         except (bs.AccessDeniedError, bs.ApiUnavailableError) as e:
             print(f"Club add: API error for {tag}: {e} ({e.reason})")
-            await interaction.followup.send(API_UNAVAILABLE, ephemeral=True)
+            await interaction.followup.send(API_UNAVAILABLE)
             return
 
         name = club.get("name") or tag
         if not await add_tracked_club(tag, name):
             await interaction.followup.send(
-                f"❌ **{name}** (`{tag}`) is already tracked.", ephemeral=True
+                f"❌ **{name}** (`{tag}`) is already tracked."
             )
             return
 
         await interaction.followup.send(
-            f"✅ Added **{name}** (`{tag}`) to the club list.", ephemeral=True
+            f"✅ Added **{name}** (`{tag}`) to the club list."
         )
         await self.request_refresh()
 
@@ -148,23 +145,20 @@ class ClubTracking(commands.Cog):
         if not is_club_manager(interaction.user):
             await interaction.response.send_message(NO_PERMISSION, ephemeral=True)
             return
-        await interaction.response.defer(ephemeral=True, thinking=True)
+        await interaction.response.defer(thinking=True)
 
         try:
             tag = bs.normalize_tag(tag)
         except ValueError:
-            await interaction.followup.send("❌ Enter a club tag.", ephemeral=True)
+            await interaction.followup.send("❌ Enter a club tag.")
             return
 
         if not await remove_tracked_club(tag):
-            await interaction.followup.send(
-                f"❌ `{tag}` is not tracked.", ephemeral=True
-            )
+            await interaction.followup.send(f"❌ `{tag}` is not tracked.")
             return
 
         await interaction.followup.send(
-            f"✅ Removed `{tag}` from the club list. Its history is kept.",
-            ephemeral=True,
+            f"✅ Removed `{tag}` from the club list. Its history is kept."
         )
         await self.request_refresh()
 
@@ -173,14 +167,14 @@ class ClubTracking(commands.Cog):
         if not is_club_manager(interaction.user):
             await interaction.response.send_message(NO_PERMISSION, ephemeral=True)
             return
-        await interaction.response.defer(ephemeral=True, thinking=True)
+        await interaction.response.defer(thinking=True)
 
         clubs = sorted(
             await list_tracked_clubs(), key=lambda c: (c.get("name") or "").lower()
         )
         if not clubs:
             await interaction.followup.send(
-                "No clubs are tracked yet. Add one with `/club-add`.", ephemeral=True
+                "No clubs are tracked yet. Add one with `/club-add`."
             )
             return
 
@@ -197,7 +191,7 @@ class ClubTracking(commands.Cog):
         ]
         for start in range(0, len(embeds), EMBEDS_PER_MESSAGE):
             await interaction.followup.send(
-                embeds=embeds[start : start + EMBEDS_PER_MESSAGE], ephemeral=True
+                embeds=embeds[start : start + EMBEDS_PER_MESSAGE]
             )
 
 

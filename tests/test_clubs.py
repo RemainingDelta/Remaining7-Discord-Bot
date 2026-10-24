@@ -57,6 +57,16 @@ def _all_ephemeral(interaction):
     return bool(calls) and all(c.kwargs.get("ephemeral") for c in calls)
 
 
+def _none_ephemeral(interaction):
+    """Replies and the deferred "thinking" message are all visible to the channel."""
+    calls = (
+        interaction.response.send_message.call_args_list
+        + interaction.response.defer.call_args_list
+        + interaction.followup.send.call_args_list
+    )
+    return bool(calls) and not any(c.kwargs.get("ephemeral") for c in calls)
+
+
 @pytest.fixture
 def db():
     """Patch the tracked club helpers where features.clubs uses them."""
@@ -151,7 +161,7 @@ async def test_add_saves_normalized_tag_and_name(cog, manager, db, api):
     api.assert_awaited_once_with("#ABC")
     db.add.assert_awaited_once_with("#ABC", "Remaining Delta")
     assert "Remaining Delta" in _sent_text(manager)
-    assert _all_ephemeral(manager)
+    assert _none_ephemeral(manager)
 
 
 async def test_add_refreshes_once_on_success(cog, manager, db, api):
@@ -233,7 +243,7 @@ async def test_remove_deletes_and_refreshes(cog, manager, db, api):
     db.remove.assert_awaited_once_with("#ABC")
     cog.request_refresh.assert_awaited_once()
     db.add.assert_not_awaited()
-    assert _all_ephemeral(manager)
+    assert _none_ephemeral(manager)
 
 
 async def test_remove_untracked_club_says_so(cog, manager, db, api):
@@ -453,3 +463,18 @@ async def test_seed_refuses_to_run_without_database():
     ):
         await seed.main()
     get_club.assert_not_awaited()
+
+
+async def test_list_reply_is_public(cog, manager, db, api):
+    db.list.return_value = [_club("#ABC", "Remaining Delta")]
+    await _list(cog, manager)
+    assert _none_ephemeral(manager)
+
+
+@pytest.mark.parametrize(
+    "error", [bs.NotFoundError("not found"), bs.ApiUnavailableError("down")]
+)
+async def test_add_errors_are_public(cog, manager, db, api, error):
+    api.side_effect = error
+    await _add(cog, manager)
+    assert _none_ephemeral(manager)
