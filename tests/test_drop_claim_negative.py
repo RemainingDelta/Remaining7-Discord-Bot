@@ -97,7 +97,7 @@ STAFF_ROLES = pytest.mark.parametrize(
 async def test_staff_can_claim_negative_drop(mock_interaction, role_id):
     interaction = _claim_interaction(mock_interaction, [role_id])
     inc = await _click(DropClaimButton(-100), interaction)
-    inc.assert_awaited_once_with("987654321", -100)
+    inc.assert_awaited_once_with("987654321", -100, source="drop")
 
 
 @pytest.mark.asyncio
@@ -121,7 +121,7 @@ async def test_staff_cannot_claim_zero_drop(mock_interaction, role_id):
 async def test_non_staff_can_claim_any_drop(mock_interaction, amount):
     interaction = _claim_interaction(mock_interaction, [])
     inc = await _click(DropClaimButton(amount), interaction)
-    inc.assert_awaited_once_with("987654321", amount)
+    inc.assert_awaited_once_with("987654321", amount, source="drop")
 
 
 @pytest.mark.asyncio

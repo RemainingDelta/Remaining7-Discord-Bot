@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 import hashlib
 import os
 import re
@@ -85,13 +85,210 @@ async def update_user_balance(user_id: str, amount: int):
     )
 
 
-async def increment_user_balance(user_id: str, amount: int):
-    """Atomically increments a user's balance using $inc."""
+# Where an earned token came from (#606). Each one is a counter under the user
+# doc's `token_sources` map, bumped in the same $inc as `balance` so a user's
+# breakdown can never disagree with what they were actually paid. Add a source
+# here to start tracking a new earning path.
+TOKEN_SOURCES = (
+    "chat",
+    "daily",
+    "drop",
+    "booster_drop",
+    "event",
+    "poll",
+    "quest",
+    "admin",
+)
+
+
+def _token_source_inc(source: str | None, amount: int) -> dict:
+    """The `token_sources` part of a balance $inc.
+
+    Only positive grants count as earned: a negative drop or admin deduction moves
+    the balance but doesn't un-earn anything. `source=None` means "not earning",
+    which is what redemption refunds pass, since those tokens were already counted
+    under their real source when first earned.
+    """
+    if source is None:
+        return {}
+    if source not in TOKEN_SOURCES:
+        raise ValueError(f"Unknown token source: {source}")
+    if amount <= 0:
+        return {}
+    return {f"token_sources.{source}": amount}
+
+
+async def increment_user_balance(user_id: str, amount: int, source: str | None = None):
+    """Atomically increments a user's balance using $inc.
+
+    Pass `source` (one of TOKEN_SOURCES) when the tokens are earned, so the grant
+    is recorded in the user's per-source breakdown.
+    """
+    inc = {"balance": amount, **_token_source_inc(source, amount)}
     if db is None:
         return
-    await db.users.update_one(
-        {"_id": str(user_id)}, {"$inc": {"balance": amount}}, upsert=True
+    await db.users.update_one({"_id": str(user_id)}, {"$inc": inc}, upsert=True)
+    if len(inc) > 1:
+        await _record_earning(user_id, source, amount)
+
+
+async def _record_earning(user_id: str, source: str, amount: int):
+    """The one hook every earning grant calls after its balance write.
+
+    Adds the grant to the user's `user_token_days` doc for today (UTC), the history
+    `recent_earnings_breakdown` walks to explain how a purchase was paid for, and to
+    the server-wide `token_stats` bucket (#607). Both are separate collections, so
+    neither can be atomic with the balance: each failure is printed and swallowed so
+    history can never break a payout that has already landed.
+    """
+    day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    try:
+        await db.user_token_days.update_one(
+            {"_id": f"{user_id}:{day}"},
+            {
+                "$inc": {source: amount},
+                "$setOnInsert": {"user_id": str(user_id), "day": day},
+            },
+            upsert=True,
+        )
+    except Exception as e:
+        print(f"⚠️ user_token_days write failed ({user_id} {source} +{amount}): {e}")
+    await _log_token_generation(source, amount)
+
+
+def split_recent_earnings(days: list[dict], amount: int) -> dict:
+    """How the most recent `amount` earned tokens break down by source.
+
+    `days` are user_token_days docs, newest first. Whole days are taken until the
+    total reaches `amount`; the oldest day needed is split proportionally, since
+    order within a day isn't recorded. Any shortfall (history runs out) is
+    `untracked`: tokens earned before tracking began. Always sums to `amount`.
+    """
+    result: dict = {}
+    remaining = amount
+    for doc in days:
+        if remaining <= 0:
+            break
+        day = {s: n for s, n in doc.items() if s in TOKEN_SOURCES and n > 0}
+        total = sum(day.values())
+        if total == 0:
+            continue
+        if total > remaining:
+            share = {s: n * remaining // total for s, n in day.items()}
+            largest = max(day, key=day.get)
+            share[largest] += remaining - sum(share.values())
+            day = {s: n for s, n in share.items() if n > 0}
+        for s, n in day.items():
+            result[s] = result.get(s, 0) + n
+        remaining -= sum(day.values())
+    if remaining > 0:
+        result["untracked"] = remaining
+    return result
+
+
+async def recent_earnings_breakdown(user_id: str, amount: int) -> dict:
+    """split_recent_earnings over the user's history, read newest day first and
+    only as far back as `amount` needs."""
+    if db is None:
+        return {"untracked": amount}
+    days = []
+    covered = 0
+    cursor = db.user_token_days.find({"user_id": str(user_id)}).sort("day", -1)
+    async for doc in cursor:
+        days.append(doc)
+        covered += sum(n for s, n in doc.items() if s in TOKEN_SOURCES)
+        if covered >= amount:
+            break
+    return split_recent_earnings(days, amount)
+
+
+async def save_purchase_snapshot(user_id: str, item: str, price: int, breakdown: dict):
+    """Record how the tokens for one /buy were earned, for that item's ticket."""
+    if db is None:
+        return
+    await db.purchase_snapshots.insert_one(
+        {
+            "user_id": str(user_id),
+            "item": item,
+            "price": price,
+            "breakdown": breakdown,
+            "created_at": datetime.now(timezone.utc),
+            "used_channel_id": None,
+        }
     )
+
+
+async def claim_purchase_snapshot(user_id: str, item: str, channel_id: int):
+    """Take the oldest unused snapshot for this item and tie it to a ticket.
+
+    Atomic, so two tickets for two copies of the same item each get their own
+    purchase. Returns the snapshot, or None if the item wasn't bought since
+    tracking began (e.g. it was granted).
+    """
+    if db is None:
+        return None
+    return await db.purchase_snapshots.find_one_and_update(
+        {"user_id": str(user_id), "item": item, "used_channel_id": None},
+        {"$set": {"used_channel_id": channel_id}},
+        sort=[("created_at", 1)],
+    )
+
+
+async def ensure_token_history_indexes():
+    """Indexes for the per-user earning history and purchase snapshots."""
+    if db is None:
+        return
+    await db.user_token_days.create_index([("user_id", 1), ("day", -1)])
+    await db.purchase_snapshots.create_index(
+        [("user_id", 1), ("item", 1), ("created_at", 1)]
+    )
+
+
+async def _log_token_generation(source: str, amount: int):
+    """Add an earned grant to today's server-wide `token_stats` bucket (#607).
+
+    One doc per UTC day (`_id = "YYYY-MM-DD"`), so a window is a cheap range read.
+    Called after the balance write and never atomic with it, since it's a separate
+    collection: a failure here is logged and swallowed so analytics can never break
+    a payout that has already landed.
+    """
+    day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    try:
+        await db.token_stats.update_one(
+            {"_id": day}, {"$inc": {source: amount}}, upsert=True
+        )
+    except Exception as e:
+        print(f"⚠️ token_stats write failed ({source} +{amount}): {e}")
+
+
+async def get_token_stats(days: int, today: date | None = None) -> dict:
+    """Server-wide earned tokens by source over the last `days` UTC days.
+
+    The window includes today, so `days=1` is today only.
+    """
+    if db is None:
+        return {}
+    today = today or datetime.now(timezone.utc).date()
+    start = (today - timedelta(days=days - 1)).isoformat()
+    docs = await db.token_stats.find({"_id": {"$gte": start}}).to_list(length=None)
+    totals: dict = {}
+    for doc in docs:
+        for source, amount in doc.items():
+            if source != "_id":
+                totals[source] = totals.get(source, 0) + amount
+    return totals
+
+
+async def get_token_sources(user_id: str) -> dict:
+    """A user's earned tokens by source, e.g. {"chat": 120, "daily": 900}.
+
+    Reads the doc directly rather than through get_user_data so looking someone up
+    doesn't create a brawl profile for them. Empty for untracked users.
+    """
+    if db is None:
+        return {}
+    doc = await db.users.find_one({"_id": str(user_id)}, {"token_sources": 1})
+    return (doc or {}).get("token_sources", {})
 
 
 async def claim_daily_reward(
@@ -113,7 +310,7 @@ async def claim_daily_reward(
     """
     if db is None:
         return None
-    return await db.users.find_one_and_update(
+    updated = await db.users.find_one_and_update(
         {
             "_id": str(user_id),
             "$or": [
@@ -121,9 +318,15 @@ async def claim_daily_reward(
                 {"daily_last_claimed": {"$lt": cutoff_ts}},
             ],
         },
-        {"$inc": {"balance": int(amount)}, "$set": {"daily_last_claimed": now_ts}},
+        {
+            "$inc": {"balance": int(amount), **_token_source_inc("daily", int(amount))},
+            "$set": {"daily_last_claimed": now_ts},
+        },
         return_document=True,  # AFTER — surface the new balance for the embed
     )
+    if updated is not None and amount > 0:
+        await _record_earning(user_id, "daily", int(amount))
+    return updated
 
 
 # --- POLL REWARD HELPERS ---
@@ -1780,11 +1983,14 @@ async def add_quest_reward(user_id: str, tokens: int, exp: int):
     inc = {}
     if tokens:
         inc["balance"] = tokens
+        inc.update(_token_source_inc("quest", tokens))
     if exp:
         inc["exp"] = exp
     if not inc:
         return
     await db.users.update_one({"_id": str(user_id)}, {"$inc": inc}, upsert=True)
+    if tokens > 0:
+        await _record_earning(user_id, "quest", tokens)
 
 
 async def mark_quest_rewarded(user_id: str, q_key: str):
