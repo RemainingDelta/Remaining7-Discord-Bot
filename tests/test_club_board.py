@@ -78,7 +78,7 @@ def _card_name(field) -> str:
 
 
 def test_club_stats_shows_only_the_top_nine_by_trophies():
-    from features.clubs import CLUBS_ON_BOARD, build_club_stats_embed
+    from features.clubs.board import CLUBS_ON_BOARD, build_club_stats_embed
 
     clubs = [_club(f"#T{i}", f"Club {i}", 1_000_000 + i) for i in range(45)]
     names = [_card_name(f) for f in build_club_stats_embed(clubs).fields]
@@ -87,7 +87,7 @@ def test_club_stats_shows_only_the_top_nine_by_trophies():
 
 
 def test_clubs_appear_in_descending_trophy_order():
-    from features.clubs import build_club_stats_embed
+    from features.clubs.board import build_club_stats_embed
 
     clubs = [
         _club("#A", "Low", 1_000_000),
@@ -99,14 +99,14 @@ def test_clubs_appear_in_descending_trophy_order():
 
 
 def test_fewer_than_nine_clubs_are_all_shown():
-    from features.clubs import build_club_stats_embed
+    from features.clubs.board import build_club_stats_embed
 
     clubs = [_club(f"#T{i}", f"Club {i}", i) for i in range(5)]
     assert len(build_club_stats_embed(clubs).fields) == 5
 
 
 def test_no_clubs_shows_a_placeholder_line():
-    from features.clubs import build_club_stats_embed
+    from features.clubs.board import build_club_stats_embed
 
     embed = build_club_stats_embed([])
     assert not embed.fields
@@ -114,7 +114,7 @@ def test_no_clubs_shows_a_placeholder_line():
 
 
 def test_club_card_shows_stats():
-    from features.clubs import build_club_stats_embed
+    from features.clubs.board import build_club_stats_embed
 
     club = _club(
         "#A",
@@ -145,14 +145,14 @@ def test_club_card_shows_stats():
 
 
 def test_unranked_club_shows_not_ranked():
-    from features.clubs import build_club_stats_embed
+    from features.clubs.board import build_club_stats_embed
 
     field = build_club_stats_embed([_club("#A", "Liars", 2_754_750)]).fields[0]
     assert "Not Ranked" in field.value
 
 
 def test_globally_ranked_club_without_country_rank_shows_global_only():
-    from features.clubs import build_club_stats_embed
+    from features.clubs.board import build_club_stats_embed
 
     field = build_club_stats_embed(
         [_club("#A", "X", 5_000_000, global_rank=12)]
@@ -162,14 +162,14 @@ def test_globally_ranked_club_without_country_rank_shows_global_only():
 
 
 def test_club_without_ranked_data_shows_no_ranked_range():
-    from features.clubs import build_club_stats_embed
+    from features.clubs.board import build_club_stats_embed
 
     field = build_club_stats_embed([_club("#A", "X", 1_000_000, ranked=None)]).fields[0]
     assert " I -" not in field.value and "Silver" not in field.value
 
 
 def test_club_not_fetched_yet_is_still_listed():
-    from features.clubs import build_club_stats_embed
+    from features.clubs.board import build_club_stats_embed
 
     field = build_club_stats_embed([_club("#A", "New Club", None)]).fields[0]
     assert _card_name(field) == "New Club"
@@ -177,7 +177,7 @@ def test_club_not_fetched_yet_is_still_listed():
 
 
 def test_fifty_long_named_clubs_fit_discord_limits():
-    from features.clubs import build_club_stats_embed
+    from features.clubs.board import build_club_stats_embed
 
     clubs = [
         _club(
@@ -200,7 +200,7 @@ def test_fifty_long_named_clubs_fit_discord_limits():
 
 
 def test_club_name_links_to_brawlify():
-    from features.clubs import build_club_stats_embed
+    from features.clubs.board import build_club_stats_embed
 
     field = build_club_stats_embed([_club("#2YYJJV9PC", "7 Dwarves", 1)]).fields[0]
     first_line = field.value.splitlines()[0]
@@ -208,14 +208,14 @@ def test_club_name_links_to_brawlify():
 
 
 def test_club_name_shows_on_card_not_field_title():
-    from features.clubs import build_club_stats_embed
+    from features.clubs.board import build_club_stats_embed
 
     field = build_club_stats_embed([_club("#A", "7 Dwarves", 1)]).fields[0]
     assert field.name.strip("\u200b") == ""
 
 
 def test_president_links_to_brawlify_player():
-    from features.clubs import build_club_stats_embed
+    from features.clubs.board import build_club_stats_embed
 
     club = _club("#A", "X", 1, president="R7 | SPARTAN", president_tag="#QQ0Y9PC")
     value = build_club_stats_embed([club]).fields[0].value
@@ -223,7 +223,7 @@ def test_president_links_to_brawlify_player():
 
 
 def test_president_without_tag_is_not_linked():
-    from features.clubs import build_club_stats_embed
+    from features.clubs.board import build_club_stats_embed
 
     club = _club("#A", "X", 1, president="Old Prez")
     value = build_club_stats_embed([club]).fields[0].value
@@ -234,7 +234,7 @@ def test_president_without_tag_is_not_linked():
 def test_names_show_as_typed_without_backslashes():
     # Discord doesn't apply backslash escapes inside link text, so a name like
     # "( ◡̀_◡́)" must be sent as-is or the backslash shows up.
-    from features.clubs import build_club_stats_embed
+    from features.clubs.board import build_club_stats_embed
 
     club = _club("#A", "Toxic_| x", 1, president="( ◡̀_◡́)Panda", president_tag="#P1")
     value = build_club_stats_embed([club]).fields[0].value
@@ -244,7 +244,7 @@ def test_names_show_as_typed_without_backslashes():
 
 
 def test_brackets_in_names_cannot_break_links():
-    from features.clubs import build_club_stats_embed
+    from features.clubs.board import build_club_stats_embed
 
     club = _club(
         "#A", "[7] Club", 1, president="[evil](https://x.y)", president_tag="#P1"
@@ -257,7 +257,7 @@ def test_brackets_in_names_cannot_break_links():
 
 
 def test_ranked_line_uses_tier_icons_for_every_tier():
-    from features.clubs import build_club_stats_embed
+    from features.clubs.board import build_club_stats_embed
 
     from features.config import CLUB_RANK_EMOJIS
 
@@ -280,7 +280,7 @@ def test_ranked_line_uses_tier_icons_for_every_tier():
 
 
 def test_board_footer_is_short_update_note_without_disclaimer():
-    from features.clubs import build_club_stats_embed, build_overview_embed
+    from features.clubs.board import build_club_stats_embed, build_overview_embed
 
     clubs = [_club(f"#T{i}", f"C{i}", i) for i in range(10)]
     for embed in (build_club_stats_embed(clubs), build_overview_embed(clubs)):
@@ -293,7 +293,7 @@ def test_board_footer_is_short_update_note_without_disclaimer():
 
 
 def test_overview_totals_and_averages():
-    from features.clubs import build_overview_embed
+    from features.clubs.board import build_overview_embed
 
     clubs = [
         _club("#A", "A", 6_000_000, member_count=30, vice_presidents=6, seniors=18),
@@ -316,7 +316,7 @@ def test_overview_totals_and_averages():
 
 
 def test_overview_ranked_distribution_adds_to_100():
-    from features.clubs import build_overview_embed
+    from features.clubs.board import build_overview_embed
 
     clubs = [
         _club(
@@ -343,7 +343,7 @@ def test_overview_ranked_distribution_adds_to_100():
 
 
 def test_overview_skips_clubs_without_snapshot_in_averages():
-    from features.clubs import build_overview_embed
+    from features.clubs.board import build_overview_embed
 
     clubs = [_club("#A", "A", 4_000_000), _club("#B", "B", None)]
     fields = {f.name: f.value for f in build_overview_embed(clubs).fields}
@@ -359,7 +359,7 @@ class _FakeChannel:
         self.messages = {}
         self._ids = itertools.count(1000)
         self.sends = 0
-        self.deleted = []
+        self.fetches = 0
 
     async def send(self, **kwargs):
         self.sends += 1
@@ -372,24 +372,30 @@ class _FakeChannel:
             msg.kwargs = kw
             msg.edits += 1
 
-        async def delete():
-            self.messages.pop(msg.id, None)
-            self.deleted.append(msg.id)
-
         msg.edit = AsyncMock(side_effect=edit)
-        msg.delete = AsyncMock(side_effect=delete)
         self.messages[msg.id] = msg
         return msg
 
+    def get_partial_message(self, message_id):
+        """Like discord.py: no request until edit, which 404s if it's gone."""
+        if message_id in self.messages:
+            return self.messages[message_id]
+        gone = MagicMock(spec=discord.PartialMessage)
+        gone.edit = AsyncMock(
+            side_effect=discord.NotFound(
+                MagicMock(status=404, reason="Not Found"), "gone"
+            )
+        )
+        return gone
+
     async def fetch_message(self, message_id):
-        if message_id not in self.messages:
-            raise discord.NotFound(MagicMock(status=404, reason="Not Found"), "gone")
-        return self.messages[message_id]
+        self.fetches += 1
+        raise AssertionError("the board should edit partial messages, not fetch them")
 
 
 @pytest.fixture
 def board(mock_bot):
-    from features.clubs import ClubTracking
+    from features.clubs.cog import ClubTracking
 
     channel = _FakeChannel()
     settings = {}
@@ -405,10 +411,10 @@ def board(mock_bot):
         side_effect=lambda cid: channel if cid == CLUB_LIST_CHANNEL_ID else None
     )
     with (
-        patch("features.clubs.get_setting", new=get_setting),
-        patch("features.clubs.set_setting", new=set_setting),
+        patch("features.clubs.cog.get_setting", new=get_setting),
+        patch("features.clubs.cog.set_setting", new=set_setting),
         patch(
-            "features.clubs.list_tracked_clubs", new=AsyncMock(return_value=clubs)
+            "features.clubs.cog.list_tracked_clubs", new=AsyncMock(return_value=clubs)
         ) as lst,
     ):
         yield MagicMock(
@@ -437,7 +443,7 @@ async def test_first_run_posts_exactly_two_messages_in_order(board):
 
 
 async def test_refreshes_add_remove_and_restart_reuse_the_same_messages(board):
-    from features.clubs import ClubTracking
+    from features.clubs.cog import ClubTracking
 
     await board.cog.update_club_board()
     first_ids = _stored_ids(board)
@@ -497,27 +503,12 @@ async def test_edit_failure_keeps_message_and_retries_later(board):
     assert board.channel.sends == 2
 
 
-async def test_old_extra_board_messages_are_deleted_once(board):
-    # The earlier layout posted 7 messages; the first update on the new layout
-    # keeps the first 2, deletes the rest, and saves only 2 IDs.
-    old = [await board.channel.send(embed=None) for _ in range(7)]
-    board.settings[BOARD_KEY] = json.dumps([str(m.id) for m in old])
-    sends_before = board.channel.sends
+async def test_board_edits_without_fetching_messages(board):
     await board.cog.update_club_board()
-    assert _stored_ids(board) == [old[0].id, old[1].id]
-    assert sorted(board.channel.deleted) == [m.id for m in old[2:]]
-    assert board.channel.sends == sends_before
-    assert old[0].edits == 1 and old[1].edits == 1
-    await board.cog.update_club_board()
-    assert len(board.channel.deleted) == 5
-
-
-async def test_already_deleted_extra_messages_are_ignored(board):
-    old = [await board.channel.send(embed=None) for _ in range(4)]
-    board.settings[BOARD_KEY] = json.dumps([str(m.id) for m in old])
-    del board.channel.messages[old[3].id]
-    await board.cog.update_club_board()
-    assert _stored_ids(board) == [old[0].id, old[1].id]
+    for _ in range(3):
+        await board.cog.update_club_board()
+    assert board.channel.fetches == 0
+    assert board.channel.sends == 2
 
 
 # --- Custom emoji (uploaded as application emoji on each bot) ---
@@ -547,7 +538,7 @@ def test_board_uses_brawltools_trophy_split():
 
 
 def test_card_and_overview_use_matching_trophy_icons():
-    from features.clubs import build_club_stats_embed, build_overview_embed
+    from features.clubs.board import build_club_stats_embed, build_overview_embed
 
     club = _club("#A", "X", 6_000_000)
     lines = build_club_stats_embed([club]).fields[0].value.splitlines()
@@ -563,14 +554,14 @@ def test_card_and_overview_use_matching_trophy_icons():
 
 
 def _distribution(clubs):
-    from features.clubs import build_overview_embed
+    from features.clubs.board import build_overview_embed
 
     embed = build_overview_embed(clubs)
     return next(f for f in embed.fields if "Ranked Distribution" in f.name)
 
 
 def test_overview_keeps_a_three_column_grid():
-    from features.clubs import build_overview_embed
+    from features.clubs.board import build_overview_embed
 
     embed = build_overview_embed([_club("#A", "A", 1)])
     inline = [f for f in embed.fields if f.inline]
@@ -612,7 +603,7 @@ def test_ranked_distribution_skips_tiers_that_round_to_zero():
 
 
 def test_overview_title_and_orange_bar():
-    from features.clubs import build_overview_embed
+    from features.clubs.board import build_overview_embed
 
     embed = build_overview_embed([_club("#A", "A", 1)])
     assert embed.title == "Overview from Remaining 7 Esports | Overview"
@@ -620,7 +611,7 @@ def test_overview_title_and_orange_bar():
 
 
 def test_club_stats_title_and_yellow_bar():
-    from features.clubs import build_club_stats_embed
+    from features.clubs.board import build_club_stats_embed
 
     embed = build_club_stats_embed([_club("#A", "A", 1)])
     assert embed.title == "Overview from Remaining 7 Esports | Club Stats"

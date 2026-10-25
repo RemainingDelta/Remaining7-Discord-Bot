@@ -66,16 +66,16 @@ def db():
     """Patch the tracked club helpers where features.clubs uses them."""
     with (
         patch(
-            "features.clubs.add_tracked_club", new=AsyncMock(return_value=True)
+            "features.clubs.cog.add_tracked_club", new=AsyncMock(return_value=True)
         ) as add,
         patch(
-            "features.clubs.remove_tracked_club", new=AsyncMock(return_value=True)
+            "features.clubs.cog.remove_tracked_club", new=AsyncMock(return_value=True)
         ) as remove,
         patch(
-            "features.clubs.list_tracked_clubs", new=AsyncMock(return_value=[])
+            "features.clubs.cog.list_tracked_clubs", new=AsyncMock(return_value=[])
         ) as list_,
         patch(
-            "features.clubs.count_tracked_clubs", new=AsyncMock(return_value=0)
+            "features.clubs.cog.count_tracked_clubs", new=AsyncMock(return_value=0)
         ) as count,
     ):
         yield MagicMock(add=add, remove=remove, list=list_, count=count)
@@ -92,10 +92,10 @@ def api():
 
 @pytest.fixture
 def cog(mock_bot):
-    from features.clubs import ClubTracking
+    from features.clubs.cog import ClubTracking
 
     c = ClubTracking(mock_bot)
-    c.request_refresh = AsyncMock()
+    c.refresh_clubs = AsyncMock()
     return c
 
 
@@ -160,14 +160,14 @@ async def test_add_saves_normalized_tag_and_name(cog, manager, db, api):
 
 async def test_add_refreshes_once_on_success(cog, manager, db, api):
     await _add(cog, manager)
-    cog.request_refresh.assert_awaited_once()
+    cog.refresh_clubs.assert_awaited_once()
 
 
 async def test_add_unknown_tag_saves_nothing(cog, manager, db, api):
     api.side_effect = bs.NotFoundError("not found")
     await _add(cog, manager)
     db.add.assert_not_awaited()
-    cog.request_refresh.assert_not_awaited()
+    cog.refresh_clubs.assert_not_awaited()
     assert "no club" in _sent_text(manager).lower()
 
 
@@ -194,12 +194,12 @@ async def test_add_empty_tag_is_rejected(cog, manager, db, api):
 async def test_add_duplicate_is_rejected(cog, manager, db, api):
     db.add.return_value = False
     await _add(cog, manager)
-    cog.request_refresh.assert_not_awaited()
+    cog.refresh_clubs.assert_not_awaited()
     assert "already" in _sent_text(manager).lower()
 
 
 async def test_add_with_and_without_hash_use_same_tag(cog, mock_bot, db, api):
-    from features.clubs import ClubTracking
+    from features.clubs.cog import ClubTracking
 
     tags = []
     for raw in ("#abc", "abc"):
@@ -209,7 +209,7 @@ async def test_add_with_and_without_hash_use_same_tag(cog, mock_bot, db, api):
         interaction.user = MagicMock(spec=discord.Member)
         _with_roles(interaction, COMMUNITY_MANAGER_ROLE_ID)
         c = ClubTracking(mock_bot)
-        c.request_refresh = AsyncMock()
+        c.refresh_clubs = AsyncMock()
         await _add(c, interaction, raw)
         tags.append(db.add.await_args.args[0])
     assert tags[0] == tags[1] == "#ABC"
@@ -235,7 +235,7 @@ async def test_add_rejected_at_cap(cog, manager, db, api):
 async def test_remove_deletes_and_refreshes(cog, manager, db, api):
     await _remove(cog, manager, "abc")
     db.remove.assert_awaited_once_with("#ABC")
-    cog.request_refresh.assert_awaited_once()
+    cog.refresh_clubs.assert_awaited_once()
     db.add.assert_not_awaited()
     assert _none_ephemeral(manager)
 
@@ -243,7 +243,7 @@ async def test_remove_deletes_and_refreshes(cog, manager, db, api):
 async def test_remove_untracked_club_says_so(cog, manager, db, api):
     db.remove.return_value = False
     await _remove(cog, manager)
-    cog.request_refresh.assert_not_awaited()
+    cog.refresh_clubs.assert_not_awaited()
     assert "not tracked" in _sent_text(manager).lower()
 
 
