@@ -13,6 +13,12 @@ from database.mongo import (
     get_user_data,
     update_user_balance,
     increment_user_balance,
+    TOKEN_SOURCES,
+    get_token_sources,
+    recent_earnings_breakdown,
+    save_purchase_snapshot,
+    claim_purchase_snapshot,
+    ensure_token_history_indexes,
     claim_daily_reward,
     claim_redemption_closure,
     get_leveling_data,
@@ -348,6 +354,27 @@ async def create_redemption_ticket(
         inline=True,
     )
     await ch.send(content=member.mention, embed=ticket_embed)
+
+    # Show staff how the tokens for this item were earned. Best-effort: callers
+    # record the returned channel right after this, and a raise here would make
+    # the reconcile think no ticket exists and refund a redemption that went through.
+    try:
+        snapshot = await claim_purchase_snapshot(str(member.id), item, ch.id)
+        if snapshot:
+            embed = _purchase_breakdown_embed(
+                member, snapshot["price"], snapshot["breakdown"]
+            )
+        else:
+            counts = await get_token_sources(str(member.id))
+            embed = _token_sources_embed(member, counts)
+            embed.description = (
+                "*No purchase record for this item (granted, or bought before "
+                "tracking began). Showing lifetime earnings instead.*\n\n"
+                + embed.description
+            )
+        await ch.send(embed=embed)
+    except Exception as e:
+        print(f"⚠️ Token sources post failed for ticket {ch.id}: {e}")
     return ch
 
 
@@ -771,6 +798,79 @@ def _format_level_line(index: int, user_doc: dict) -> str:
     )
 
 
+TOKEN_SOURCE_LABELS = {
+    "chat": "💬 Chatting",
+    "daily": "📅 Daily Rewards",
+    "drop": "📦 Supply Drops",
+    "booster_drop": "🚀 Booster Drops",
+    "event": "🏆 Events",
+    "poll": "🗳️ Polls",
+    "quest": "📜 Quests",
+    "admin": "🛠️ Staff Grants",
+}
+
+
+def token_source_breakdown(counts: dict) -> list[tuple[str, int, float]]:
+    """(source, tokens, percent of total) per earning source, largest first.
+
+    Keys that aren't a known source and zero counts are dropped, so the
+    percentages always sum to 100 over what's shown.
+    """
+    counts = {s: int(counts.get(s, 0)) for s in TOKEN_SOURCES}
+    counts = {s: n for s, n in counts.items() if n > 0}
+    total = sum(counts.values())
+    if total == 0:
+        return []
+    rows = [(s, n, n / total * 100) for s, n in counts.items()]
+    return sorted(rows, key=lambda row: row[1], reverse=True)
+
+
+def _token_breakdown_lines(counts: dict) -> str:
+    return "\n".join(
+        f"{TOKEN_SOURCE_LABELS[source]}: **{tokens}** ({pct:.1f}%)"
+        for source, tokens, pct in token_source_breakdown(counts)
+    )
+
+
+def _token_sources_embed(target: discord.abc.User, counts: dict) -> discord.Embed:
+    """The per-user breakdown shown by /token-sources and on redemption tickets."""
+    lines = _token_breakdown_lines(counts)
+    embed = discord.Embed(
+        title=f"📊 {target.display_name}'s Token Sources",
+        description=lines or "No tracked token earnings yet.",
+        color=discord.Color.blue(),
+    )
+    if lines:
+        total = sum(n for _, n, _ in token_source_breakdown(counts))
+        embed.add_field(name="Total Earned", value=f"**{total}** R7 tokens")
+    embed.set_footer(
+        text="Counts tokens earned since tracking began. Refunds aren't counted."
+    )
+    return embed
+
+
+def _purchase_breakdown_embed(
+    member: discord.abc.User, price: int, breakdown: dict
+) -> discord.Embed:
+    """How the most recent `price` tokens were earned when the item was bought."""
+    labels = {**TOKEN_SOURCE_LABELS, "untracked": "⏳ Before tracking"}
+    rows = sorted(breakdown.items(), key=lambda row: row[1], reverse=True)
+    lines = "\n".join(
+        f"{labels.get(source, source)}: **{tokens}** ({tokens / price * 100:.1f}%)"
+        for source, tokens in rows
+        if tokens > 0
+    )
+    embed = discord.Embed(
+        title=f"📊 How {member.display_name} earned the {price:,} tokens for this item",
+        description=lines,
+        color=discord.Color.blue(),
+    )
+    embed.set_footer(
+        text="Most recent earnings before the purchase, by UTC day. Refunds aren't counted."
+    )
+    return embed
+
+
 def _leaderboard_footer(page: int, rank: int) -> str:
     return f"Page {page + 1} | Your Rank: #{rank}"
 
@@ -998,7 +1098,10 @@ class DropClaimButton(
             return
 
         # 1. Pay atomically ($inc) — no read-modify-write.
-        await increment_user_balance(str(interaction.user.id), self.amount)
+        source = "booster_drop" if message.channel.id == BOOSTER_CHANNEL_ID else "drop"
+        await increment_user_balance(
+            str(interaction.user.id), self.amount, source=source
+        )
 
         # 2. Clear the booster-drop marker if this was the live booster drop. The
         #    persistent button has no on_claim closure, so do it here directly.
@@ -1062,6 +1165,10 @@ class Economy(commands.Cog):
             await ensure_drop_claims_ttl_index()
         except Exception as e:
             print(f"⚠️ Economy: could not create drop_claims TTL index: {e}")
+        try:
+            await ensure_token_history_indexes()
+        except Exception as e:
+            print(f"⚠️ Economy: could not create token history indexes: {e}")
 
     def cog_unload(self):
         self.supply_drop_task.cancel()
@@ -1453,7 +1560,7 @@ class Economy(commands.Cog):
                 # NOTE: this deliberately reverses #412's paid-first choice; there the
                 # reward was large enough to prioritize never-lose over never-double.
                 await set_setting(f"last_message_{user_id}", str(current_timestamp))
-                await increment_user_balance(user_id, earned_tokens)
+                await increment_user_balance(user_id, earned_tokens, source="chat")
 
             # --- PART 2: XP & LEVELING ---
             EXP_PER_MESSAGE = 10
@@ -1695,6 +1802,15 @@ class Economy(commands.Cog):
         )
         embed.set_footer(text=f"Your new balance: {int(new_balance)} R7 tokens")
         await interaction.response.send_message(embed=embed)
+
+        # Snapshot how the spent tokens were earned, for this item's redemption
+        # ticket. After the response so the history read can't time out the
+        # interaction; best-effort so it can never affect a completed purchase.
+        try:
+            breakdown = await recent_earnings_breakdown(user_id, price)
+            await save_purchase_snapshot(user_id, item, price, breakdown)
+        except Exception as e:
+            print(f"⚠️ Purchase snapshot failed for {user_id} ({item}): {e}")
 
     @app_commands.command(name="redeem", description="Redeem an item you own.")
     @app_commands.describe(item="Select the item you want to redeem.")
@@ -1941,6 +2057,27 @@ class Economy(commands.Cog):
             icon_url=interaction.user.display_avatar.url,
         )
         await interaction.followup.send(embed=embed)
+
+    @app_commands.command(
+        name="token-sources",
+        description="STAFF ONLY: See where a user's R7 tokens came from.",
+    )
+    @app_commands.describe(user="The user to check (leave blank for yourself)")
+    async def token_sources(
+        self, interaction: discord.Interaction, user: Optional[discord.User] = None
+    ):
+        if not _is_redemption_staff(interaction.user):
+            await interaction.response.send_message(
+                "❌ Permission Denied: This command is for Moderators and Admins only.",
+                ephemeral=True,
+            )
+            return
+        await interaction.response.defer(ephemeral=True)
+        target = user or interaction.user
+        counts = await get_token_sources(str(target.id))
+        await interaction.followup.send(
+            embed=_token_sources_embed(target, counts), ephemeral=True
+        )
 
     @app_commands.command(
         name="level", description="Check your or another user's level and progress."
@@ -2203,8 +2340,7 @@ class Economy(commands.Cog):
 
         uid = str(user.id)
         if resource_type == "tokens":
-            cur = await get_user_balance(uid)
-            await update_user_balance(uid, cur + amount)
+            await increment_user_balance(uid, amount, source="admin")
             msg = f"Gave **{amount} tokens** to {user.mention}."
         elif resource_type == "xp":
             lvl, exp = await get_leveling_data(uid)

@@ -1,7 +1,7 @@
 # Token System
 
 ## Overview
-R7 Tokens are the primary server currency. Members earn them passively through chat messages and via `/daily` claims. The passive listener runs on every `on_message` event and enforces a per-user cooldown tracked in an in-memory dict. Server Boosters receive a ~10% average bonus on passive token earnings, a passive XP bonus in the general channel, a flat +20 tokens on every `/daily` claim, and a once-monthly 10% shop discount (see `ECONOMY_SHOP.md`).
+R7 Tokens are the primary server currency. Members earn them passively through chat messages and via `/daily` claims, plus drops, events, polls and quests. Every earned token is tagged with its source (see Token Source Tracking below). The passive listener runs on every `on_message` event and enforces a per-user cooldown tracked in an in-memory dict. Server Boosters receive a ~10% average bonus on passive token earnings, a passive XP bonus in the general channel, a flat +20 tokens on every `/daily` claim, and a once-monthly 10% shop discount (see `ECONOMY_SHOP.md`).
 
 > When changing any booster perk here, also update the `/booster-perks` embed in `features/general.py`.
 
@@ -51,7 +51,8 @@ On claim:
 | Command | Who | Notes |
 |---------|-----|-------|
 | `/balance [user]` | Anyone | Shows token balance; defaults to self |
-| `/give <user> <amount>` | Anyone | Transfers from caller to target; fails if insufficient balance |
+| `/token-sources [user]` | Moderator / Admin | Percentage breakdown of a user's earned tokens by source; defaults to self; ephemeral (see below) |
+| `/give <user> <tokens/xp/levels> <amount>` | Admin only | Grants tokens via atomic `increment_user_balance()` tagged `admin`; no transfer from the caller |
 | `/set-balance <user> <amount>` | Admin only | Directly sets balance, no transfer logic |
 | `/leaderboard token` | Anyone | Paginated 10-per-page view using `LeaderboardView`; shows your rank in the footer |
 
@@ -86,6 +87,41 @@ Channel access is restricted to the Server Booster role via manual Discord permi
 ### Persistent claim button (all drop types)
 
 The supply (`/drop` and the auto `supply_drop_task`), booster, and admin drops all share one claim button, `DropClaimButton` — a `discord.ui.DynamicItem` whose `custom_id` is `drop_claim:{amount}`. The `amount` may be negative (the template matches `-?\d+`), so an admin can post a negative `/drop` that deducts tokens from the claimer rather than paying them out. Staff (moderator, admin and trial moderator roles) can claim only negative drops; positive and zero drops reject them. It's re-registered once in `Economy.cog_load` via `bot.add_dynamic_items(DropClaimButton)`, so a drop message posted **before** a restart stays claimable (the token amount is recovered from the `custom_id`; the old plain `DropView` had no `custom_id` and was never re-added, leaving pre-restart buttons dead). The single-claim guard is the atomic `claim_drop(message_id, user_id)` (a `$setOnInsert` on the `drop_claims` collection, TTL-expired after 7 days), which replaces the old in-memory `claimed` flag — so it survives restarts and serializes two near-simultaneous clicks. Payout is the atomic `increment_user_balance()` (`$inc`).
+
+---
+
+## Token Source Tracking (`/token-sources`)
+
+Every earned token is tagged with where it came from. The user doc carries a `token_sources` map of per-source totals, bumped **in the same `$inc` as `balance`**, so a user's breakdown can never disagree with what they were paid.
+
+| Source | Granted by |
+|--------|-----------|
+| `chat` | Passive `on_message` earning |
+| `daily` | `claim_daily_reward()` (always, no parameter) |
+| `drop` | `DropClaimButton` claimed outside the booster channel (`/drop` and the auto supply drop) |
+| `booster_drop` | `DropClaimButton` claimed in `BOOSTER_CHANNEL_ID` |
+| `event` | `/event-rewards` payouts |
+| `poll` | `/poll-rewards` payouts |
+| `quest` | `add_quest_reward()` (always, no parameter) |
+| `admin` | `/give tokens` |
+
+Rules:
+- The list lives in `TOKEN_SOURCES` in `database/mongo.py`. An unknown source raises `ValueError` before any write, so a typo can't silently create a new bucket. Adding a source there (plus a label in `TOKEN_SOURCE_LABELS` in `features/economy.py`) is all a new earning path needs.
+- `increment_user_balance(user_id, amount, source=None)` only records a source when one is passed. **Redemption refunds pass none**: those tokens were already counted under their real source when first earned. `apply_queue_refund()` and `/set-balance` never touch the counters either.
+- Only **positive** grants count. A negative drop or negative `/give` moves the balance but doesn't reduce "earned".
+- Tracking starts at deploy. Tokens earned before it are not in anyone's breakdown, so the command's footer says it counts tokens "since tracking began".
+
+`/token-sources [user]` is limited to Moderators and Admins (`_is_redemption_staff`; trial moderators and DMs are denied) and replies ephemerally, so only the caller sees it. It defaults to self and reads the map with `get_token_sources()`, which reads the doc directly rather than through `get_user_data()` so looking someone up doesn't create a brawl profile. `token_source_breakdown()` turns it into `(source, tokens, percent)` rows, largest first, dropping zero and unknown keys so the percentages always sum to 100 over what's shown. `_token_sources_embed()` builds the embed for both uses below.
+
+### Purchase breakdown (redemption tickets)
+
+Lifetime counters can't say how someone got the tokens they spent on a particular item, so each earning grant is also added to a per-user, per-UTC-day history (`user_token_days`, written by `_record_earning()` after the balance write; best-effort, a failure is printed and swallowed). Refunds, deductions and lost `/daily` claims are not recorded, same rules as the counters.
+
+1. **On `/buy`**, after the purchase succeeds and the response is sent, `recent_earnings_breakdown(user_id, price)` walks the user's days newest first until it covers the **price actually paid** (after any booster discount). `split_recent_earnings()` takes whole days, splits the oldest day needed proportionally (order within a day isn't recorded; rounding remainders go to that day's largest source), and puts any shortfall under `untracked` ("⏳ Before tracking"). The result always sums to the price and is saved with `save_purchase_snapshot()`. This is best-effort and never affects the purchase.
+2. **When a redemption ticket opens** (from `/redeem` or the monthly queue), `create_redemption_ticket()` claims the **oldest unused** snapshot for that user and item with `claim_purchase_snapshot()` (atomic, so two copies of one item get one snapshot each) and posts "How {member} earned the {price} tokens for this item" as a normal message after the opening embed. The opener can see it too.
+3. **No snapshot** (the item was granted, or bought before this shipped): the lifetime `/token-sources` breakdown is posted instead, with a note saying so.
+
+Because the history is per day, earnings on the purchase day are split proportionally rather than ordered: if someone gets a staff grant and chats on the same day they buy, both appear in proportion. The whole post is wrapped in `try/except`: callers record the returned channel right after, and a raise would make the reconcile treat the ticket as missing and refund it.
 
 ---
 

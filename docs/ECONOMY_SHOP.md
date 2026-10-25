@@ -65,7 +65,7 @@ Mechanics:
 4. Otherwise the item is consumed and `create_redemption_ticket()` opens a private ticket channel in `REDEMPTION_TICKET_CATEGORY_ID`:
    - Channel topic: `redemption-opener:{user_id}|item:{item_key}|budget_usd:{cost}`
    - Opener gets full access + slash commands; Admin/Mod roles get full access
-5. Ticket shows the item requested, token cost deducted, and remaining balance
+5. Ticket shows the item requested, token cost deducted, and remaining balance, followed by how the opener earned the tokens spent on this item, saved when they ran `/buy` (see `TOKEN_SYSTEM.md`, Purchase breakdown). Items with no purchase record show the lifetime breakdown instead. If the lookup fails, the ticket still opens without it.
 
 The budget guard is re-checked once after the interaction defer, so two near-simultaneous redemptions can't both claim the last of the budget.
 
