@@ -35,6 +35,7 @@ from database.mongo import (
 from features import brawl_stars_client as bs
 from features.clubs.board import build_club_stats_embed, build_overview_embed
 from features.clubs.countries import COUNTRY_CODES
+from features.clubs.picker import ClubPicker
 from features.clubs.snapshots import (
     build_ranked,
     build_snapshot,
@@ -115,6 +116,8 @@ class ClubTracking(commands.Cog):
         self._refresh_lock = asyncio.Lock()
 
     async def cog_load(self):
+        # Routes picks from the board's menus, including after a restart.
+        self.bot.add_view(ClubPicker())
         self.club_refresh_loop.start()
         self.ranked_loop.start()
         self.country_scan_loop.start()
@@ -142,7 +145,11 @@ class ClubTracking(commands.Cog):
             return
 
         clubs = await list_tracked_clubs()
-        embeds = [build_overview_embed(clubs), build_club_stats_embed(clubs)]
+        # (embed, view) per board message; the menus ride on the club stats.
+        messages = [
+            (build_overview_embed(clubs), None),
+            (build_club_stats_embed(clubs), ClubPicker.for_clubs(clubs)),
+        ]
         try:
             raw = json.loads(await get_setting(BOARD_MESSAGES_SETTING) or "[]")
             stored = [int(i) for i in raw]
@@ -150,11 +157,13 @@ class ClubTracking(commands.Cog):
             stored = []
 
         message_ids = []
-        for i, embed in enumerate(embeds):
+        for i, (embed, view) in enumerate(messages):
             if i < len(stored):
                 try:
                     # A partial message edits without fetching it first.
-                    await channel.get_partial_message(stored[i]).edit(embed=embed)
+                    await channel.get_partial_message(stored[i]).edit(
+                        embed=embed, view=view
+                    )
                     message_ids.append(stored[i])
                     continue
                 except discord.NotFound:
@@ -164,7 +173,7 @@ class ClubTracking(commands.Cog):
                     print(f"Club board: could not edit {stored[i]}: {e}")
                     message_ids.append(stored[i])
                     continue
-            message = await channel.send(embed=embed)
+            message = await channel.send(embed=embed, view=view)
             message_ids.append(message.id)
 
         if message_ids != stored:

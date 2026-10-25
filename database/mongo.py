@@ -507,6 +507,12 @@ async def remove_tracked_club(tag: str) -> bool:
     return result.deleted_count == 1
 
 
+async def get_tracked_club(tag: str) -> dict | None:
+    if db is None:
+        return None
+    return await db.tracked_clubs.find_one({"_id": tag})
+
+
 async def list_tracked_clubs() -> list[dict]:
     if db is None:
         return []

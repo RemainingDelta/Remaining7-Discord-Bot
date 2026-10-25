@@ -31,7 +31,11 @@ class _ClubSnapshotRequired(TypedDict):
 
 
 class ClubSnapshot(_ClubSnapshotRequired, total=False):
-    president_tag: str | None  # missing on snapshots saved before #618
+    # Missing on snapshots saved before the ticket that added them.
+    president_tag: str | None  # #618
+    badge_id: int | None  # #619, for the badge image
+    type: str  # #619: "open", "inviteOnly" or "closed"
+    description: str  # #619
 
 
 class RankedSummary(TypedDict):
@@ -89,6 +93,9 @@ def build_snapshot(club: dict, country_rank, global_rank) -> ClubSnapshot:
         "max_member_trophies": max(trophies) if trophies else None,
         "country_rank": country_rank,
         "global_rank": global_rank,
+        "badge_id": club.get("badgeId"),
+        "type": club.get("type", ""),
+        "description": club.get("description") or "",
     }
 
 
