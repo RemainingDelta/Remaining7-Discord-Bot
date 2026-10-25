@@ -433,6 +433,17 @@ CLUB_EMOJIS = {
     "vice_president": "⭐",
     "senior": "🔹",
 }
+# Ranked tier icons, shown with the division (e.g. Silver icon + `I`).
+CLUB_RANK_EMOJIS = {
+    "BRONZE": "🥉",
+    "SILVER": "🥈",
+    "GOLD": "🥇",
+    "DIAMOND": "💎",
+    "MYTHIC": "🔮",
+    "LEGENDARY": "🔥",
+    "MASTERS": "👑",
+    "PRO": "🏅",
+}
 
 TOURNEY_STAFF_ROLES = [
     TOURNEY_ADMIN_ROLE_ID,

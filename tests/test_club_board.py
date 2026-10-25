@@ -103,10 +103,21 @@ def test_45_clubs_spread_evenly_and_all_shown_once():
     clubs = [_club(f"#T{i}", f"Club {i}", 1_000_000 + i) for i in range(45)]
     embeds = build_club_embeds(clubs)
     sizes = [len(e.fields) for e in embeds]
-    assert sum(sizes) == 45
-    assert max(sizes) - min(sizes) <= 1
+    # Full rows of 3, 9 per message like BrawlTools; the 6th waits for growth.
+    assert sizes == [9, 9, 9, 9, 9, 0]
     names = [_card_name(f) for e in embeds for f in e.fields]
     assert len(set(names)) == 45
+
+
+@pytest.mark.parametrize(
+    "count, sizes",
+    [(50, [9, 9, 9, 9, 9, 5]), (7, [7, 0, 0, 0, 0, 0]), (10, [9, 1, 0, 0, 0, 0])],
+)
+def test_clubs_fill_messages_nine_at_a_time(count, sizes):
+    from features.clubs import build_club_embeds
+
+    clubs = [_club(f"#T{i}", f"Club {i}", 1_000_000 + i) for i in range(count)]
+    assert [len(e.fields) for e in build_club_embeds(clubs)] == sizes
 
 
 def test_club_card_shows_stats():
@@ -125,7 +136,7 @@ def test_club_card_shows_stats():
     field = build_club_embeds([club])[0].fields[0]
     assert _card_name(field) == "7 Dwarves"
     for expected in (
-        "R7 \\| SPARTAN",  # escaped so it can't start markdown; Discord shows "R7 | SPARTAN"
+        "R7 | SPARTAN",
         "`6,072,652`",
         "`3` in 🇺🇸",
         "`10`",
@@ -133,8 +144,7 @@ def test_club_card_shows_stats():
         "`252.9k`",
         "`100,000`",
         "`30/30`",
-        "`Silver I`",
-        "`Masters II`",
+        "🥈`I` - 👑`II`",
         "`6`",
         "`18`",
     ):
@@ -216,7 +226,7 @@ def test_president_links_to_brawlify_player():
 
     club = _club("#A", "X", 1, president="R7 | SPARTAN", president_tag="#QQ0Y9PC")
     value = build_club_embeds([club])[0].fields[0].value
-    assert "[R7 \\| SPARTAN](https://brawlify.com/player/QQ0Y9PC)" in value
+    assert "[R7 | SPARTAN](https://brawlify.com/player/QQ0Y9PC)" in value
 
 
 def test_president_without_tag_is_not_linked():
@@ -228,27 +238,61 @@ def test_president_without_tag_is_not_linked():
     assert "brawlify.com/player" not in president_line
 
 
-def test_names_are_escaped_so_links_stay_intact():
+def test_names_show_as_typed_without_backslashes():
+    # Discord doesn't apply backslash escapes inside link text, so a name like
+    # "( ◡̀_◡́)" must be sent as-is or the backslash shows up.
+    from features.clubs import build_club_embeds
+
+    club = _club("#A", "Toxic_| x", 1, president="( ◡̀_◡́)Panda", president_tag="#P1")
+    value = build_club_embeds([club])[0].fields[0].value
+    assert "\\" not in value
+    assert "**[Toxic_| x](https://brawlify.com/club/A)**" in value
+    assert "[( ◡̀_◡́)Panda](https://brawlify.com/player/P1)" in value
+
+
+def test_brackets_in_names_cannot_break_links():
     from features.clubs import build_club_embeds
 
     club = _club(
-        "#A", "*Bold* _x_ [7]", 1, president="[evil](https://x.y)", president_tag="#P1"
+        "#A", "[7] Club", 1, president="[evil](https://x.y)", president_tag="#P1"
     )
     value = build_club_embeds([club])[0].fields[0].value
     first_line = value.splitlines()[0]
-    assert first_line.endswith("](https://brawlify.com/club/A)**")
-    assert "\\*Bold\\*" in first_line and "\\[7\\]" in first_line
-    assert "](https://brawlify.com/player/P1)" in value
+    assert first_line == "**[［7］ Club](https://brawlify.com/club/A)**"
     assert "[evil](https://x.y)" not in value
+    assert "](https://brawlify.com/player/P1)" in value
+
+
+def test_ranked_line_uses_tier_icons_for_every_tier():
+    from features.clubs import build_club_embeds
+
+    icons = {
+        "BRONZE": "🥉",
+        "SILVER": "🥈",
+        "GOLD": "🥇",
+        "DIAMOND": "💎",
+        "MYTHIC": "🔮",
+        "LEGENDARY": "🔥",
+        "MASTERS": "👑",
+        "PRO": "🏅",
+    }
+    for tier, icon in icons.items():
+        club = _club(
+            "#A", "X", 1, ranked=_ranked(f"{tier} III", f"{tier} I", {tier: 1})
+        )
+        value = build_club_embeds([club])[0].fields[0].value
+        assert f"{icon}`III` - {icon}`I`" in value, tier
 
 
 def test_club_embeds_carry_disclaimer_and_update_note():
     from features.brawl.commands import SUPERCELL_DISCLAIMER
     from features.clubs import build_club_embeds
 
-    last = build_club_embeds([_club("#A", "X", 1)])[-1]
-    assert SUPERCELL_DISCLAIMER in last.footer.text
-    assert "30 minutes" in last.footer.text
+    # The footer sits under the last message that has clubs, not an empty one.
+    embeds = build_club_embeds([_club(f"#T{i}", f"C{i}", i) for i in range(10)])
+    assert SUPERCELL_DISCLAIMER in embeds[1].footer.text
+    assert "30 minutes" in embeds[1].footer.text
+    assert all(not e.footer.text for i, e in enumerate(embeds) if i != 1)
 
 
 # --- Overview ---
@@ -295,7 +339,8 @@ def test_overview_ranked_distribution_adds_to_100():
     dist = next(f.value for f in embed.fields if "Ranked" in f.name)
     percents = [int(p) for p in __import__("re").findall(r"(\d+)%", dist)]
     assert 98 <= sum(percents) <= 102
-    assert dist.index("Silver") < dist.index("Gold") < dist.index("Mythic")
+    # Icons in tier order, like BrawlTools: 🥈 then 🥇 then 🔮.
+    assert dist.index("🥈") < dist.index("🥇") < dist.index("🔮")
 
 
 def test_overview_skips_clubs_without_snapshot_in_averages():

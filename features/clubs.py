@@ -40,6 +40,7 @@ from features.config import (
     CLUB_EMOJIS,
     CLUB_LIST_CHANNEL_ID,
     CLUB_MANAGER_ROLES,
+    CLUB_RANK_EMOJIS,
     MAX_TRACKED_CLUBS,
 )
 
@@ -393,6 +394,7 @@ def _rank_lookup(items: list[dict]) -> dict[str, int]:
 # removing a club only changes what each message holds.
 
 CLUB_MESSAGES = 6
+CLUBS_PER_MESSAGE = 9  # 3 full rows of 3; 6 x 9 = 54 >= MAX_TRACKED_CLUBS
 CLUB_CAPACITY = 30
 # Keyed by channel: DEV and PROD share one database, so each keeps its own IDs.
 BOARD_MESSAGES_SETTING = f"club_list_message_ids:{CLUB_LIST_CHANNEL_ID}"
@@ -420,10 +422,11 @@ def _flag(country_code: str) -> str:
     return "".join(chr(0x1F1E6 + ord(ch) - ord("A")) for ch in country_code.upper())
 
 
-def _rank_label(rank_name: str) -> str:
-    """'SILVER I' -> 'Silver I'."""
+def _rank_badge(rank_name: str) -> str:
+    """'SILVER I' -> the Silver icon plus `I`, short enough for a 3-column card."""
     tier, _, division = rank_name.partition(" ")
-    return f"{tier.title()} {division}".strip()
+    icon = CLUB_RANK_EMOJIS.get(tier.upper(), tier.title())
+    return f"{icon}{_box(division)}" if division else icon
 
 
 def _sorted_by_trophies(clubs: list[dict]) -> list[dict]:
@@ -443,12 +446,14 @@ def _box(value) -> str:
     return f"`{value}`"
 
 
-_MARKDOWN_CHARS = re.compile(r"([\\*_~`|>\[\]])")
-
-
 def _link_text(name: str) -> str:
-    """Escape a name so markdown or brackets in it can't break a [text](url) link."""
-    return _MARKDOWN_CHARS.sub(r"\\\1", name)
+    """Make a name safe as [text](url) link text.
+
+    Discord shows backslash escapes literally inside link text, so names are
+    sent as typed. Only square brackets, which would end the link early, are
+    swapped for look-alike full-width brackets.
+    """
+    return name.replace("[", "［").replace("]", "］")
 
 
 def _club_card(club: dict) -> str:
@@ -487,8 +492,8 @@ def _club_card(club: dict) -> str:
     ranked = club.get("ranked")
     if ranked:
         lines.append(
-            f"{e['ranked']} {_box(_rank_label(ranked['min_rank_name']))} - "
-            f"{_box(_rank_label(ranked['max_rank_name']))}"
+            f"{e['ranked']} {_rank_badge(ranked['min_rank_name'])} - "
+            f"{_rank_badge(ranked['max_rank_name'])}"
         )
     lines += [
         f"{e['required']} **Req:** {_box(f'{required:,}')}",
@@ -500,14 +505,15 @@ def _club_card(club: dict) -> str:
 
 
 def build_club_embeds(clubs: list[dict]) -> list[discord.Embed]:
-    """CLUB_MESSAGES embeds with the clubs spread evenly, highest trophies first."""
+    """CLUB_MESSAGES embeds, highest trophies first, CLUBS_PER_MESSAGE in each.
+
+    Like BrawlTools, messages fill in full rows of 3 (9 clubs each); messages
+    past the last club hold a blank placeholder until the org grows.
+    """
     ordered = _sorted_by_trophies(clubs)
-    per_message, extra = divmod(len(ordered), CLUB_MESSAGES)
-    embeds, start = [], 0
+    embeds = []
     for i in range(CLUB_MESSAGES):
-        size = per_message + (1 if i < extra else 0)
-        chunk = ordered[start : start + size]
-        start += size
+        chunk = ordered[i * CLUBS_PER_MESSAGE : (i + 1) * CLUBS_PER_MESSAGE]
         embed = discord.Embed(
             title=f"{BOARD_TITLE} | Club Stats" if i == 0 else None,
             color=BOARD_COLOR,
@@ -516,10 +522,11 @@ def build_club_embeds(clubs: list[dict]) -> list[discord.Embed]:
             # Field names can't hold links, so the linked name leads the value.
             embed.add_field(name="\u200b", value=_club_card(club)[:1024], inline=True)
         if not chunk:
-            embed.description = "—"
+            embed.description = "\u200b"
         embeds.append(embed)
-    embeds[-1].set_footer(text=BOARD_FOOTER)
-    embeds[-1].timestamp = datetime.now(timezone.utc)
+    last = embeds[max(0, (len(ordered) - 1) // CLUBS_PER_MESSAGE)]
+    last.set_footer(text=BOARD_FOOTER)
+    last.timestamp = datetime.now(timezone.utc)
     return embeds
 
 
@@ -535,7 +542,7 @@ def _ranked_distribution(clubs: list[dict]) -> str:
         return "No ranked data yet"
     order = {tier: i for i, tier in enumerate(RANKED_TIERS)}
     return " · ".join(
-        f"{tier.title()} {round(100 * count / players)}%"
+        f"{CLUB_RANK_EMOJIS.get(tier, tier.title())} {_box(f'{round(100 * count / players)}%')}"
         for tier, count in sorted(totals.items(), key=lambda t: order.get(t[0], 99))
     )
 
