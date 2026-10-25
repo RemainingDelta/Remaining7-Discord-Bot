@@ -12,9 +12,8 @@ slash commands. Three background jobs keep their data current (#616):
 """
 
 import asyncio
-import re
+import json
 import time
-import unicodedata
 from datetime import datetime, timedelta, timezone
 
 import discord
@@ -34,7 +33,15 @@ from database.mongo import (
     set_setting,
 )
 from features import brawl_stars_client as bs
-from features.config import CLUB_MANAGER_ROLES, MAX_TRACKED_CLUBS
+from features.clubs.board import build_club_stats_embed, build_overview_embed
+from features.clubs.countries import COUNTRY_CODES
+from features.clubs.snapshots import (
+    build_ranked,
+    build_snapshot,
+    clean_name,
+    rank_lookup,
+)
+from features.config import CLUB_LIST_CHANNEL_ID, CLUB_MANAGER_ROLES, MAX_TRACKED_CLUBS
 
 EMBED_DESCRIPTION_LIMIT = 4096
 EMBEDS_PER_MESSAGE = 10
@@ -46,261 +53,8 @@ RANKED_SPREAD_SECONDS = 2 * 60 * 60
 COUNTRY_SCAN_INTERVAL = timedelta(hours=24)
 COUNTRY_SCAN_SPACING_SECONDS = 1
 COUNTRY_SCAN_SETTING = "club_country_scan_at"
-
-# ISO 3166-1 alpha-2 codes. The Brawl Stars API has no endpoint that lists
-# countries, so the daily scan walks this list; codes the rankings do not
-# cover return 404 and are skipped.
-COUNTRY_CODES = (
-    "AD",
-    "AE",
-    "AF",
-    "AG",
-    "AI",
-    "AL",
-    "AM",
-    "AO",
-    "AQ",
-    "AR",
-    "AS",
-    "AT",
-    "AU",
-    "AW",
-    "AX",
-    "AZ",
-    "BA",
-    "BB",
-    "BD",
-    "BE",
-    "BF",
-    "BG",
-    "BH",
-    "BI",
-    "BJ",
-    "BL",
-    "BM",
-    "BN",
-    "BO",
-    "BQ",
-    "BR",
-    "BS",
-    "BT",
-    "BV",
-    "BW",
-    "BY",
-    "BZ",
-    "CA",
-    "CC",
-    "CD",
-    "CF",
-    "CG",
-    "CH",
-    "CI",
-    "CK",
-    "CL",
-    "CM",
-    "CN",
-    "CO",
-    "CR",
-    "CU",
-    "CV",
-    "CW",
-    "CX",
-    "CY",
-    "CZ",
-    "DE",
-    "DJ",
-    "DK",
-    "DM",
-    "DO",
-    "DZ",
-    "EC",
-    "EE",
-    "EG",
-    "EH",
-    "ER",
-    "ES",
-    "ET",
-    "FI",
-    "FJ",
-    "FK",
-    "FM",
-    "FO",
-    "FR",
-    "GA",
-    "GB",
-    "GD",
-    "GE",
-    "GF",
-    "GG",
-    "GH",
-    "GI",
-    "GL",
-    "GM",
-    "GN",
-    "GP",
-    "GQ",
-    "GR",
-    "GS",
-    "GT",
-    "GU",
-    "GW",
-    "GY",
-    "HK",
-    "HM",
-    "HN",
-    "HR",
-    "HT",
-    "HU",
-    "ID",
-    "IE",
-    "IL",
-    "IM",
-    "IN",
-    "IO",
-    "IQ",
-    "IR",
-    "IS",
-    "IT",
-    "JE",
-    "JM",
-    "JO",
-    "JP",
-    "KE",
-    "KG",
-    "KH",
-    "KI",
-    "KM",
-    "KN",
-    "KP",
-    "KR",
-    "KW",
-    "KY",
-    "KZ",
-    "LA",
-    "LB",
-    "LC",
-    "LI",
-    "LK",
-    "LR",
-    "LS",
-    "LT",
-    "LU",
-    "LV",
-    "LY",
-    "MA",
-    "MC",
-    "MD",
-    "ME",
-    "MF",
-    "MG",
-    "MH",
-    "MK",
-    "ML",
-    "MM",
-    "MN",
-    "MO",
-    "MP",
-    "MQ",
-    "MR",
-    "MS",
-    "MT",
-    "MU",
-    "MV",
-    "MW",
-    "MX",
-    "MY",
-    "MZ",
-    "NA",
-    "NC",
-    "NE",
-    "NF",
-    "NG",
-    "NI",
-    "NL",
-    "NO",
-    "NP",
-    "NR",
-    "NU",
-    "NZ",
-    "OM",
-    "PA",
-    "PE",
-    "PF",
-    "PG",
-    "PH",
-    "PK",
-    "PL",
-    "PM",
-    "PN",
-    "PR",
-    "PS",
-    "PT",
-    "PW",
-    "PY",
-    "QA",
-    "RE",
-    "RO",
-    "RS",
-    "RU",
-    "RW",
-    "SA",
-    "SB",
-    "SC",
-    "SD",
-    "SE",
-    "SG",
-    "SH",
-    "SI",
-    "SJ",
-    "SK",
-    "SL",
-    "SM",
-    "SN",
-    "SO",
-    "SR",
-    "SS",
-    "ST",
-    "SV",
-    "SX",
-    "SY",
-    "SZ",
-    "TC",
-    "TD",
-    "TF",
-    "TG",
-    "TH",
-    "TJ",
-    "TK",
-    "TL",
-    "TM",
-    "TN",
-    "TO",
-    "TR",
-    "TT",
-    "TV",
-    "TW",
-    "TZ",
-    "UA",
-    "UG",
-    "UM",
-    "US",
-    "UY",
-    "UZ",
-    "VA",
-    "VC",
-    "VE",
-    "VG",
-    "VI",
-    "VN",
-    "VU",
-    "WF",
-    "WS",
-    "YE",
-    "YT",
-    "ZA",
-    "ZM",
-    "ZW",
-)
+# Keyed by channel: DEV and PROD share one database, so each keeps its own IDs.
+BOARD_MESSAGES_SETTING = f"club_list_message_ids:{CLUB_LIST_CHANNEL_ID}"
 
 
 async def _pause(seconds: float) -> None:
@@ -314,69 +68,6 @@ def _monotonic() -> float:
 def _utcnow() -> datetime:
     # Naive UTC, matching what Mongo stores and returns.
     return datetime.now(timezone.utc).replace(tzinfo=None)
-
-
-def build_snapshot(club: dict, country_rank, global_rank) -> dict:
-    """The stats shown for one club. Member names and tags are not kept."""
-    members = club.get("members") or []
-    trophies = [m.get("trophies", 0) for m in members]
-    president = next((m for m in members if m.get("role") == "president"), None)
-    return {
-        "trophies": club.get("trophies", 0),
-        "required_trophies": club.get("requiredTrophies", 0),
-        "member_count": len(members),
-        "president": clean_name(president.get("name")) if president else None,
-        "vice_presidents": sum(1 for m in members if m.get("role") == "vicePresident"),
-        "seniors": sum(1 for m in members if m.get("role") == "senior"),
-        "min_member_trophies": min(trophies) if trophies else None,
-        "max_member_trophies": max(trophies) if trophies else None,
-        "country_rank": country_rank,
-        "global_rank": global_rank,
-    }
-
-
-def build_ranked(players: list[dict]) -> dict | None:
-    """Lowest and highest current rank plus members per tier, or None with no data."""
-    ranked = [
-        p
-        for p in players
-        if p.get("rankedRank") is not None and p.get("rankedRankName")
-    ]
-    if not ranked:
-        return None
-    lowest = min(ranked, key=lambda p: p["rankedRank"])
-    highest = max(ranked, key=lambda p: p["rankedRank"])
-    tiers: dict[str, int] = {}
-    for p in ranked:
-        tier = p["rankedRankName"].split()[0]
-        tiers[tier] = tiers.get(tier, 0) + 1
-    return {
-        "min_rank": lowest["rankedRank"],
-        "min_rank_name": lowest["rankedRankName"],
-        "max_rank": highest["rankedRank"],
-        "max_rank_name": highest["rankedRankName"],
-        "tier_counts": tiers,
-        "players_counted": len(ranked),
-    }
-
-
-_COLOR_TAG = re.compile(r"</?c[0-9a-fA-F]*>")
-
-
-def clean_name(name: str | None) -> str | None:
-    """Display form of an in-game name, matching how BrawlTools showed it.
-
-    Strips color codes like <c4>...</c> and turns decorative letters
-    (e.g. math-script) into normal ones. Emoji and other scripts are kept.
-    """
-    if not name:
-        return name
-    cleaned = unicodedata.normalize("NFKC", _COLOR_TAG.sub("", name)).strip()
-    return cleaned or name
-
-
-def _rank_lookup(items: list[dict]) -> dict[str, int]:
-    return {bs.normalize_tag(item["tag"]): item["rank"] for item in items}
 
 
 def is_club_manager(member) -> bool:
@@ -436,12 +127,50 @@ class ClubTracking(commands.Cog):
 
     # --- 30-minute club refresh ---
 
-    async def request_refresh(self):
-        """Refresh now, after /club-add or /club-remove."""
-        await self.refresh_clubs()
-
     async def on_refresh_complete(self):
-        """Runs after every refresh. History (#617) and the embeds (#618) hook in here."""
+        """Runs after every refresh. History (#617) also hooks in here."""
+        try:
+            await self.update_club_board()
+        except Exception as e:
+            print(f"Club board update error: {e}")
+
+    async def update_club_board(self):
+        """Edit the two board messages in place, posting any that don't exist yet."""
+        channel = self.bot.get_channel(CLUB_LIST_CHANNEL_ID)
+        if channel is None:
+            print(f"Club board: channel {CLUB_LIST_CHANNEL_ID} not found")
+            return
+
+        clubs = await list_tracked_clubs()
+        embeds = [build_overview_embed(clubs), build_club_stats_embed(clubs)]
+        try:
+            raw = json.loads(await get_setting(BOARD_MESSAGES_SETTING) or "[]")
+            stored = [int(i) for i in raw]
+        except (TypeError, ValueError):
+            stored = []
+
+        message_ids = []
+        for i, embed in enumerate(embeds):
+            if i < len(stored):
+                try:
+                    # A partial message edits without fetching it first.
+                    await channel.get_partial_message(stored[i]).edit(embed=embed)
+                    message_ids.append(stored[i])
+                    continue
+                except discord.NotFound:
+                    pass  # Deleted by hand: post a replacement below.
+                except discord.HTTPException as e:
+                    # Keep the message and try again next refresh.
+                    print(f"Club board: could not edit {stored[i]}: {e}")
+                    message_ids.append(stored[i])
+                    continue
+            message = await channel.send(embed=embed)
+            message_ids.append(message.id)
+
+        if message_ids != stored:
+            await set_setting(
+                BOARD_MESSAGES_SETTING, json.dumps([str(i) for i in message_ids])
+            )
 
     async def refresh_clubs(self):
         async with self._refresh_lock:
@@ -449,7 +178,7 @@ class ClubTracking(commands.Cog):
 
             global_ranks = None
             try:
-                global_ranks = _rank_lookup(await bs.get_global_club_rankings())
+                global_ranks = rank_lookup(await bs.get_global_club_rankings())
             except bs.BrawlStarsError as e:
                 print(f"Club refresh: global rankings failed: {e}")
 
@@ -458,7 +187,7 @@ class ClubTracking(commands.Cog):
                 {c["country_code"] for c in clubs if c.get("country_code")}
             ):
                 try:
-                    country_ranks[code] = _rank_lookup(
+                    country_ranks[code] = rank_lookup(
                         await bs.get_country_club_rankings(code)
                     )
                 except bs.BrawlStarsError as e:
@@ -660,7 +389,7 @@ class ClubTracking(commands.Cog):
         await interaction.followup.send(
             f"✅ Added **{name}** (`{tag}`) to the club list."
         )
-        await self.request_refresh()
+        await self.refresh_clubs()
 
     @app_commands.command(
         name="club-remove", description="Stop tracking a club in the club list"
@@ -686,7 +415,7 @@ class ClubTracking(commands.Cog):
         await interaction.followup.send(
             f"✅ Removed `{tag}` from the club list. Its history is kept."
         )
-        await self.request_refresh()
+        await self.refresh_clubs()
 
     @app_commands.command(name="club-list", description="Show every tracked club")
     async def club_list(self, interaction: discord.Interaction):

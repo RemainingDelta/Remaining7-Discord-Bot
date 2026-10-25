@@ -44,16 +44,16 @@ def _tracked(tag, country=None, snapshot=None):
 def db():
     with (
         patch(
-            "features.clubs.list_tracked_clubs", new=AsyncMock(return_value=[])
+            "features.clubs.cog.list_tracked_clubs", new=AsyncMock(return_value=[])
         ) as list_,
-        patch("features.clubs.save_club_refresh", new=AsyncMock()) as save,
-        patch("features.clubs.mark_club_failing", new=AsyncMock()) as failing,
-        patch("features.clubs.save_club_ranked", new=AsyncMock()) as ranked,
-        patch("features.clubs.save_club_countries", new=AsyncMock()) as countries,
+        patch("features.clubs.cog.save_club_refresh", new=AsyncMock()) as save,
+        patch("features.clubs.cog.mark_club_failing", new=AsyncMock()) as failing,
+        patch("features.clubs.cog.save_club_ranked", new=AsyncMock()) as ranked,
+        patch("features.clubs.cog.save_club_countries", new=AsyncMock()) as countries,
         patch(
-            "features.clubs.get_setting", new=AsyncMock(return_value=None)
+            "features.clubs.cog.get_setting", new=AsyncMock(return_value=None)
         ) as get_setting,
-        patch("features.clubs.set_setting", new=AsyncMock()) as set_setting,
+        patch("features.clubs.cog.set_setting", new=AsyncMock()) as set_setting,
     ):
         yield MagicMock(
             list=list_,
@@ -107,11 +107,11 @@ def api():
             new=AsyncMock(side_effect=get_global),
         ) as ggc,
         patch("features.brawl_stars_client.get_player", new=AsyncMock()) as gp,
-        patch("features.clubs.COUNTRY_CODES", ("US", "IN")),
+        patch("features.clubs.cog.COUNTRY_CODES", ("US", "IN")),
         # A fake clock: pausing moves it forward, requests take no time unless a
         # test advances it.
-        patch("features.clubs._monotonic", new=lambda: clock[0]),
-        patch("features.clubs._pause", new=AsyncMock(side_effect=advance)) as sleep,
+        patch("features.clubs.cog._monotonic", new=lambda: clock[0]),
+        patch("features.clubs.cog._pause", new=AsyncMock(side_effect=advance)) as sleep,
     ):
         yield MagicMock(
             clubs=clubs,
@@ -128,7 +128,7 @@ def api():
 
 @pytest.fixture
 def cog(mock_bot):
-    from features.clubs import ClubTracking
+    from features.clubs.cog import ClubTracking
 
     c = ClubTracking(mock_bot)
     c.on_refresh_complete = AsyncMock()
@@ -144,7 +144,7 @@ def _saved(db):
 
 
 def test_snapshot_counts_roles_and_trophy_range():
-    from features.clubs import build_snapshot
+    from features.clubs.snapshots import build_snapshot
 
     members = [
         _member("#A", "president", 250_000),
@@ -155,6 +155,7 @@ def test_snapshot_counts_roles_and_trophy_range():
     ]
     snap = build_snapshot(_api_club("#X", members), country_rank=3, global_rank=11)
     assert snap["president"] == "P#A"
+    assert snap["president_tag"] == "#A"
     assert snap["vice_presidents"] == 2
     assert snap["seniors"] == 1
     assert snap["member_count"] == 5
@@ -166,7 +167,7 @@ def test_snapshot_counts_roles_and_trophy_range():
 
 
 def test_snapshot_with_no_members_has_no_range_or_president():
-    from features.clubs import build_snapshot
+    from features.clubs.snapshots import build_snapshot
 
     snap = build_snapshot(_api_club("#X", members=[]), None, None)
     assert snap["member_count"] == 0
@@ -175,7 +176,7 @@ def test_snapshot_with_no_members_has_no_range_or_president():
 
 
 def test_snapshot_does_not_store_member_names_or_tags():
-    from features.clubs import build_snapshot
+    from features.clubs.snapshots import build_snapshot
 
     snap = build_snapshot(_api_club("#X", [_member("#SECRET", "senior")]), None, None)
     assert "#SECRET" not in repr(snap)
@@ -275,7 +276,7 @@ async def test_refresh_calls_completion_hook_once(cog, db, api):
     cog.on_refresh_complete.assert_awaited_once()
 
 
-async def test_request_refresh_waits_for_running_refresh(cog, db, api):
+async def test_concurrent_refreshes_run_one_at_a_time(cog, db, api):
     running = 0
     peak = 0
 
@@ -288,9 +289,7 @@ async def test_request_refresh_waits_for_running_refresh(cog, db, api):
         return []
 
     db.list.side_effect = slow_list
-    await asyncio.gather(
-        cog.refresh_clubs(), cog.request_refresh(), cog.request_refresh()
-    )
+    await asyncio.gather(cog.refresh_clubs(), cog.refresh_clubs(), cog.refresh_clubs())
     assert peak == 1
     assert db.list.await_count == 3
 
@@ -303,7 +302,7 @@ def _player(rank, name):
 
 
 def test_build_ranked_min_max_and_tiers():
-    from features.clubs import build_ranked
+    from features.clubs.snapshots import build_ranked
 
     ranked = build_ranked(
         [
@@ -320,14 +319,14 @@ def test_build_ranked_min_max_and_tiers():
 
 
 def test_build_ranked_skips_players_without_rank():
-    from features.clubs import build_ranked
+    from features.clubs.snapshots import build_ranked
 
     ranked = build_ranked([_player(4, "SILVER I"), {"name": "no ranked data"}])
     assert ranked["players_counted"] == 1
 
 
 def test_build_ranked_empty_is_none():
-    from features.clubs import build_ranked
+    from features.clubs.snapshots import build_ranked
 
     assert build_ranked([]) is None
     assert build_ranked([{"name": "x"}]) is None
@@ -337,7 +336,7 @@ def test_build_ranked_empty_is_none():
 
 
 async def test_ranked_update_skips_failed_player_and_saves_aggregate(cog, db, api):
-    from features.clubs import RANKED_SPREAD_SECONDS
+    from features.clubs.cog import RANKED_SPREAD_SECONDS
 
     db.list.return_value = [_tracked("#A")]
     api.clubs["#A"] = _api_club("#A", [_member("#P1"), _member("#P2"), _member("#P3")])
@@ -360,7 +359,7 @@ async def test_ranked_update_skips_failed_player_and_saves_aggregate(cog, db, ap
 
 
 async def test_ranked_update_counts_request_time_toward_spacing(cog, db, api):
-    from features.clubs import RANKED_SPREAD_SECONDS
+    from features.clubs.cog import RANKED_SPREAD_SECONDS
 
     members = [_member(f"#P{i}") for i in range(4)]
     db.list.return_value = [_tracked("#A")]
@@ -520,7 +519,7 @@ async def test_country_scan_loop_skips_refresh_when_not_due(cog):
 
 
 def test_country_codes_are_unique_two_letter_codes():
-    from features.clubs import COUNTRY_CODES
+    from features.clubs.countries import COUNTRY_CODES
 
     assert 240 <= len(COUNTRY_CODES) <= 252
     assert len(set(COUNTRY_CODES)) == len(COUNTRY_CODES)
@@ -543,13 +542,13 @@ def test_country_codes_are_unique_two_letter_codes():
     ],
 )
 def test_clean_name(raw, clean):
-    from features.clubs import clean_name
+    from features.clubs.snapshots import clean_name
 
     assert clean_name(raw) == clean
 
 
 def test_clean_name_never_returns_blank():
-    from features.clubs import clean_name
+    from features.clubs.snapshots import clean_name
 
     assert clean_name("<c4></c>") == "<c4></c>"
     assert clean_name(None) is None
