@@ -51,6 +51,18 @@ Brawlers are fetched from `users.brawlers` in the DB. The full roster order is d
 
 ---
 
+## `/brawler <brawler>`
+
+Full details for a single brawler, resolved from `BRAWLER_ROSTER` by id or name (case-insensitive) with autocomplete over the **entire** roster (owned or not). The embed shows:
+
+- The brawler's rarity (with its `EMOJIS_RARITIES` emoji)
+- Ownership status: `✅ Owned • Lvl {level}` for a brawler in `users.brawlers`, or `❌ Not owned`
+- All of the brawler's gadgets, star powers, and hypercharge from `brawlers.json` (via the `Brawler` dataclass), each marked `✅` if the caller owns it and `▫️` otherwise
+
+An unknown/misspelled name returns an ephemeral error (no DB read, no exception). The command reuses `get_user_data()` — it does not add any new MongoDB helper.
+
+---
+
 ## `/buy-brawler <brawler>`
 
 1. Looks up the brawler in `BRAWLER_ROSTER` to get its rarity
