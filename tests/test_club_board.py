@@ -279,14 +279,14 @@ def test_ranked_line_uses_tier_icons_for_every_tier():
         assert f"{icon}`III` - {icon}`I`" in value, tier
 
 
-def test_club_embeds_carry_disclaimer_and_update_note():
-    from features.brawl.commands import SUPERCELL_DISCLAIMER
-    from features.clubs import build_club_stats_embed
+def test_board_footer_is_short_update_note_without_disclaimer():
+    from features.clubs import build_club_stats_embed, build_overview_embed
 
-    embed = build_club_stats_embed([_club(f"#T{i}", f"C{i}", i) for i in range(10)])
-    assert SUPERCELL_DISCLAIMER in embed.footer.text
-    assert "30 minutes" in embed.footer.text
-    assert embed.timestamp is not None
+    clubs = [_club(f"#T{i}", f"C{i}", i) for i in range(10)]
+    for embed in (build_club_stats_embed(clubs), build_overview_embed(clubs)):
+        assert embed.footer.text == "Updating every 30 minutes. Posted at"
+        assert "Supercell" not in embed.footer.text
+        assert embed.timestamp is not None
 
 
 # --- Overview ---
@@ -557,3 +557,52 @@ def test_card_and_overview_use_matching_trophy_icons():
     fields = {f.name: f.value for f in build_overview_embed([club]).fields}
     assert fields["Total Trophies"].startswith(CLUB_EMOJIS["club_trophies"])
     assert fields["Average Trophies"].startswith(CLUB_EMOJIS["trophy"])
+
+
+# --- Compact overview, like BrawlTools ---
+
+
+def _distribution(clubs):
+    from features.clubs import build_overview_embed
+
+    embed = build_overview_embed(clubs)
+    return next(f for f in embed.fields if "Ranked Distribution" in f.name)
+
+
+def test_overview_keeps_a_three_column_grid():
+    from features.clubs import build_overview_embed
+
+    embed = build_overview_embed([_club("#A", "A", 1)])
+    inline = [f for f in embed.fields if f.inline]
+    assert len(inline) % 3 == 0
+    assert (
+        inline[-1].name.strip("\u200b") == "" and inline[-1].value.strip("\u200b") == ""
+    )
+
+
+def test_ranked_distribution_has_plain_title_and_three_tiers_per_line():
+    tiers = {
+        "BRONZE": 7,
+        "SILVER": 63,
+        "GOLD": 10,
+        "DIAMOND": 7,
+        "MYTHIC": 7,
+        "LEGENDARY": 6,
+    }
+    field = _distribution(
+        [_club("#A", "A", 1, ranked=_ranked("BRONZE I", "LEGENDARY I", tiers))]
+    )
+    assert field.name == "Ranked Distribution"
+    lines = field.value.splitlines()
+    assert len(lines) == 2
+    assert all(line.count("%") == 3 for line in lines)
+    assert "·" not in field.value
+
+
+def test_ranked_distribution_skips_tiers_that_round_to_zero():
+    tiers = {"SILVER": 300, "MASTERS": 1}
+    field = _distribution(
+        [_club("#A", "A", 1, ranked=_ranked("SILVER I", "MASTERS I", tiers))]
+    )
+    assert CLUB_RANK_EMOJIS["MASTERS"] not in field.value
+    assert "`0%`" not in field.value

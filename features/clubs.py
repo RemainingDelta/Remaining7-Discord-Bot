@@ -35,7 +35,6 @@ from database.mongo import (
     set_setting,
 )
 from features import brawl_stars_client as bs
-from features.brawl.commands import SUPERCELL_DISCLAIMER
 from features.config import (
     CLUB_EMOJIS,
     CLUB_LIST_CHANNEL_ID,
@@ -397,7 +396,7 @@ CLUB_CAPACITY = 30
 # Keyed by channel: DEV and PROD share one database, so each keeps its own IDs.
 BOARD_MESSAGES_SETTING = f"club_list_message_ids:{CLUB_LIST_CHANNEL_ID}"
 BOARD_TITLE = "Remaining 7 Esports"
-BOARD_FOOTER = f"Updating every 30 minutes · {SUPERCELL_DISCLAIMER}"
+BOARD_FOOTER = "Updating every 30 minutes. Posted at"  # Discord appends the timestamp
 BOARD_COLOR = discord.Color.gold()
 RANKED_TIERS = (
     "BRONZE",
@@ -529,10 +528,15 @@ def _ranked_distribution(clubs: list[dict]) -> str:
     if not players:
         return "No ranked data yet"
     order = {tier: i for i, tier in enumerate(RANKED_TIERS)}
-    return " · ".join(
-        f"{CLUB_RANK_EMOJIS.get(tier, tier.title())} {_box(f'{round(100 * count / players)}%')}"
-        for tier, count in sorted(totals.items(), key=lambda t: order.get(t[0], 99))
-    )
+    parts = []
+    for tier, count in sorted(totals.items(), key=lambda t: order.get(t[0], 99)):
+        percent = round(100 * count / players)
+        if percent:  # BrawlTools leaves out tiers that round to 0%
+            parts.append(
+                f"{CLUB_RANK_EMOJIS.get(tier, tier.title())} {_box(f'{percent}%')}"
+            )
+    # Three tiers per line, like BrawlTools.
+    return "\n".join(" ".join(parts[i : i + 3]) for i in range(0, len(parts), 3))
 
 
 def build_overview_embed(clubs: list[dict]) -> discord.Embed:
@@ -567,8 +571,13 @@ def build_overview_embed(clubs: list[dict]) -> discord.Embed:
     ]
     for name, value in fields:
         embed.add_field(name=name, value=value, inline=True)
+    # Pad the last row so Discord keeps the 3-column grid instead of
+    # stretching the final fields wide.
+    while len(fields) % 3:
+        fields.append(("\u200b", "\u200b"))
+        embed.add_field(name="\u200b", value="\u200b", inline=True)
     embed.add_field(
-        name=f"{e['ranked']} Ranked Distribution",
+        name="Ranked Distribution",
         value=_ranked_distribution(clubs),
         inline=False,
     )
