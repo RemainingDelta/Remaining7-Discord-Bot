@@ -389,12 +389,10 @@ def _rank_lookup(items: list[dict]) -> dict[str, int]:
 
 
 # --- Club-list board (#618) ---
-# One overview message plus a fixed set of club messages, posted once and then
-# edited in place on every refresh. The count never changes, so adding or
-# removing a club only changes what each message holds.
+# Two messages, like BrawlTools: the org overview and the top clubs by
+# trophies. Both are posted once and then edited in place on every refresh.
 
-CLUB_MESSAGES = 6
-CLUBS_PER_MESSAGE = 9  # 3 full rows of 3; 6 x 9 = 54 >= MAX_TRACKED_CLUBS
+CLUBS_ON_BOARD = 9  # 3 full rows of 3
 CLUB_CAPACITY = 30
 # Keyed by channel: DEV and PROD share one database, so each keeps its own IDs.
 BOARD_MESSAGES_SETTING = f"club_list_message_ids:{CLUB_LIST_CHANNEL_ID}"
@@ -504,30 +502,20 @@ def _club_card(club: dict) -> str:
     return "\n".join(lines)
 
 
-def build_club_embeds(clubs: list[dict]) -> list[discord.Embed]:
-    """CLUB_MESSAGES embeds, highest trophies first, CLUBS_PER_MESSAGE in each.
+def build_club_stats_embed(clubs: list[dict]) -> discord.Embed:
+    """The top CLUBS_ON_BOARD clubs by trophies, 3 per row, like BrawlTools.
 
-    Like BrawlTools, messages fill in full rows of 3 (9 clubs each); messages
-    past the last club hold a blank placeholder until the org grows.
+    Every other club is reached through the "Choose a Club" dropdowns (#619).
     """
-    ordered = _sorted_by_trophies(clubs)
-    embeds = []
-    for i in range(CLUB_MESSAGES):
-        chunk = ordered[i * CLUBS_PER_MESSAGE : (i + 1) * CLUBS_PER_MESSAGE]
-        embed = discord.Embed(
-            title=f"{BOARD_TITLE} | Club Stats" if i == 0 else None,
-            color=BOARD_COLOR,
-        )
-        for club in chunk:
-            # Field names can't hold links, so the linked name leads the value.
-            embed.add_field(name="\u200b", value=_club_card(club)[:1024], inline=True)
-        if not chunk:
-            embed.description = "\u200b"
-        embeds.append(embed)
-    last = embeds[max(0, (len(ordered) - 1) // CLUBS_PER_MESSAGE)]
-    last.set_footer(text=BOARD_FOOTER)
-    last.timestamp = datetime.now(timezone.utc)
-    return embeds
+    embed = discord.Embed(title=f"{BOARD_TITLE} | Club Stats", color=BOARD_COLOR)
+    for club in _sorted_by_trophies(clubs)[:CLUBS_ON_BOARD]:
+        # Field names can't hold links, so the linked name leads the value.
+        embed.add_field(name="\u200b", value=_club_card(club)[:1024], inline=True)
+    if not clubs:
+        embed.description = "No clubs tracked yet. Add one with `/club-add`."
+    embed.set_footer(text=BOARD_FOOTER)
+    embed.timestamp = datetime.now(timezone.utc)
+    return embed
 
 
 def _ranked_distribution(clubs: list[dict]) -> str:
@@ -665,7 +653,7 @@ class ClubTracking(commands.Cog):
             return
 
         clubs = await list_tracked_clubs()
-        embeds = [build_overview_embed(clubs), *build_club_embeds(clubs)]
+        embeds = [build_overview_embed(clubs), build_club_stats_embed(clubs)]
         try:
             stored = [
                 int(i)
@@ -692,6 +680,14 @@ class ClubTracking(commands.Cog):
                     continue
             message = await channel.send(embed=embed)
             message_ids.append(message.id)
+
+        # Tidy up messages left from a layout that used more of them.
+        for message_id in stored[len(embeds) :]:
+            try:
+                message = await channel.fetch_message(message_id)
+                await message.delete()
+            except discord.HTTPException:
+                pass  # Already gone (NotFound is an HTTPException) or not ours to delete.
 
         if message_ids != stored:
             await set_setting(
