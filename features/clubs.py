@@ -395,9 +395,10 @@ CLUBS_ON_BOARD = 9  # 3 full rows of 3
 CLUB_CAPACITY = 30
 # Keyed by channel: DEV and PROD share one database, so each keeps its own IDs.
 BOARD_MESSAGES_SETTING = f"club_list_message_ids:{CLUB_LIST_CHANNEL_ID}"
-BOARD_TITLE = "Remaining 7 Esports"
+BOARD_TITLE = "Overview from Remaining 7 Esports"
 BOARD_FOOTER = "Updating every 30 minutes. Posted at"  # Discord appends the timestamp
-BOARD_COLOR = discord.Color.gold()
+OVERVIEW_COLOR = discord.Color.orange()
+CLUB_STATS_COLOR = discord.Color.gold()
 RANKED_TIERS = (
     "BRONZE",
     "SILVER",
@@ -506,7 +507,7 @@ def build_club_stats_embed(clubs: list[dict]) -> discord.Embed:
 
     Every other club is reached through the "Choose a Club" dropdowns (#619).
     """
-    embed = discord.Embed(title=f"{BOARD_TITLE} | Club Stats", color=BOARD_COLOR)
+    embed = discord.Embed(title=f"{BOARD_TITLE} | Club Stats", color=CLUB_STATS_COLOR)
     for club in _sorted_by_trophies(clubs)[:CLUBS_ON_BOARD]:
         # Field names can't hold links, so the linked name leads the value.
         embed.add_field(name="\u200b", value=_club_card(club)[:1024], inline=True)
@@ -548,7 +549,7 @@ def build_overview_embed(clubs: list[dict]) -> discord.Embed:
         return sum(s.get(key) or 0 for s in snaps)
 
     members = total("member_count")
-    embed = discord.Embed(title=f"{BOARD_TITLE} | Overview", color=BOARD_COLOR)
+    embed = discord.Embed(title=f"{BOARD_TITLE} | Overview", color=OVERVIEW_COLOR)
     total_trophies = total("trophies")
     avg_trophies = round(total_trophies / n)
     avg_required = round(total("required_trophies") / n)

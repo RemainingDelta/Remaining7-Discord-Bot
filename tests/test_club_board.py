@@ -606,3 +606,22 @@ def test_ranked_distribution_skips_tiers_that_round_to_zero():
     )
     assert CLUB_RANK_EMOJIS["MASTERS"] not in field.value
     assert "`0%`" not in field.value
+
+
+# --- Titles and colors, like BrawlTools ---
+
+
+def test_overview_title_and_orange_bar():
+    from features.clubs import build_overview_embed
+
+    embed = build_overview_embed([_club("#A", "A", 1)])
+    assert embed.title == "Overview from Remaining 7 Esports | Overview"
+    assert embed.color == discord.Color.orange()
+
+
+def test_club_stats_title_and_yellow_bar():
+    from features.clubs import build_club_stats_embed
+
+    embed = build_club_stats_embed([_club("#A", "A", 1)])
+    assert embed.title == "Overview from Remaining 7 Esports | Club Stats"
+    assert embed.color == discord.Color.gold()
