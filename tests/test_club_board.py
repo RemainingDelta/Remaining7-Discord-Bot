@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import discord
 import pytest
 
-from features.config import CLUB_LIST_CHANNEL_ID
+from features.config import CLUB_EMOJIS, CLUB_LIST_CHANNEL_ID, CLUB_RANK_EMOJIS
 
 # Keyed by channel so DEV and PROD, which share one database, never clash.
 BOARD_KEY = f"club_list_message_ids:{CLUB_LIST_CHANNEL_ID}"
@@ -144,7 +144,7 @@ def test_club_card_shows_stats():
         "`252.9k`",
         "`100,000`",
         "`30/30`",
-        "🥈`I` - 👑`II`",
+        f"{CLUB_RANK_EMOJIS['SILVER']}`I` - {CLUB_RANK_EMOJIS['MASTERS']}`II`",
         "`6`",
         "`18`",
     ):
@@ -266,17 +266,19 @@ def test_brackets_in_names_cannot_break_links():
 def test_ranked_line_uses_tier_icons_for_every_tier():
     from features.clubs import build_club_embeds
 
-    icons = {
-        "BRONZE": "🥉",
-        "SILVER": "🥈",
-        "GOLD": "🥇",
-        "DIAMOND": "💎",
-        "MYTHIC": "🔮",
-        "LEGENDARY": "🔥",
-        "MASTERS": "👑",
-        "PRO": "🏅",
+    from features.config import CLUB_RANK_EMOJIS
+
+    assert set(CLUB_RANK_EMOJIS) == {
+        "BRONZE",
+        "SILVER",
+        "GOLD",
+        "DIAMOND",
+        "MYTHIC",
+        "LEGENDARY",
+        "MASTERS",
+        "PRO",
     }
-    for tier, icon in icons.items():
+    for tier, icon in CLUB_RANK_EMOJIS.items():
         club = _club(
             "#A", "X", 1, ranked=_ranked(f"{tier} III", f"{tier} I", {tier: 1})
         )
@@ -339,8 +341,13 @@ def test_overview_ranked_distribution_adds_to_100():
     dist = next(f.value for f in embed.fields if "Ranked" in f.name)
     percents = [int(p) for p in __import__("re").findall(r"(\d+)%", dist)]
     assert 98 <= sum(percents) <= 102
-    # Icons in tier order, like BrawlTools: 🥈 then 🥇 then 🔮.
-    assert dist.index("🥈") < dist.index("🥇") < dist.index("🔮")
+    # Icons in tier order, like BrawlTools: Silver, then Gold, then Mythic.
+    icons = CLUB_RANK_EMOJIS
+    assert (
+        dist.index(icons["SILVER"])
+        < dist.index(icons["GOLD"])
+        < dist.index(icons["MYTHIC"])
+    )
 
 
 def test_overview_skips_clubs_without_snapshot_in_averages():
@@ -496,3 +503,42 @@ async def test_edit_failure_keeps_message_and_retries_later(board):
     await board.cog.update_club_board()
     assert _stored_ids(board) == ids
     assert board.channel.sends == 7
+
+
+# --- Custom emoji (uploaded as application emoji on each bot) ---
+
+CUSTOM_EMOJI = re.compile(r"^<:[A-Za-z0-9_]{2,32}:\d{17,20}>$")
+
+
+def test_board_icons_are_custom_emoji_except_globe():
+    for key, value in CLUB_EMOJIS.items():
+        if key == "global":
+            assert value == "🌍"  # BrawlTools uses the standard globe too
+        else:
+            assert CUSTOM_EMOJI.match(value), (key, value)
+
+
+def test_rank_icons_are_custom_emoji():
+    for tier, value in CLUB_RANK_EMOJIS.items():
+        assert CUSTOM_EMOJI.match(value), (tier, value)
+
+
+def test_board_uses_brawltools_trophy_split():
+    # Total trophies use the trophy-with-club icon; range and averages the plain one.
+    assert "trophy_with_club" in CLUB_EMOJIS["club_trophies"]
+    assert ":trophy:" in CLUB_EMOJIS["trophy"]
+    assert "grayscale_trophy" in CLUB_EMOJIS["required"]
+    assert "lock" in CLUB_EMOJIS["type"] and "city" in CLUB_EMOJIS["region"]
+
+
+def test_card_and_overview_use_matching_trophy_icons():
+    from features.clubs import build_club_embeds, build_overview_embed
+
+    club = _club("#A", "X", 6_000_000)
+    lines = build_club_embeds([club])[0].fields[0].value.splitlines()
+    assert lines[2].startswith(CLUB_EMOJIS["club_trophies"])  # 🏆 total
+    range_line = next(line for line in lines if "k` - `" in line)
+    assert range_line.startswith(CLUB_EMOJIS["trophy"])
+    fields = {f.name: f.value for f in build_overview_embed([club]).fields}
+    assert fields["Total Trophies"].startswith(CLUB_EMOJIS["club_trophies"])
+    assert fields["Average Trophies"].startswith(CLUB_EMOJIS["trophy"])

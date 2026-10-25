@@ -481,12 +481,12 @@ def _club_card(club: dict) -> str:
     lines = [
         header,
         f"{e['president']} {president}",
-        f"{e['trophy']} {_box(f'{trophies:,}')}",
+        f"{e['club_trophies']} {_box(f'{trophies:,}')}",
         f"{e['rank']} {' | '.join(ranks) if ranks else _box('Not Ranked')}",
     ]
     if snap.get("min_member_trophies") is not None:
         lines.append(
-            f"{e['range']} {_box(_thousands(snap['min_member_trophies']))} - "
+            f"{e['trophy']} {_box(_thousands(snap['min_member_trophies']))} - "
             f"{_box(_thousands(snap['max_member_trophies']))}"
         )
     ranked = club.get("ranked")
@@ -563,7 +563,7 @@ def build_overview_embed(clubs: list[dict]) -> discord.Embed:
     capacity = len(clubs) * CLUB_CAPACITY
     fields = [
         ("Total Clubs", f"{e['clubs']} {_box(len(clubs))}"),
-        ("Total Trophies", f"{e['trophy']} {_box(f'{total_trophies:,}')}"),
+        ("Total Trophies", f"{e['club_trophies']} {_box(f'{total_trophies:,}')}"),
         ("Members", f"{e['members']} {_box(f'{members}/{capacity}')}"),
         ("Average Trophies", f"{e['trophy']} {_box(f'{avg_trophies:,}')}"),
         ("Average Required", f"{e['required']} {_box(f'{avg_required:,}')}"),

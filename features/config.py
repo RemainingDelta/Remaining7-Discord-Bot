@@ -53,6 +53,33 @@ if MODE == "PROD":
     BOOSTER_CHANNEL_ID = 1527942112526602250
     BRAWL_CHAT_CHANNEL_ID = 1157054341547556905
     CLUB_LIST_CHANNEL_ID = 1563687266805620797
+    # Club-list board icons (#618), uploaded as application emoji on the PROD bot.
+    # The globe stays a standard emoji, as in BrawlTools.
+    CLUB_EMOJIS = {
+        "clubs": "<:club:1563749367687544982>",
+        "club_trophies": "<:trophy_with_club:1563749377523191928>",
+        "trophy": "<:trophy:1563749378542542908>",
+        "members": "<:friends:1563749369386238173>",
+        "president": "<:crown:1563749368471883958>",
+        "rank": "<:podium:1563749374046113912>",
+        "ranked": "<:icon_ranked_front:1563749371646976080>",
+        "required": "<:grayscale_trophy:1563749370426294292>",
+        "vice_president": "<:vice_presidents:1563749379867938878>",
+        "senior": "<:seniors:1563749376470548490>",
+        "type": "<:lock:1563749372804472903>",
+        "region": "<:city:1563749365858697226>",
+        "global": "🌍",
+    }
+    CLUB_RANK_EMOJIS = {
+        "BRONZE": "<:bronze_rank:1563749380836565122>",
+        "SILVER": "<:silver_rank:1563749390081069078>",
+        "GOLD": "<:gold_rank:1563749382870933634>",
+        "DIAMOND": "<:diamond_rank:1563749381855780957>",
+        "MYTHIC": "<:mythic_rank:1563749388000567427>",
+        "LEGENDARY": "<:legendary_rank:1563749384238141450>",
+        "MASTERS": "<:masters_rank:1563749385437839431>",
+        "PRO": "<:pro_rank:1563749375446884382>",
+    }
     TOURNEY_CHAT_CHANNEL_ID = 721938563490643968
     TOURNEY_UPDATES_CHANNEL_ID = 1363702666865410148
     TOURNEY_VS_EMOJI = "<:vs:1479981530410520608>"
@@ -253,6 +280,33 @@ else:
     BOOSTER_CHANNEL_ID = 1527943085777223780
     BRAWL_CHAT_CHANNEL_ID = 1479696939179180136
     CLUB_LIST_CHANNEL_ID = 1563687707635482744
+    # Club-list board icons (#618), uploaded as application emoji on the DEV bot.
+    # The globe stays a standard emoji, as in BrawlTools.
+    CLUB_EMOJIS = {
+        "clubs": "<:club:1563749737318973440>",
+        "club_trophies": "<:trophy_with_club:1563749746626003025>",
+        "trophy": "<:trophy:1563749747582566490>",
+        "members": "<:friends:1563749739357544488>",
+        "president": "<:crown:1563749738162032650>",
+        "rank": "<:podium:1563749743220367461>",
+        "ranked": "<:icon_ranked_front:1563749741454561311>",
+        "required": "<:grayscale_trophy:1563749740485672970>",
+        "vice_president": "<:vice_presidents:1563749748714766376>",
+        "senior": "<:seniors:1563749745665638430>",
+        "type": "<:lock:1563749742268129280>",
+        "region": "<:city:1563749735851106304>",
+        "global": "🌍",
+    }
+    CLUB_RANK_EMOJIS = {
+        "BRONZE": "<:bronze_rank:1563749749402640406>",
+        "SILVER": "<:silver_rank:1563749768402833469>",
+        "GOLD": "<:gold_rank:1563749752733048912>",
+        "DIAMOND": "<:diamond_rank:1563749751155986504>",
+        "MYTHIC": "<:mythic_rank:1563749763189313547>",
+        "LEGENDARY": "<:legendary_rank:1563749753999720588>",
+        "MASTERS": "<:masters_rank:1563749762036142162>",
+        "PRO": "<:pro_rank:1563749744558346361>",
+    }
     TOURNEY_CHAT_CHANNEL_ID = 1479696993809862738
     TOURNEY_UPDATES_CHANNEL_ID = 1479971576748441691
     TOURNEY_VS_EMOJI = "<:vs:1479981462764781680>"
@@ -418,33 +472,6 @@ STORY_MOD_ROLES = {MODERATOR_ROLE_ID, ADMIN_ROLE_ID, FOUNDER_ROLE_ID}
 # club-list channel layout holds.
 CLUB_MANAGER_ROLES = {COMMUNITY_MANAGER_ROLE_ID, ADMIN_ROLE_ID, FOUNDER_ROLE_ID}
 MAX_TRACKED_CLUBS = 50
-# Icons on the club-list board (#618). Standard emoji work on both servers;
-# swap in custom emoji markup here later to match the old BrawlTools look.
-CLUB_EMOJIS = {
-    "clubs": "🛡️",
-    "trophy": "🏆",
-    "members": "👥",
-    "president": "👑",
-    "rank": "📍",
-    "global": "🌍",
-    "range": "📊",
-    "ranked": "🎖️",
-    "required": "🎯",
-    "vice_president": "⭐",
-    "senior": "🔹",
-}
-# Ranked tier icons, shown with the division (e.g. Silver icon + `I`).
-CLUB_RANK_EMOJIS = {
-    "BRONZE": "🥉",
-    "SILVER": "🥈",
-    "GOLD": "🥇",
-    "DIAMOND": "💎",
-    "MYTHIC": "🔮",
-    "LEGENDARY": "🔥",
-    "MASTERS": "👑",
-    "PRO": "🏅",
-}
-
 TOURNEY_STAFF_ROLES = [
     TOURNEY_ADMIN_ROLE_ID,
     FOUNDER_ROLE_ID,
