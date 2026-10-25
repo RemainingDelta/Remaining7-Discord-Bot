@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 
 import discord
 
-from features.clubs.snapshots import TrackedClub
+from features.clubs.snapshots import ClubSnapshot, TrackedClub
 from features.config import CLUB_EMOJIS, CLUB_RANK_EMOJIS
 
 CLUBS_ON_BOARD = 9  # 3 full rows of 3
@@ -18,8 +18,11 @@ BOARD_TITLE = "Overview from Remaining 7 Esports"
 BOARD_FOOTER = "Updating every 30 minutes. Posted at"  # Discord appends the timestamp
 OVERVIEW_COLOR = discord.Color.orange()
 CLUB_STATS_COLOR = discord.Color.gold()
+DETAIL_COLOR = discord.Color.green()
 BRAWLIFY_CLUB_URL = "https://brawlify.com/club/{}"
 BRAWLIFY_PLAYER_URL = "https://brawlify.com/player/{}"
+BADGE_URL = "https://cdn.brawlify.com/club-badges/regular/{}.png"
+CLUB_TYPES = {"open": "Open", "inviteOnly": "Invite Only", "closed": "Closed"}
 
 
 def _box(value) -> str:
@@ -62,8 +65,22 @@ def _rank_badge(rank_name: str) -> str:
     return f"{icon}{_box(division)}" if division else icon
 
 
-def _trophies(club: TrackedClub) -> int:
+def club_trophies(club: TrackedClub) -> int:
+    """A club's trophies, or 0 before its first refresh."""
     return club["snapshot"]["trophies"] if club["snapshot"] else 0
+
+
+def sorted_by_trophies(clubs: list[TrackedClub]) -> list[TrackedClub]:
+    """Highest trophies first: the order of the cards and the dropdowns."""
+    return sorted(clubs, key=club_trophies, reverse=True)
+
+
+def _president(snap: ClubSnapshot) -> str:
+    """The president's name, linked to Brawlify when the tag is known."""
+    name = _link_text(snap["president"] or "—")
+    if not snap.get("president_tag"):
+        return name
+    return f"[{name}]({BRAWLIFY_PLAYER_URL.format(snap['president_tag'].lstrip('#'))})"
 
 
 def _club_card(club: TrackedClub) -> str:
@@ -74,11 +91,7 @@ def _club_card(club: TrackedClub) -> str:
     if not snap:
         return f"{header}\nNot fetched yet"
 
-    president = _link_text(snap["president"] or "—")
-    if snap.get("president_tag"):
-        player = snap["president_tag"].lstrip("#")
-        president = f"[{president}]({BRAWLIFY_PLAYER_URL.format(player)})"
-
+    president = _president(snap)
     ranks = []
     if snap["country_rank"] and club["country_code"]:
         ranks.append(f"{_box(snap['country_rank'])} in {_flag(club['country_code'])}")
@@ -119,7 +132,7 @@ def build_club_stats_embed(clubs: list[TrackedClub]) -> discord.Embed:
     Every other club is reached through the "Choose a Club" dropdowns (#619).
     """
     embed = discord.Embed(title=f"{BOARD_TITLE} | Club Stats", color=CLUB_STATS_COLOR)
-    for club in sorted(clubs, key=_trophies, reverse=True)[:CLUBS_ON_BOARD]:
+    for club in sorted_by_trophies(clubs)[:CLUBS_ON_BOARD]:
         # Field names can't hold links, so the linked name leads the value.
         embed.add_field(name="​", value=_club_card(club), inline=True)
     if not clubs:
@@ -193,3 +206,70 @@ def build_overview_embed(clubs: list[TrackedClub]) -> discord.Embed:
     embed.set_footer(text=BOARD_FOOTER)
     embed.timestamp = datetime.now(timezone.utc)
     return embed
+
+
+def build_club_detail_embed(club: TrackedClub) -> discord.Embed:
+    """One club's details, shown privately when it's picked from the dropdowns (#619)."""
+    e = CLUB_EMOJIS
+    tag = club["_id"]
+    embed = discord.Embed(
+        title=f"{club['name']} ({tag})",
+        url=BRAWLIFY_CLUB_URL.format(tag.lstrip("#")),
+        color=DETAIL_COLOR,
+    )
+    snap = club["snapshot"]
+    if not snap:
+        embed.description = "Not fetched yet. Check back after the next refresh."
+        return embed
+
+    if snap.get("badge_id"):
+        embed.set_thumbnail(url=BADGE_URL.format(snap["badge_id"]))
+
+    trophies, members = snap["trophies"], snap["member_count"]
+    average = round(trophies / members) if members else 0
+    sections = [
+        (
+            "Trophies",
+            f"{e['club_trophies']} {_box(f'{trophies:,}')} "
+            f"**Average** {e['trophy']} {_box(f'{average:,}')}",
+        )
+    ]
+    if snap["min_member_trophies"] is not None:
+        low, high = snap["min_member_trophies"], snap["max_member_trophies"]
+        sections.append(
+            ("Trophy Range", f"{e['trophy']} {_box(f'{low:,}')} - {_box(f'{high:,}')}")
+        )
+    required = snap["required_trophies"]
+    sections += [
+        ("President", _president(snap)),
+        ("Required Trophies", f"{e['required']} {_box(f'{required:,}')}"),
+    ]
+    if club_type := snap.get("type"):
+        label = CLUB_TYPES.get(club_type, club_type)
+        place = (
+            f" {e['region']} {_flag(club['country_code'])}"
+            if club["country_code"]
+            else ""
+        )
+        sections.append(("Type", f"{e['type']} {_box(label)}{place}"))
+    sections.append(
+        (
+            "Members",
+            f"{e['members']} {_box(f'{members}/{CLUB_CAPACITY}')}\n"
+            f"{e['vice_president']} **Vice-Presidents** {_box(snap['vice_presidents'])}\n"
+            f"{e['senior']} **Seniors** {_box(snap['seniors'])}",
+        )
+    )
+
+    for name, value in sections:
+        # BrawlTools quotes each value, which draws the bar down its left side.
+        embed.add_field(name=name, value=_quote(value), inline=False)
+    if description := snap.get("description"):
+        # Swap backticks so a description can't close its code block early.
+        safe = description.replace("`", "ˋ")
+        embed.add_field(name="Description", value=f"```\n{safe}\n```", inline=False)
+    return embed
+
+
+def _quote(value: str) -> str:
+    return "\n".join(f"> {line}" for line in value.splitlines())
