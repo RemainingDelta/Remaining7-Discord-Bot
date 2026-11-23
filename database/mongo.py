@@ -7,8 +7,6 @@ import motor.motor_asyncio
 import certifi
 from bson import ObjectId
 from bson.errors import InvalidId
-from pymongo import UpdateOne
-from pymongo.errors import DuplicateKeyError
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -471,98 +469,6 @@ async def set_setting(key: str, value: str):
     if db is None:
         return
     await db.settings.update_one({"_id": key}, {"$set": {"value": value}}, upsert=True)
-
-
-# --- TRACKED BRAWL STARS CLUBS (#595) ---
-# One document per club, keyed by normalized tag. Removing a club deletes only
-# this document; its history lives in other collections and is kept.
-
-
-async def add_tracked_club(tag: str, name: str) -> bool:
-    """Start tracking a club. Returns False if the tag is already tracked."""
-    if db is None:
-        return False
-    try:
-        await db.tracked_clubs.insert_one(
-            {
-                "_id": tag,
-                "name": name,
-                "added_at": datetime.utcnow(),
-                "country_code": None,
-                "snapshot": None,
-                "fetched_at": None,
-                "failing_since": None,
-            }
-        )
-    except DuplicateKeyError:
-        return False
-    return True
-
-
-async def remove_tracked_club(tag: str) -> bool:
-    """Stop tracking a club. Returns False if it was not tracked."""
-    if db is None:
-        return False
-    result = await db.tracked_clubs.delete_one({"_id": tag})
-    return result.deleted_count == 1
-
-
-async def list_tracked_clubs() -> list[dict]:
-    if db is None:
-        return []
-    return await db.tracked_clubs.find({}).to_list(length=None)
-
-
-async def count_tracked_clubs() -> int:
-    if db is None:
-        return 0
-    return await db.tracked_clubs.count_documents({})
-
-
-async def save_club_refresh(tag: str, name: str, snapshot: dict) -> None:
-    """Store a successful fetch and clear any failure flag."""
-    if db is None:
-        return
-    await db.tracked_clubs.update_one(
-        {"_id": tag},
-        {
-            "$set": {
-                "name": name,
-                "snapshot": snapshot,
-                "fetched_at": datetime.utcnow(),
-                "failing_since": None,
-            }
-        },
-    )
-
-
-async def mark_club_failing(tag: str) -> None:
-    """Flag a failed fetch, keeping the time of the first failure and the old snapshot."""
-    if db is None:
-        return
-    await db.tracked_clubs.update_one(
-        {"_id": tag, "failing_since": None},
-        {"$set": {"failing_since": datetime.utcnow()}},
-    )
-
-
-async def save_club_ranked(tag: str, ranked: dict | None) -> None:
-    """Store per-club ranked aggregates, kept apart from the 30-minute snapshot."""
-    if db is None:
-        return
-    await db.tracked_clubs.update_one({"_id": tag}, {"$set": {"ranked": ranked}})
-
-
-async def save_club_countries(country_by_tag: dict) -> None:
-    """Set each tracked club's detected country (None when it ranks nowhere)."""
-    if db is None or not country_by_tag:
-        return
-    await db.tracked_clubs.bulk_write(
-        [
-            UpdateOne({"_id": tag}, {"$set": {"country_code": code}})
-            for tag, code in country_by_tag.items()
-        ]
-    )
 
 
 async def ensure_drop_claims_ttl_index():

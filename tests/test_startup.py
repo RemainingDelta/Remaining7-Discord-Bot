@@ -34,7 +34,6 @@ def test_feature_extensions_lists_every_feature_in_load_order():
         "features.github_tickets",
         "features.sticky",
         "features.counting",
-        "features.clubs",
         "features.story",
         "features.message_mirror",
         "features.tourney.tourney_reports",
@@ -313,12 +312,12 @@ async def test_healthy_boot_posts_a_summary_with_no_attachment(monkeypatch):
     _bot_logs(monkeypatch, channel)
     main.STARTUP_FAILURES.clear()
 
-    await main.report_startup_to_discord(loaded=19, synced=72)
+    await main.report_startup_to_discord(loaded=18, synced=72)
 
     kwargs = channel.send.await_args.kwargs
     summary = kwargs["embeds"][0]
     rendered = " ".join(f"{f.name} {f.value}" for f in summary.fields)
-    assert "19/19" in rendered
+    assert "18/18" in rendered
     assert "72" in rendered
     assert kwargs["file"] is None
 
